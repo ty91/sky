@@ -87,6 +87,10 @@ export function classifyTelegramError(error: unknown): ClassifiedTelegramError {
     return { kind: 'network_transient', message, code, statusCode, retryAfterMs, recoverable: true };
   }
 
+  if (statusCode !== undefined && statusCode >= 500) {
+    return { kind: 'server_transient', message, code, statusCode, retryAfterMs, recoverable: true };
+  }
+
   return { kind: 'fatal_unknown', message, code, statusCode, retryAfterMs, recoverable: false };
 }
 

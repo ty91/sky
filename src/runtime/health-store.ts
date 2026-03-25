@@ -12,7 +12,7 @@ export type TelegramPhase =
   | 'stopping'
   | 'stopped'
   | 'fatal';
-export type RuntimeErrorKind = 'auth' | 'config' | 'network_transient' | 'rate_limit' | 'conflict' | 'fatal_unknown';
+export type RuntimeErrorKind = 'auth' | 'config' | 'network_transient' | 'server_transient' | 'rate_limit' | 'conflict' | 'fatal_unknown';
 export type RuntimeErrorPhase = 'initialize' | 'polling' | 'send' | 'shutdown' | 'middleware';
 
 export type RuntimeErrorInfo = {
