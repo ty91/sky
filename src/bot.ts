@@ -102,6 +102,20 @@ function safeRead(filePath: string): string {
   }
 }
 
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries) throw error;
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 5000);
+      console.log(`[telegram] sendMessage failed, retrying in ${delay}ms (${attempt}/${maxRetries})`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error('unreachable');
+}
+
 function extractTextFromMessage(message: SDKMessage): string {
   if (message.type !== 'assistant') return '';
 
@@ -341,8 +355,9 @@ export async function startBot(): Promise<void> {
       }
 
       const chunks = reply.match(/[\s\S]{1,3500}/g) ?? ['(빈 응답)'];
-      for (const chunk of chunks) {
-        await ctx.reply(chunk);
+      for (let i = 0; i < chunks.length; i++) {
+        if (i > 0) await new Promise((r) => setTimeout(r, 500));
+        await withRetry(() => ctx.reply(chunks[i]));
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
