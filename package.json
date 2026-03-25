@@ -14,7 +14,9 @@
     "stop": "node dist/index.js stop",
     "restart": "node dist/index.js restart",
     "status": "node dist/index.js status",
-    "run": "NODE_OPTIONS=--dns-result-order=ipv4first node dist/index.js run"
+    "run": "NODE_OPTIONS=--dns-result-order=ipv4first node dist/index.js run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs"
   },
   "license": "MIT",
   "dependencies": {
