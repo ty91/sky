@@ -4,6 +4,7 @@ import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startBot } from './bot.js';
 
 const CLAUDECLAW_DIR = path.join(os.homedir(), '.claudeclaw');
@@ -70,7 +71,8 @@ function startDaemon() {
 
   const out = openSync(LOG_FILE, 'a');
   const err = openSync(LOG_FILE, 'a');
-  const child = spawn(process.execPath, [path.join(path.dirname(process.argv[1]!), 'bot.js')], {
+  const botEntry = fileURLToPath(new URL('./bot.js', import.meta.url));
+  const child = spawn(process.execPath, [botEntry], {
     detached: true,
     stdio: ['ignore', out, err],
     env: {
