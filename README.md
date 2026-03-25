@@ -1,6 +1,6 @@
 # claudeclaw
 
-텔레그램에서 Claude Agent SDK와 **세션 유지형 대화**를 테스트하는 최소 프로젝트입니다.
+텔레그램용 Claude Agent SDK 봇을 **CLI + 데몬**으로 다루는 프로젝트입니다.
 
 ## 특징
 
@@ -52,7 +52,7 @@ CLAUDE_USER_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/USER.md
 npm run dev
 ```
 
-참고: macOS/일부 네트워크 환경에서는 Telegram API 연결이 IPv6 쪽에서 지연될 수 있어서, 스크립트에 `NODE_OPTIONS=--dns-result-order=ipv4first`를 넣어 두었습니다.
+참고: macOS/일부 네트워크 환경에서는 Telegram API 연결이 IPv6 쪽에서 지연될 수 있어서, 실행 시 `NODE_OPTIONS=--dns-result-order=ipv4first`를 넣습니다.
 
 빌드:
 
@@ -60,10 +60,25 @@ npm run dev
 npm run build
 ```
 
-빌드 후 실행:
+CLI 설치:
 
 ```bash
-npm start
+npm link
+```
+
+이후 아래 커맨드를 쓸 수 있습니다:
+
+```bash
+claudeclaw start
+claudeclaw stop
+claudeclaw restart
+claudeclaw status
+```
+
+포그라운드 실행이 필요하면:
+
+```bash
+claudeclaw run
 ```
 
 ## 사용법
@@ -77,4 +92,5 @@ npm start
 - 내부적으로 `query()`를 매 턴 새로 호출하지 않고, 세션당 하나를 오래 유지합니다.
 - 멀티턴 입력은 `AsyncIterable<SDKUserMessage>` 형태의 pushable queue로 넣습니다.
 - system prompt는 `SOUL.md` 뒤에 `USER.md`를 붙인 문자열입니다.
-- 메모리 기반 저장(`Map`)이라서 **프로세스를 재시작하면 세션이 사라집니다**.
+- 데몬 PID/log 파일은 기본적으로 `~/.claudeclaw/` 아래에 저장됩니다.
+- 텔레그램 세션 resume 매핑도 `~/.claudeclaw/telegram-sessions.json`에 저장됩니다.

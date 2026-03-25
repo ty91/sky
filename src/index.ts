@@ -1,383 +1,166 @@
+#!/usr/bin/env node
 import 'dotenv/config';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { Telegraf } from 'telegraf';
-import {
-  query,
-  type Options,
-  type PermissionMode,
-  type Query,
-  type SDKMessage,
-  type SDKSystemMessage,
-  type SDKUserMessage,
-} from '@anthropic-ai/claude-agent-sdk';
-
-type ChatState = {
-  query: Query;
-  input: Pushable<SDKUserMessage>;
-  busy: boolean;
-  sessionId?: string;
-};
-
-class Pushable<T> implements AsyncIterable<T> {
-  private queue: T[] = [];
-  private resolvers: Array<(value: IteratorResult<T>) => void> = [];
-  private ended = false;
-
-  push(value: T) {
-    if (this.ended) {
-      throw new Error('Cannot push to a closed Pushable');
-    }
-
-    const resolver = this.resolvers.shift();
-    if (resolver) {
-      resolver({ value, done: false });
-      return;
-    }
-
-    this.queue.push(value);
-  }
-
-  end() {
-    this.ended = true;
-    while (this.resolvers.length > 0) {
-      const resolver = this.resolvers.shift();
-      resolver?.({ value: undefined as T, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: async (): Promise<IteratorResult<T>> => {
-        if (this.queue.length > 0) {
-          const value = this.queue.shift()!;
-          return { value, done: false };
-        }
-
-        if (this.ended) {
-          return { value: undefined as T, done: true };
-        }
-
-        return new Promise<IteratorResult<T>>((resolve) => {
-          this.resolvers.push(resolve);
-        });
-      },
-    };
-  }
-}
-
-// --- Session persistence ---
+import { startBot } from './bot.js';
 
 const CLAUDECLAW_DIR = path.join(os.homedir(), '.claudeclaw');
-const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'telegram-sessions.json');
+const PID_FILE = path.join(CLAUDECLAW_DIR, 'claudeclaw.pid');
+const LOG_FILE = path.join(CLAUDECLAW_DIR, 'claudeclaw.log');
 
-function loadPersistedSessions(): Record<string, string> {
-  try {
-    return JSON.parse(readFileSync(SESSIONS_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-function persistSession(chatId: number, sessionId: string): void {
-  const data = loadPersistedSessions();
-  data[String(chatId)] = sessionId;
+function ensureDir() {
   mkdirSync(CLAUDECLAW_DIR, { recursive: true });
-  writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
 }
 
-function removePersistedSession(chatId: number): void {
-  const data = loadPersistedSessions();
-  delete data[String(chatId)];
-  writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
-}
-
-function getPersistedSessionId(chatId: number): string | undefined {
-  return loadPersistedSessions()[String(chatId)];
-}
-
-// --- Telegram bot config ---
-
-const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const apiKey = process.env.ANTHROPIC_API_KEY;
-const model = process.env.CLAUDE_MODEL || 'sonnet';
-const soulPath = process.env.CLAUDE_SYSTEM_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/SOUL.md';
-const userPath = process.env.CLAUDE_USER_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/USER.md';
-
-function safeRead(path: string): string {
+function readPid(): number | null {
   try {
-    return readFileSync(path, 'utf8').trim();
+    const raw = readFileSync(PID_FILE, 'utf8').trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isFinite(pid) ? pid : null;
   } catch {
-    return '';
+    return null;
   }
 }
 
-function loadCombinedPrompt(): string {
-  const soul = safeRead(soulPath);
-  const user = safeRead(userPath);
+function isRunning(pid: number | null): pid is number {
+  if (!pid) return false;
 
-  if (soul && user) return `${soul}\n\n${user}`;
-  return soul || user || '';
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-const combinedPrompt = loadCombinedPrompt();
-
-if (!telegramToken) {
-  console.error('Missing TELEGRAM_BOT_TOKEN. Copy .env.example to .env and set it.');
-  process.exit(1);
+function removePidFile() {
+  rmSync(PID_FILE, { force: true });
 }
 
-const bot = new Telegraf(telegramToken);
-const sessions = new Map<number, ChatState>();
+function printStatus() {
+  const pid = readPid();
+  if (isRunning(pid)) {
+    console.log(`claudeclaw is running (pid: ${pid})`);
+    console.log(`log: ${LOG_FILE}`);
+    return;
+  }
 
-function buildOptions(resumeId?: string): Options {
-  return {
-    model,
-    systemPrompt: combinedPrompt,
-    ...(resumeId ? { resume: resumeId } : {}),
+  if (pid) {
+    removePidFile();
+  }
+
+  console.log('claudeclaw is stopped');
+}
+
+function startDaemon() {
+  ensureDir();
+
+  const pid = readPid();
+  if (isRunning(pid)) {
+    console.log(`claudeclaw is already running (pid: ${pid})`);
+    console.log(`log: ${LOG_FILE}`);
+    return;
+  }
+
+  if (pid) {
+    removePidFile();
+  }
+
+  const out = openSync(LOG_FILE, 'a');
+  const err = openSync(LOG_FILE, 'a');
+  const child = spawn(process.execPath, [path.join(path.dirname(process.argv[1]!), 'bot.js')], {
+    detached: true,
+    stdio: ['ignore', out, err],
     env: {
       ...process.env,
-      ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'telegram-claude-session-bot/0.4.0',
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, '--dns-result-order=ipv4first'].filter(Boolean).join(' '),
     },
-    tools: [
-      'Bash',
-      'Glob',
-      'Grep',
-      'Read',
-      'Edit',
-      'Write',
-      'Skill',
-      'TaskOutput',
-      'TaskStop',
-      'TodoWrite',
-      'WebFetch',
-      'WebSearch',
-    ],
-    permissionMode: 'bypassPermissions' as PermissionMode,
-    includePartialMessages: true,
-    settingSources: [],
-    ...( { extraArgs: { 'replay-user-messages': '' } } as unknown as {} ),
-  };
-}
-
-function createChatSession(chatId: number): ChatState {
-  const savedSessionId = getPersistedSessionId(chatId);
-  if (savedSessionId) {
-    console.log(`[session] resuming session ${savedSessionId} for chat ${chatId}`);
-  }
-
-  const input = new Pushable<SDKUserMessage>();
-  const q = query({
-    prompt: input,
-    options: buildOptions(savedSessionId),
   });
 
-  const state: ChatState = {
-    query: q,
-    input,
-    busy: false,
-  };
+  child.unref();
+  writeFileSync(PID_FILE, `${child.pid}\n`);
 
-  sessions.set(chatId, state);
-  return state;
+  console.log(`claudeclaw started (pid: ${child.pid})`);
+  console.log(`log: ${LOG_FILE}`);
 }
 
-function getOrCreateChatSession(chatId: number): ChatState {
-  return sessions.get(chatId) ?? createChatSession(chatId);
-}
-
-async function resetChatSession(chatId: number): Promise<void> {
-  const existing = sessions.get(chatId);
-  if (!existing) return;
-
-  existing.input.end();
-  existing.query.close();
-  sessions.delete(chatId);
-  removePersistedSession(chatId);
-  console.log(`[session] reset session for chat ${chatId}`);
-}
-
-function extractTextFromMessage(message: SDKMessage): string {
-  if (message.type !== 'assistant') return '';
-
-  const blocks = message.message.content ?? [];
-  const texts: string[] = [];
-
-  for (const block of blocks) {
-    if (block.type === 'text') {
-      texts.push(block.text);
-    }
-  }
-
-  return texts.join('\n').trim();
-}
-
-function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
-  return message.type === 'system' && (message as SDKSystemMessage).subtype === 'init';
-}
-
-async function runTurn(state: ChatState, userText: string): Promise<string> {
-  console.log(`[query] runTurn start: ${JSON.stringify(userText)}`);
-  const promptUuid = randomUUID();
-  const userMessage: SDKUserMessage = {
-    type: 'user',
-    message: {
-      role: 'user',
-      content: [{ type: 'text', text: userText }],
-    },
-    session_id: promptUuid,
-    parent_tool_use_id: null,
-    uuid: promptUuid,
-  };
-
-  state.input.push(userMessage);
-
-  let finalText = '';
-  let promptReplayed = false;
-
-  while (true) {
-    const { value: message, done } = await state.query.next();
-    if (message) {
-      console.log(`[query] message type=${message.type}${message.type === 'system' ? ` subtype=${message.subtype}` : ''}`);
-    } else if (done) {
-      console.log('[query] done=true');
-    }
-
-    if (done || !message) {
-      break;
-    }
-
-    if (isSystemInitMessage(message)) {
-      state.sessionId = message.session_id;
-      continue;
-    }
-
-    if (message.type === 'user' && 'uuid' in message && message.uuid === promptUuid) {
-      promptReplayed = true;
-      continue;
-    }
-
-    if (message.type === 'assistant') {
-      const text = extractTextFromMessage(message);
-      if (text) finalText = text;
-      continue;
-    }
-
-    if (message.type === 'result') {
-      if (!promptReplayed) {
-        continue;
-      }
-
-      if (message.subtype === 'success') {
-        console.log('[query] success result received');
-        return finalText || message.result || '(No text response)';
-      }
-
-      throw new Error(message.errors.join('; ') || 'Claude returned an error');
-    }
-  }
-
-  return finalText || '(No response)';
-}
-
-bot.start(async (ctx) => {
-  console.log(`[telegram] /start from chat ${ctx.chat.id}`);
-  await resetChatSession(ctx.chat.id);
-  createChatSession(ctx.chat.id);
-
-  await ctx.reply(
-    '안녕하세요. 이 봇은 채팅방별로 long-lived query 세션을 유지합니다.\n\n' +
-      '- 같은 채팅방 메시지는 같은 query에 계속 들어갑니다\n' +
-      '- /new 로 세션을 초기화할 수 있습니다\n' +
-      '- system prompt는 SOUL.md + USER.md를 조립해서 사용합니다'
-  );
-});
-
-bot.command('new', async (ctx) => {
-  console.log(`[telegram] /new from chat ${ctx.chat.id}`);
-  await resetChatSession(ctx.chat.id);
-  createChatSession(ctx.chat.id);
-  await ctx.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
-});
-
-bot.on('text', async (ctx) => {
-  const chatId = ctx.chat.id;
-  const userText = ctx.message.text.trim();
-  console.log(`[telegram] text from ${chatId}: ${JSON.stringify(userText)}`);
-
-  if (!userText) {
-    await ctx.reply('빈 메시지는 처리할 수 없습니다.');
+async function stopDaemon() {
+  const pid = readPid();
+  if (!isRunning(pid)) {
+    if (pid) removePidFile();
+    console.log('claudeclaw is already stopped');
     return;
   }
 
-  const state = getOrCreateChatSession(chatId);
+  process.kill(pid, 'SIGTERM');
 
-  if (state.busy) {
-    await ctx.reply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
-    return;
-  }
-
-  state.busy = true;
-
-  try {
-    await ctx.sendChatAction('typing');
-    const reply = await runTurn(state, userText);
-
-    // Persist sessionId after first successful turn
-    if (state.sessionId) {
-      const sessionId = state.sessionId;
-      if (getPersistedSessionId(chatId) !== sessionId) {
-        persistSession(chatId, sessionId);
-        console.log(`[session] persisted session ${sessionId} for chat ${chatId}`);
-      }
-    }
-
-    const chunks = reply.match(/[\s\S]{1,3500}/g) ?? ['(빈 응답)'];
-    for (const chunk of chunks) {
-      await ctx.reply(chunk);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await ctx.reply(`오류가 났습니다: ${message}`);
-  } finally {
-    state.busy = false;
-  }
-});
-
-async function launchBotWithRetry() {
-  let attempt = 0;
-
-  while (true) {
-    attempt += 1;
-    try {
-      await bot.launch();
-      console.log(`Telegram bot started with Claude model: ${model}`);
-      console.log(`System prompt sources: ${soulPath} + ${userPath}`);
-      console.log('Mode: long-lived query + pushable input');
-      console.log(`Launch succeeded on attempt ${attempt}`);
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (!isRunning(pid)) {
+      removePidFile();
+      console.log('claudeclaw stopped');
       return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Bot launch failed on attempt ${attempt}: ${message}`);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  process.kill(pid, 'SIGKILL');
+  removePidFile();
+  console.log('claudeclaw force-stopped');
+}
+
+async function restartDaemon() {
+  await stopDaemon();
+  startDaemon();
+}
+
+function printHelp() {
+  console.log(`claudeclaw <command>
+
+Commands:
+  start    Start claudeclaw as a daemon
+  stop     Stop the daemon
+  restart  Restart the daemon
+  status   Show daemon status
+  run      Run in foreground
+  help     Show this help
+`);
+}
+
+async function main() {
+  const command = process.argv[2] ?? 'help';
+
+  switch (command) {
+    case 'start':
+      startDaemon();
+      break;
+    case 'stop':
+      await stopDaemon();
+      break;
+    case 'restart':
+      await restartDaemon();
+      break;
+    case 'status':
+      printStatus();
+      break;
+    case 'run':
+      await startBot();
+      break;
+    case 'help':
+    case '--help':
+    case '-h':
+      printHelp();
+      break;
+    default:
+      console.error(`Unknown command: ${command}`);
+      printHelp();
+      process.exitCode = 1;
   }
 }
 
-launchBotWithRetry().catch((error) => {
-  console.error(error);
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    for (const state of sessions.values()) {
-      state.input.end();
-      state.query.close();
-    }
-    bot.stop(signal);
-  });
-}
