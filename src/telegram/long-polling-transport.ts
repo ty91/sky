@@ -1,4 +1,5 @@
 import { Bot } from 'grammy';
+import { withTimeout } from '../runtime/retry.js';
 import { TelegramSender } from './sender.js';
 import type {
   TelegramBotIdentity,
@@ -10,6 +11,7 @@ import type {
 export type LongPollingTransportOptions = {
   botToken: string;
   handlers: TransportHandlers;
+  initTimeoutMs?: number;
 };
 
 function nowIso(): string {
@@ -75,8 +77,13 @@ export class LongPollingTransport implements TelegramTransport {
     });
   }
 
-  async initialize(_signal?: AbortSignal): Promise<TelegramBotIdentity> {
-    await this.bot.init();
+  async initialize(signal?: AbortSignal): Promise<TelegramBotIdentity> {
+    await withTimeout(
+      this.bot.init(),
+      this.options.initTimeoutMs ?? 15000,
+      'Telegram init',
+      signal,
+    );
     const identity = {
       id: this.bot.botInfo.id,
       username: this.bot.botInfo.username,

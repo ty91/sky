@@ -17,6 +17,8 @@ export type BotRuntimeOptions = {
   systemPrompt: string;
 };
 
+const TELEGRAM_INIT_TIMEOUT_MS = 15000;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -142,6 +144,7 @@ export class BotRuntime {
   private createTransport(): TelegramTransport {
     return new LongPollingTransport({
       botToken: this.options.settings.telegram.botToken,
+      initTimeoutMs: TELEGRAM_INIT_TIMEOUT_MS,
       handlers: {
         onStartCommand: async (event) => {
           this.sessionManager.prepareFreshSession(event.chatId);

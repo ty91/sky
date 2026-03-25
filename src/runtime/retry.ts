@@ -14,6 +14,13 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+export function timeoutError(message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.name = 'TimeoutError';
+  error.code = 'ETIMEDOUT';
+  return error;
+}
+
 export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return;
   if (signal?.aborted) throw abortError();
@@ -35,6 +42,57 @@ export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     };
 
     signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  description: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (ms <= 0 && !signal) {
+    return promise;
+  }
+
+  if (signal?.aborted) {
+    throw abortError();
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timeout =
+      ms > 0
+        ? setTimeout(() => {
+            cleanup();
+            reject(timeoutError(`${description} timed out after ${ms}ms`));
+          }, ms)
+        : undefined;
+
+    const onAbort = () => {
+      cleanup();
+      reject(abortError());
+    };
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
   });
 }
 
