@@ -1,9 +1,7 @@
-import 'dotenv/config';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
-import { Telegraf } from 'telegraf';
+import { Bot } from 'grammy';
 import {
   query,
   type Options,
@@ -13,6 +11,7 @@ import {
   type SDKSystemMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { CLAUDECLAW_DIR, loadSettings } from './settings.js';
 
 export type ChatState = {
   query: Query;
@@ -68,7 +67,6 @@ class Pushable<T> implements AsyncIterable<T> {
   }
 }
 
-const CLAUDECLAW_DIR = path.join(os.homedir(), '.claudeclaw');
 const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'telegram-sessions.json');
 
 function loadPersistedSessions(): Record<string, string> {
@@ -96,12 +94,9 @@ function getPersistedSessionId(chatId: number): string | undefined {
   return loadPersistedSessions()[String(chatId)];
 }
 
-const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const apiKey = process.env.ANTHROPIC_API_KEY;
-const model = process.env.CLAUDE_MODEL || 'sonnet';
-const claudeCwd = process.env.CLAUDE_CWD || '/Users/taeyoung/.claudeclaw/workspace';
-const soulPath = process.env.CLAUDE_SYSTEM_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/SOUL.md';
-const userPath = process.env.CLAUDE_USER_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/USER.md';
+const settings = loadSettings();
+const { workspace } = settings;
+const model = settings.claude.model;
 
 function safeRead(filePath: string): string {
   try {
@@ -112,11 +107,11 @@ function safeRead(filePath: string): string {
 }
 
 function loadCombinedPrompt(): string {
-  const soul = safeRead(soulPath);
-  const user = safeRead(userPath);
-
-  if (soul && user) return `${soul}\n\n${user}`;
-  return soul || user || '';
+  const files = ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'];
+  return files
+    .map((f) => safeRead(path.join(workspace, f)))
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 const combinedPrompt = loadCombinedPrompt();
@@ -124,12 +119,11 @@ const combinedPrompt = loadCombinedPrompt();
 function buildOptions(resumeId?: string): Options {
   return {
     model,
-    cwd: claudeCwd,
+    cwd: workspace,
     systemPrompt: combinedPrompt,
     ...(resumeId ? { resume: resumeId } : {}),
     env: {
       ...process.env,
-      ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
       CLAUDE_AGENT_SDK_CLIENT_APP: 'claudeclaw/0.5.0',
     },
     tools: [
@@ -274,14 +268,10 @@ async function runTurn(state: ChatState, userText: string): Promise<string> {
 }
 
 export async function startBot(): Promise<void> {
-  if (!telegramToken) {
-    throw new Error('Missing TELEGRAM_BOT_TOKEN. Copy .env.example to .env and set it.');
-  }
-
-  const bot = new Telegraf(telegramToken);
+  const bot = new Bot(settings.telegram.botToken);
   const sessions = new Map<number, ChatState>();
 
-  bot.start(async (ctx) => {
+  bot.command('start', async (ctx) => {
     console.log(`[telegram] /start from chat ${ctx.chat.id}`);
     await resetChatSession(ctx.chat.id, sessions);
     createChatSession(ctx.chat.id, sessions);
@@ -301,7 +291,7 @@ export async function startBot(): Promise<void> {
     await ctx.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
   });
 
-  bot.on('text', async (ctx) => {
+  bot.on('message:text', async (ctx) => {
     const chatId = ctx.chat.id;
     const userText = ctx.message.text.trim();
     console.log(`[telegram] text from ${chatId}: ${JSON.stringify(userText)}`);
@@ -320,8 +310,10 @@ export async function startBot(): Promise<void> {
 
     state.busy = true;
 
+    await ctx.replyWithChatAction('typing');
+    const typingInterval = setInterval(() => ctx.replyWithChatAction('typing'), 4000);
+
     try {
-      await ctx.sendChatAction('typing');
       const reply = await runTurn(state, userText);
 
       if (state.sessionId) {
@@ -340,6 +332,7 @@ export async function startBot(): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       await ctx.reply(`오류가 났습니다: ${message}`);
     } finally {
+      clearInterval(typingInterval);
       state.busy = false;
     }
   });
@@ -350,12 +343,12 @@ export async function startBot(): Promise<void> {
     while (true) {
       attempt += 1;
       try {
-        await bot.launch();
+        await bot.init();
         console.log(`Telegram bot started with Claude model: ${model}`);
-        console.log(`System prompt sources: ${soulPath} + ${userPath}`);
-        console.log(`Claude cwd: ${claudeCwd}`);
+        console.log(`Workspace: ${workspace}`);
         console.log('Mode: long-lived query + pushable input');
         console.log(`Launch succeeded on attempt ${attempt}`);
+        bot.start();
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -366,12 +359,12 @@ export async function startBot(): Promise<void> {
   }
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(signal, () => {
+    process.once(signal, async () => {
       for (const state of sessions.values()) {
         state.input.end();
         state.query.close();
       }
-      bot.stop(signal);
+      await bot.stop();
     });
   }
 

@@ -9,7 +9,8 @@
 - long-lived query에서 현재 턴을 식별하기 위해 `replay-user-messages`를 활성화합니다.
 - 같은 채팅방에서 이어서 보내는 메시지는 같은 query 컨텍스트로 처리됩니다.
 - `/new` 명령으로 해당 채팅방 세션을 초기화할 수 있습니다.
-- `SOUL.md + USER.md`를 조립해 정식 `systemPrompt` 옵션으로 넣습니다.
+- `~/.claudeclaw/settings.json`의 `workspace` 아래 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 `systemPrompt`로 넣습니다.
+- 텔레그램 봇 프레임워크로 **[grammY](https://grammy.dev)** 를 사용합니다.
 - 활성화된 도구는 다음으로 제한되어 있습니다: `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`
 - 현재는 `permissionMode: 'bypassPermissions'` 입니다.
 - Claude Agent SDK의 작업 디렉토리(`cwd`)는 기본적으로 `~/.claudeclaw/workspace`로 고정됩니다.
@@ -30,28 +31,33 @@
 
 ```bash
 cd ~/Developer/workspace/claudeclaw
-cp .env.example .env
-npm install
+pnpm install
 ```
 
-`.env` 예시:
+`~/.claudeclaw/settings.json` 을 만듭니다:
 
-```env
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-# Optional if Claude Code is already authenticated locally:
-ANTHROPIC_API_KEY=
-CLAUDE_MODEL=sonnet
-CLAUDE_CWD=/Users/taeyoung/.claudeclaw/workspace
-CLAUDE_SYSTEM_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/SOUL.md
-CLAUDE_USER_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/USER.md
+```json
+{
+  "telegram": {
+    "botToken": "your_telegram_bot_token_here"
+  },
+  "claude": {
+    "model": "sonnet"
+  },
+  "workspace": "/Users/taeyoung/.claudeclaw/workspace"
+}
 ```
+
+- `telegram.botToken` — 필수. `@BotFather`에서 발급받은 토큰.
+- `claude.model` — 선택. 기본값 `"sonnet"`.
+- `workspace` — 선택. 기본값 `~/.claudeclaw/workspace`. 이 디렉토리 아래의 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 시스템 프롬프트로 사용합니다.
 
 ## 실행
 
 개발 모드:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 참고: macOS/일부 네트워크 환경에서는 Telegram API 연결이 IPv6 쪽에서 지연될 수 있어서, 실행 시 `NODE_OPTIONS=--dns-result-order=ipv4first`를 넣습니다.
@@ -59,13 +65,13 @@ npm run dev
 빌드:
 
 ```bash
-npm run build
+pnpm build
 ```
 
 CLI 설치:
 
 ```bash
-npm link
+pnpm link --global
 ```
 
 이후 아래 커맨드를 쓸 수 있습니다:
@@ -93,6 +99,7 @@ claudeclaw run
 
 - 내부적으로 `query()`를 매 턴 새로 호출하지 않고, 세션당 하나를 오래 유지합니다.
 - 멀티턴 입력은 `AsyncIterable<SDKUserMessage>` 형태의 pushable queue로 넣습니다.
-- system prompt는 `SOUL.md` 뒤에 `USER.md`를 붙인 문자열입니다.
+- 텔레그램 봇은 `grammy` 패키지를 사용합니다 (telegraf에서 마이그레이션).
+- system prompt는 `workspace` 아래 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립한 문자열입니다.
 - 데몬 PID/log 파일은 기본적으로 `~/.claudeclaw/` 아래에 저장됩니다.
 - 텔레그램 세션 resume 매핑도 `~/.claudeclaw/telegram-sessions.json`에 저장됩니다.

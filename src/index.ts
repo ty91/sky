@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-import 'dotenv/config';
 import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startBot } from './bot.js';
-
-const CLAUDECLAW_DIR = path.join(os.homedir(), '.claudeclaw');
+import { CLAUDECLAW_DIR } from './settings.js';
 const PID_FILE = path.join(CLAUDECLAW_DIR, 'claudeclaw.pid');
 const LOG_FILE = path.join(CLAUDECLAW_DIR, 'claudeclaw.log');
 
