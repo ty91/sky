@@ -56,10 +56,7 @@ export function startDaemon() {
   const child = spawn(process.execPath, [botEntry], {
     detached: true,
     stdio: ['ignore', out, err],
-    env: {
-      ...process.env,
-      NODE_OPTIONS: [process.env.NODE_OPTIONS, '--dns-result-order=ipv4first'].filter(Boolean).join(' '),
-    },
+    env: process.env,
   });
 
   child.unref();
@@ -79,7 +76,7 @@ export async function stopDaemon() {
 
   process.kill(pid, 'SIGTERM');
 
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     if (!isRunning(pid)) {
       removePidFile();

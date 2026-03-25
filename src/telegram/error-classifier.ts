@@ -20,16 +20,18 @@ const NETWORK_CODES = new Set([
   'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT',
+  'UND_ERR_RESPONSE_STATUS_CODE',
+  'fetch failed',
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-function getNestedError(value: unknown): Record<string, unknown> | null {
-  const record = asRecord(value);
-  const nested = record?.error;
-  return asRecord(nested);
+function getNestedRecord(value: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  return asRecord(value?.[key]);
 }
 
 function getCode(value: Record<string, unknown> | null): string | undefined {
@@ -38,7 +40,7 @@ function getCode(value: Record<string, unknown> | null): string | undefined {
 }
 
 function getStatusCode(value: Record<string, unknown> | null): number | undefined {
-  const statusCode = value?.error_code ?? value?.status;
+  const statusCode = value?.error_code ?? value?.status ?? value?.statusCode;
   return typeof statusCode === 'number' ? statusCode : undefined;
 }
 
@@ -53,11 +55,12 @@ function getRetryAfterMs(value: Record<string, unknown> | null): number | undefi
 
 export function classifyTelegramError(error: unknown): ClassifiedTelegramError {
   const outer = asRecord(error);
-  const inner = getNestedError(error);
+  const inner = getNestedRecord(outer, 'error');
+  const cause = getNestedRecord(outer, 'cause');
   const message = error instanceof Error ? error.message : String(error);
-  const statusCode = getStatusCode(outer) ?? getStatusCode(inner);
-  const code = getCode(outer) ?? getCode(inner);
-  const retryAfterMs = getRetryAfterMs(outer) ?? getRetryAfterMs(inner);
+  const statusCode = getStatusCode(outer) ?? getStatusCode(inner) ?? getStatusCode(cause);
+  const code = getCode(outer) ?? getCode(inner) ?? getCode(cause);
+  const retryAfterMs = getRetryAfterMs(outer) ?? getRetryAfterMs(inner) ?? getRetryAfterMs(cause);
 
   if (message.includes('Empty token')) {
     return { kind: 'config', message, code, statusCode, recoverable: false };
@@ -75,7 +78,12 @@ export function classifyTelegramError(error: unknown): ClassifiedTelegramError {
     return { kind: 'rate_limit', message, code, statusCode, retryAfterMs, recoverable: true };
   }
 
-  if ((code && NETWORK_CODES.has(code)) || message.includes('Network request')) {
+  if (
+    (code && NETWORK_CODES.has(code)) ||
+    message.includes('Network request') ||
+    message.includes('fetch failed') ||
+    message.includes('timed out')
+  ) {
     return { kind: 'network_transient', message, code, statusCode, retryAfterMs, recoverable: true };
   }
 

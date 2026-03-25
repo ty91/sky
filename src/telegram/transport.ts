@@ -15,27 +15,24 @@ export type TelegramTextEvent = TelegramCommandEvent & {
   createTypingLoop(intervalMs?: number): TypingLoop;
 };
 
-export type TransportSnapshot = {
-  initialized: boolean;
-  polling: boolean;
-  identity?: TelegramBotIdentity;
-  lastUpdateAt?: string;
-};
-
-export type TransportHandlers = {
+export type TelegramHandlers = {
   onStartCommand(event: TelegramCommandEvent): Promise<void>;
   onNewCommand(event: TelegramCommandEvent): Promise<void>;
   onTextMessage(event: TelegramTextEvent): Promise<void>;
+};
+
+export type TelegramLifecycleEvents = {
+  onProbeStart(): void;
+  onProbeSuccess(identity: TelegramBotIdentity): void;
+  onPollingStart(): void;
+  onPollingStop(): void;
   onUpdateReceived(): void;
-  onPollingStarted(): void;
   onMiddlewareError(error: unknown): Promise<void>;
   onOutboundSuccess(method: 'sendMessage' | 'sendChatAction'): void;
   onOutboundFailure(error: unknown): void;
 };
 
-export interface TelegramTransport {
-  initialize(signal?: AbortSignal): Promise<TelegramBotIdentity>;
-  startPolling(): Promise<void>;
-  stop(): Promise<void>;
-  getSnapshot(): TransportSnapshot;
-}
+export type TelegramPollingSessionResult =
+  | { kind: 'stopped' }
+  | { kind: 'stopped_unexpectedly'; error: Error }
+  | { kind: 'failed'; phase: 'initialize' | 'polling'; error: unknown };

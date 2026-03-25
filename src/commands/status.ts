@@ -10,10 +10,13 @@ function printHealth(): void {
   }
 
   console.log(`lifecycle: ${health.state}`);
+  console.log(`telegram phase: ${health.telegramPhase}`);
+  console.log(`telegram network: ${health.telegramNetwork} fixed`);
   console.log(`ready: ${health.ready ? 'yes' : 'no'}`);
   if (health.botUsername) {
     console.log(`telegram: @${health.botUsername}`);
   }
+  console.log(`attempt: ${health.currentAttempt}`);
   if (health.lastInitSuccessAt) {
     console.log(`last init success: ${health.lastInitSuccessAt}`);
   }
@@ -28,6 +31,16 @@ function printHealth(): void {
   }
   if (health.currentBackoffMs !== undefined) {
     console.log(`backoff: ${health.currentBackoffMs}ms`);
+  }
+  if (health.lastProbe) {
+    console.log(
+      `last probe: ok=${health.lastProbe.ok ? 'yes' : 'no'} duration=${health.lastProbe.durationMs}ms remote=${health.lastProbe.remoteAddress ?? 'n/a'} family=${health.lastProbe.remoteFamily ?? 'n/a'} network=ipv4`,
+    );
+    if (health.lastProbe.errorCode || health.lastProbe.errorMessage) {
+      console.log(
+        `last probe error: [${health.lastProbe.errorCode ?? 'unknown'}] ${health.lastProbe.errorMessage ?? '(no message)'}`,
+      );
+    }
   }
   console.log(`consecutive failures: ${health.consecutiveFailures}`);
   if (health.lastError) {

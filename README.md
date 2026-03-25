@@ -10,8 +10,11 @@
 - 같은 채팅방에서 이어서 보내는 메시지는 같은 query 컨텍스트로 처리됩니다.
 - `/new` 명령으로 해당 채팅방 세션을 초기화할 수 있습니다.
 - `~/.claudeclaw/settings.json`의 `workspace` 아래 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 `systemPrompt`로 넣습니다.
-- 텔레그램 연결은 **초기화 / long polling / 송신 / 종료**를 분리한 런타임 계층으로 관리합니다.
-- Telegram API 실패는 오류 분류 후 **지수 백오프 재시도**로 복구하고, `sendChatAction` 실패는 best-effort로 처리합니다.
+- 텔레그램 연결은 **probe / polling / 송신 / 종료**를 분리한 런타임 계층으로 관리합니다.
+- startup은 `bot.init()`에만 의존하지 않고, 직접 `getMe` probe로 readiness를 확인한 뒤 polling을 시작합니다.
+- Telegram API 실패는 오류 분류 후 **지수 백오프 재시도**로 복구합니다.
+- Telegram API 연결은 probe, polling, outbound request를 포함해 항상 **IPv4 고정**으로 처리합니다.
+- `sendChatAction` 실패는 best-effort로 처리하고, polling stall은 watchdog으로 감지해 재기동합니다.
 - `claudeclaw status`는 PID만 보는 대신 **실제 런타임 health**를 보여줍니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`로 제한되어 있습니다.
 - Claude Agent SDK의 작업 디렉토리(`cwd`)는 기본적으로 `~/.claudeclaw/workspace`로 고정됩니다.
@@ -61,8 +64,6 @@ pnpm install
 pnpm dev
 ```
 
-참고: macOS/일부 네트워크 환경에서는 Telegram API 연결이 IPv6 쪽에서 지연될 수 있어서, 실행 시 `NODE_OPTIONS=--dns-result-order=ipv4first`를 넣습니다.
-
 빌드:
 
 ```bash
@@ -106,10 +107,11 @@ claudeclaw run
 ## 운영 메모
 
 - `claudeclaw status`는 다음 정보를 보여줍니다.
-  - lifecycle state (`initializing`, `polling`, `degraded`, `stopped`, `fatal` 등)
+  - process lifecycle과 telegram phase (`probing`, `connecting`, `polling`, `backoff` 등)
   - readiness
   - 마지막 초기화 성공 시각
   - 마지막 update / outbound 성공 시각
+  - 고정된 IPv4 네트워크와 마지막 `getMe` probe 결과
   - 현재 backoff와 마지막 오류
 - 런타임 health는 `~/.claudeclaw/runtime-health.json`에 저장됩니다.
 - 데몬 PID/log 파일은 기본적으로 `~/.claudeclaw/` 아래에 저장됩니다.
