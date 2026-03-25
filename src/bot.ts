@@ -99,6 +99,7 @@ function getPersistedSessionId(chatId: number): string | undefined {
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const apiKey = process.env.ANTHROPIC_API_KEY;
 const model = process.env.CLAUDE_MODEL || 'sonnet';
+const claudeCwd = process.env.CLAUDE_CWD || '/Users/taeyoung/.claudeclaw/workspace';
 const soulPath = process.env.CLAUDE_SYSTEM_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/SOUL.md';
 const userPath = process.env.CLAUDE_USER_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/USER.md';
 
@@ -123,6 +124,7 @@ const combinedPrompt = loadCombinedPrompt();
 function buildOptions(resumeId?: string): Options {
   return {
     model,
+    cwd: claudeCwd,
     systemPrompt: combinedPrompt,
     ...(resumeId ? { resume: resumeId } : {}),
     env: {
@@ -351,6 +353,7 @@ export async function startBot(): Promise<void> {
         await bot.launch();
         console.log(`Telegram bot started with Claude model: ${model}`);
         console.log(`System prompt sources: ${soulPath} + ${userPath}`);
+        console.log(`Claude cwd: ${claudeCwd}`);
         console.log('Mode: long-lived query + pushable input');
         console.log(`Launch succeeded on attempt ${attempt}`);
         return;

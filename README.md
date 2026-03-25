@@ -12,6 +12,7 @@
 - `SOUL.md + USER.md`를 조립해 정식 `systemPrompt` 옵션으로 넣습니다.
 - 활성화된 도구는 다음으로 제한되어 있습니다: `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`
 - 현재는 `permissionMode: 'bypassPermissions'` 입니다.
+- Claude Agent SDK의 작업 디렉토리(`cwd`)는 기본적으로 `~/.claudeclaw/workspace`로 고정됩니다.
 
 ## 준비물
 
@@ -40,6 +41,7 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 # Optional if Claude Code is already authenticated locally:
 ANTHROPIC_API_KEY=
 CLAUDE_MODEL=sonnet
+CLAUDE_CWD=/Users/taeyoung/.claudeclaw/workspace
 CLAUDE_SYSTEM_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/SOUL.md
 CLAUDE_USER_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/USER.md
 ```
