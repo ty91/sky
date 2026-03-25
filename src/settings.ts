@@ -21,6 +21,7 @@ const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>;
 
 export function loadSettings(): Settings {
+  console.log(`[startup] reading ${SETTINGS_FILE}`);
   try {
     const raw = readFileSync(SETTINGS_FILE, 'utf8');
     return settingsSchema.parse(JSON.parse(raw));

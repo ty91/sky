@@ -94,94 +94,12 @@ function getPersistedSessionId(chatId: number): string | undefined {
   return loadPersistedSessions()[String(chatId)];
 }
 
-const settings = loadSettings();
-const { workspace } = settings;
-const model = settings.claude.model;
-
 function safeRead(filePath: string): string {
   try {
     return readFileSync(filePath, 'utf8').trim();
   } catch {
     return '';
   }
-}
-
-function loadCombinedPrompt(): string {
-  const files = ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'];
-  return files
-    .map((f) => safeRead(path.join(workspace, f)))
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-const combinedPrompt = loadCombinedPrompt();
-
-function buildOptions(resumeId?: string): Options {
-  return {
-    model,
-    cwd: workspace,
-    systemPrompt: combinedPrompt,
-    ...(resumeId ? { resume: resumeId } : {}),
-    env: {
-      ...process.env,
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'claudeclaw/0.5.0',
-    },
-    tools: [
-      'Bash',
-      'Glob',
-      'Grep',
-      'Read',
-      'Edit',
-      'Write',
-      'Skill',
-      'TaskOutput',
-      'TaskStop',
-      'TodoWrite',
-      'WebFetch',
-      'WebSearch',
-    ],
-    permissionMode: 'bypassPermissions' as PermissionMode,
-    includePartialMessages: true,
-    settingSources: [],
-    ...({ extraArgs: { 'replay-user-messages': '' } } as unknown as {}),
-  };
-}
-
-function createChatSession(chatId: number, sessions: Map<number, ChatState>): ChatState {
-  const savedSessionId = getPersistedSessionId(chatId);
-  if (savedSessionId) {
-    console.log(`[session] resuming session ${savedSessionId} for chat ${chatId}`);
-  }
-
-  const input = new Pushable<SDKUserMessage>();
-  const q = query({
-    prompt: input,
-    options: buildOptions(savedSessionId),
-  });
-
-  const state: ChatState = {
-    query: q,
-    input,
-    busy: false,
-  };
-
-  sessions.set(chatId, state);
-  return state;
-}
-
-function getOrCreateChatSession(chatId: number, sessions: Map<number, ChatState>): ChatState {
-  return sessions.get(chatId) ?? createChatSession(chatId, sessions);
-}
-
-async function resetChatSession(chatId: number, sessions: Map<number, ChatState>): Promise<void> {
-  const existing = sessions.get(chatId);
-  if (!existing) return;
-
-  existing.input.end();
-  existing.query.close();
-  sessions.delete(chatId);
-  removePersistedSession(chatId);
-  console.log(`[session] reset session for chat ${chatId}`);
 }
 
 function extractTextFromMessage(message: SDKMessage): string {
@@ -268,13 +186,111 @@ async function runTurn(state: ChatState, userText: string): Promise<string> {
 }
 
 export async function startBot(): Promise<void> {
+  console.log('[startup] loading settings...');
+  const settings = loadSettings();
+  const { workspace } = settings;
+  const model = settings.claude.model;
+  console.log(`[startup] model: ${model}`);
+  console.log(`[startup] workspace: ${workspace}`);
+
+  const PROMPT_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'] as const;
+  const loaded: string[] = [];
+  const missing: string[] = [];
+  const promptParts: string[] = [];
+
+  for (const f of PROMPT_FILES) {
+    const content = safeRead(path.join(workspace, f));
+    if (content) {
+      loaded.push(f);
+      promptParts.push(content);
+    } else {
+      missing.push(f);
+    }
+  }
+
+  console.log(`[startup] prompt files loaded: ${loaded.join(', ') || '(none)'}`);
+  if (missing.length) {
+    console.log(`[startup] prompt files missing: ${missing.join(', ')}`);
+  }
+
+  const combinedPrompt = promptParts.join('\n\n');
+  console.log(`[startup] system prompt length: ${combinedPrompt.length} chars`);
+
+  function buildOptions(resumeId?: string): Options {
+    return {
+      model,
+      cwd: workspace,
+      systemPrompt: combinedPrompt,
+      ...(resumeId ? { resume: resumeId } : {}),
+      env: {
+        ...process.env,
+        CLAUDE_AGENT_SDK_CLIENT_APP: 'claudeclaw/0.5.0',
+      },
+      tools: [
+        'Bash',
+        'Glob',
+        'Grep',
+        'Read',
+        'Edit',
+        'Write',
+        'Skill',
+        'TaskOutput',
+        'TaskStop',
+        'TodoWrite',
+        'WebFetch',
+        'WebSearch',
+      ],
+      permissionMode: 'bypassPermissions' as PermissionMode,
+      includePartialMessages: true,
+      settingSources: [],
+      ...({ extraArgs: { 'replay-user-messages': '' } } as unknown as {}),
+    };
+  }
+
+  function createChatSession(chatId: number): ChatState {
+    const savedSessionId = getPersistedSessionId(chatId);
+    if (savedSessionId) {
+      console.log(`[session] resuming session ${savedSessionId} for chat ${chatId}`);
+    }
+
+    const input = new Pushable<SDKUserMessage>();
+    const q = query({
+      prompt: input,
+      options: buildOptions(savedSessionId),
+    });
+
+    const state: ChatState = {
+      query: q,
+      input,
+      busy: false,
+    };
+
+    sessions.set(chatId, state);
+    return state;
+  }
+
+  function getOrCreateChatSession(chatId: number): ChatState {
+    return sessions.get(chatId) ?? createChatSession(chatId);
+  }
+
+  async function resetChatSession(chatId: number): Promise<void> {
+    const existing = sessions.get(chatId);
+    if (!existing) return;
+
+    existing.input.end();
+    existing.query.close();
+    sessions.delete(chatId);
+    removePersistedSession(chatId);
+    console.log(`[session] reset session for chat ${chatId}`);
+  }
+
   const bot = new Bot(settings.telegram.botToken);
   const sessions = new Map<number, ChatState>();
 
   bot.command('start', async (ctx) => {
     console.log(`[telegram] /start from chat ${ctx.chat.id}`);
-    await resetChatSession(ctx.chat.id, sessions);
-    createChatSession(ctx.chat.id, sessions);
+    await resetChatSession(ctx.chat.id);
+    createChatSession(ctx.chat.id);
 
     await ctx.reply(
       '안녕하세요. 이 봇은 채팅방별로 long-lived query 세션을 유지합니다.\n\n' +
@@ -286,8 +302,8 @@ export async function startBot(): Promise<void> {
 
   bot.command('new', async (ctx) => {
     console.log(`[telegram] /new from chat ${ctx.chat.id}`);
-    await resetChatSession(ctx.chat.id, sessions);
-    createChatSession(ctx.chat.id, sessions);
+    await resetChatSession(ctx.chat.id);
+    createChatSession(ctx.chat.id);
     await ctx.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
   });
 
@@ -301,7 +317,7 @@ export async function startBot(): Promise<void> {
       return;
     }
 
-    const state = getOrCreateChatSession(chatId, sessions);
+    const state = getOrCreateChatSession(chatId);
 
     if (state.busy) {
       await ctx.reply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
@@ -344,15 +360,13 @@ export async function startBot(): Promise<void> {
       attempt += 1;
       try {
         await bot.init();
-        console.log(`Telegram bot started with Claude model: ${model}`);
-        console.log(`Workspace: ${workspace}`);
-        console.log('Mode: long-lived query + pushable input');
-        console.log(`Launch succeeded on attempt ${attempt}`);
+        console.log(`[startup] telegram bot connected as @${bot.botInfo.username}`);
+        console.log(`[startup] launch succeeded on attempt ${attempt}`);
         bot.start();
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`Bot launch failed on attempt ${attempt}: ${message}`);
+        console.error(`[startup] bot launch failed on attempt ${attempt}: ${message}`);
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     }
