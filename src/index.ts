@@ -5,6 +5,7 @@ import { stopCommand } from './commands/stop.js';
 import { restartCommand } from './commands/restart.js';
 import { statusCommand } from './commands/status.js';
 import { runCommand } from './commands/run.js';
+import { logsCommand } from './commands/logs.js';
 
 const program = new Command()
   .name('claudeclaw')
@@ -16,5 +17,6 @@ program.addCommand(stopCommand);
 program.addCommand(restartCommand);
 program.addCommand(statusCommand);
 program.addCommand(runCommand);
+program.addCommand(logsCommand);
 
 program.parse();
