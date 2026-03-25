@@ -70,8 +70,8 @@ class Pushable<T> implements AsyncIterable<T> {
 
 // --- Session persistence ---
 
-const MYCLAW_DIR = path.join(os.homedir(), '.myclaw');
-const SESSIONS_FILE = path.join(MYCLAW_DIR, 'telegram-sessions.json');
+const CLAUDECLAW_DIR = path.join(os.homedir(), '.claudeclaw');
+const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'telegram-sessions.json');
 
 function loadPersistedSessions(): Record<string, string> {
   try {
@@ -84,7 +84,7 @@ function loadPersistedSessions(): Record<string, string> {
 function persistSession(chatId: number, sessionId: string): void {
   const data = loadPersistedSessions();
   data[String(chatId)] = sessionId;
-  mkdirSync(MYCLAW_DIR, { recursive: true });
+  mkdirSync(CLAUDECLAW_DIR, { recursive: true });
   writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
 }
 
@@ -103,8 +103,8 @@ function getPersistedSessionId(chatId: number): string | undefined {
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const apiKey = process.env.ANTHROPIC_API_KEY;
 const model = process.env.CLAUDE_MODEL || 'sonnet';
-const soulPath = process.env.CLAUDE_SYSTEM_PROMPT_FILE || '/Users/taeyoung/.myclaw/workspace/SOUL.md';
-const userPath = process.env.CLAUDE_USER_PROMPT_FILE || '/Users/taeyoung/.myclaw/workspace/USER.md';
+const soulPath = process.env.CLAUDE_SYSTEM_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/SOUL.md';
+const userPath = process.env.CLAUDE_USER_PROMPT_FILE || '/Users/taeyoung/.claudeclaw/workspace/USER.md';
 
 function safeRead(path: string): string {
   try {

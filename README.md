@@ -40,8 +40,8 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 # Optional if Claude Code is already authenticated locally:
 ANTHROPIC_API_KEY=
 CLAUDE_MODEL=sonnet
-CLAUDE_SYSTEM_PROMPT_FILE=/Users/taeyoung/.myclaw/workspace/SOUL.md
-CLAUDE_USER_PROMPT_FILE=/Users/taeyoung/.myclaw/workspace/USER.md
+CLAUDE_SYSTEM_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/SOUL.md
+CLAUDE_USER_PROMPT_FILE=/Users/taeyoung/.claudeclaw/workspace/USER.md
 ```
 
 ## 실행
