@@ -119,6 +119,7 @@ test('userMessage reports busy sessions', async () => {
 
 test('userMessage sends each assistant message individually via onMessage callback', async () => {
   const replies = [];
+  const statuses = [];
   const config = createSlackAssistantConfig({
     sessionManager: {
       handleText: async (_threadId, _text, onMessage) => {
@@ -134,13 +135,16 @@ test('userMessage sends each assistant message individually via onMessage callba
     say: async (text) => {
       replies.push(text);
     },
-    setStatus: async () => {},
+    setStatus: async (status) => {
+      statuses.push(status);
+    },
   });
 
   assert.deepEqual(replies, ['파일을 확인해볼게요', '수정 완료했습니다']);
+  assert.deepEqual(statuses, ['생각 중...', '생각 중...', '생각 중...', '']);
 });
 
-test('userMessage clears status after completion', async () => {
+test('userMessage resets status after each assistant message and clears it after completion', async () => {
   const statuses = [];
   const config = createSlackAssistantConfig({
     sessionManager: {
@@ -159,7 +163,7 @@ test('userMessage clears status after completion', async () => {
     },
   });
 
-  assert.deepEqual(statuses, ['생각 중...', '']);
+  assert.deepEqual(statuses, ['생각 중...', '생각 중...', '']);
 });
 
 test('userMessage sends errors as reply text', async () => {

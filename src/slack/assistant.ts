@@ -63,6 +63,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       try {
         const result = await sessionManager.handleText(threadId, text, async (msg) => {
           await sender.sendReply(msg);
+          await sender.setStatus('생각 중...');
         });
 
         if (result.kind === 'busy') {
