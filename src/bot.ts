@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BotRuntime } from './runtime/bot-runtime.js';
 import { ClaudeSessionManager } from './session/manager.js';
-import { startSlackApp } from './slack/app.js';
+import { startSlackApp, stopSlackApp } from './slack/app.js';
 import { loadSettings } from './settings.js';
 
 function safeRead(filePath: string): string {
@@ -39,6 +39,30 @@ function loadSystemPrompt(workspace: string): string {
   return combinedPrompt;
 }
 
+function waitForShutdownSignal(): Promise<void> {
+  return new Promise((resolve) => {
+    const handlers = new Map<NodeJS.Signals, () => void>();
+
+    const cleanup = () => {
+      for (const [signal, handler] of handlers.entries()) {
+        process.removeListener(signal, handler);
+      }
+      handlers.clear();
+    };
+
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      const handler = () => {
+        console.log(`[shutdown] received ${signal.toLowerCase()}`);
+        cleanup();
+        resolve();
+      };
+
+      handlers.set(signal, handler);
+      process.once(signal, handler);
+    }
+  });
+}
+
 export async function startBot(): Promise<void> {
   console.log('[startup] loading settings...');
   const settings = loadSettings();
@@ -52,28 +76,42 @@ export async function startBot(): Promise<void> {
     systemPrompt,
   });
 
-  // Telegram — always start
-  const telegramRuntime = new BotRuntime({
-    settings,
-    systemPrompt,
-    sessionManager,
-  });
+  let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
 
-  // Slack — start only if configured
-  if (settings.slack) {
-    console.log('[startup] slack config found, starting slack app...');
-    startSlackApp({
-      botToken: settings.slack.botToken,
-      appToken: settings.slack.appToken,
-      sessionManager,
-    }).catch((error) => {
-      console.error(`[startup] slack app failed to start: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  } else {
-    console.log('[startup] no slack config, skipping slack app');
+  try {
+    if (settings.slack) {
+      console.log('[startup] slack config found, starting slack app...');
+      slackApp = await startSlackApp({
+        botToken: settings.slack.botToken,
+        appToken: settings.slack.appToken,
+        sessionManager,
+      });
+    } else {
+      console.log('[startup] no slack config, skipping slack app');
+    }
+
+    if (settings.telegram) {
+      console.log('[startup] telegram config found, starting telegram runtime...');
+      const telegramRuntime = new BotRuntime({
+        settings: {
+          ...settings,
+          telegram: settings.telegram,
+        },
+        sessionManager,
+      });
+
+      await telegramRuntime.start();
+      return;
+    }
+
+    console.log('[startup] no telegram config, running slack-only mode');
+    await waitForShutdownSignal();
+  } finally {
+    sessionManager.closeAll();
+    if (slackApp) {
+      await stopSlackApp(slackApp);
+    }
   }
-
-  await telegramRuntime.start();
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

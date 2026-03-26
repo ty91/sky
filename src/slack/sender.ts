@@ -4,6 +4,8 @@ import { computeBackoffMs, sleep } from '../runtime/retry.js';
 export type SlackSenderOptions = {
   say: SayFn;
   setStatus: (status: string) => Promise<unknown>;
+  computeDelayMs?: (attempt: number) => number;
+  sleep?: (delayMs: number) => Promise<void>;
 };
 
 const MAX_SLACK_MESSAGE_LENGTH = 3500;
@@ -27,6 +29,11 @@ export class SlackSender {
   }
 
   private async sendWithRetry(text: string, maxAttempts = 4): Promise<void> {
+    const computeDelayMs =
+      this.options.computeDelayMs ??
+      ((attempt: number) => computeBackoffMs(attempt, { baseMs: 1000, maxMs: 10000 }));
+    const sleepFn = this.options.sleep ?? ((delayMs: number) => sleep(delayMs));
+
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         await this.options.say(text);
@@ -38,9 +45,9 @@ export class SlackSender {
           throw error;
         }
 
-        const delay = computeBackoffMs(attempt, { baseMs: 1000, maxMs: 10000 });
+        const delay = computeDelayMs(attempt);
         console.log(`[slack] say failed (attempt ${attempt}/${maxAttempts}): ${message}, retrying in ${delay}ms`);
-        await sleep(delay);
+        await sleepFn(delay);
       }
     }
   }

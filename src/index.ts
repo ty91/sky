@@ -9,7 +9,7 @@ import { logsCommand } from './commands/logs.js';
 
 const program = new Command()
   .name('claudeclaw')
-  .description('Telegram chatbot powered by Claude Agent SDK')
+  .description('Claude Agent SDK chatbot for Slack and Telegram')
   .version('0.1.0');
 
 program.addCommand(startCommand);

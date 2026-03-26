@@ -16,9 +16,12 @@ import {
 } from './health-store.js';
 import { computeBackoffMs, isAbortError, sleep } from './retry.js';
 
+type TelegramEnabledSettings = Settings & {
+  telegram: NonNullable<Settings['telegram']>;
+};
+
 export type BotRuntimeOptions = {
-  settings: Settings;
-  systemPrompt: string;
+  settings: TelegramEnabledSettings;
   sessionManager: ClaudeSessionManager;
 };
 

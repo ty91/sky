@@ -6,34 +6,50 @@ import { z } from 'zod';
 export const CLAUDECLAW_DIR = path.join(os.homedir(), '.claudeclaw');
 const SETTINGS_FILE = path.join(CLAUDECLAW_DIR, 'settings.json');
 
-const settingsSchema = z.object({
-  telegram: z.object({
-    botToken: z.string(),
-  }),
-  slack: z
-    .object({
-      botToken: z.string(),
-      appToken: z.string(),
-    })
-    .optional(),
-  claude: z
-    .object({
-      model: z.string().default('sonnet'),
-    })
-    .default({ model: 'sonnet' }),
-  workspace: z.string().default(path.join(os.homedir(), '.claudeclaw', 'workspace')),
+const telegramSettingsSchema = z.object({
+  botToken: z.string(),
 });
+
+const slackSettingsSchema = z.object({
+  botToken: z.string(),
+  appToken: z.string(),
+});
+
+const settingsSchema = z
+  .object({
+    telegram: telegramSettingsSchema.optional(),
+    slack: slackSettingsSchema.optional(),
+    claude: z
+      .object({
+        model: z.string().default('sonnet'),
+      })
+      .default({ model: 'sonnet' }),
+    workspace: z.string().default(path.join(os.homedir(), '.claudeclaw', 'workspace')),
+  })
+  .refine((value) => value.telegram || value.slack, {
+    message: 'At least one transport must be configured: telegram or slack',
+  });
 
 export type Settings = z.infer<typeof settingsSchema>;
 
-export function loadSettings(): Settings {
-  console.log(`[startup] reading ${SETTINGS_FILE}`);
+export function parseSettings(raw: unknown): Settings {
+  return settingsSchema.parse(raw);
+}
+
+export function loadSettings(options: { silent?: boolean } = {}): Settings {
+  if (!options.silent) {
+    console.log(`[startup] reading ${SETTINGS_FILE}`);
+  }
   try {
     const raw = readFileSync(SETTINGS_FILE, 'utf8');
-    return settingsSchema.parse(JSON.parse(raw));
+    return parseSettings(JSON.parse(raw));
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      throw new Error(`Settings file not found: ${SETTINGS_FILE}\nCreate it with at least: { "telegram": { "botToken": "..." } }`);
+      throw new Error(
+        `Settings file not found: ${SETTINGS_FILE}\n` +
+          'Create it with at least one transport, for example: ' +
+          '{ "slack": { "botToken": "...", "appToken": "..." } }',
+      );
     }
     throw error;
   }

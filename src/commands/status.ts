@@ -1,11 +1,20 @@
 import { Command } from 'commander';
 import { isRunning, LOG_FILE, readPid, removePidFile } from '../daemon.js';
 import { readHealthSnapshot } from '../runtime/health-store.js';
+import { loadSettings, type Settings } from '../settings.js';
+
+function tryLoadSettings(): Settings | undefined {
+  try {
+    return loadSettings({ silent: true });
+  } catch {
+    return undefined;
+  }
+}
 
 function printHealth(): void {
   const health = readHealthSnapshot();
   if (!health) {
-    console.log('health: unavailable');
+    console.log('telegram health: unavailable');
     return;
   }
 
@@ -53,11 +62,19 @@ function printHealth(): void {
 export const statusCommand = new Command('status')
   .description('Show daemon status')
   .action(() => {
+    const settings = tryLoadSettings();
     const pid = readPid();
     if (isRunning(pid)) {
       console.log(`claudeclaw is running (pid: ${pid})`);
       console.log(`log: ${LOG_FILE}`);
-      printHealth();
+      if (settings?.slack) {
+        console.log('slack app: configured');
+      }
+      if (settings?.telegram) {
+        printHealth();
+      } else {
+        console.log('telegram runtime: disabled');
+      }
       return;
     }
 
@@ -67,5 +84,12 @@ export const statusCommand = new Command('status')
 
     console.log('claudeclaw is stopped');
     console.log(`log: ${LOG_FILE}`);
-    printHealth();
+    if (settings?.slack) {
+      console.log('slack app: configured');
+    }
+    if (settings?.telegram) {
+      printHealth();
+    } else if (settings) {
+      console.log('telegram runtime: disabled');
+    }
   });
