@@ -11,6 +11,7 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { CLAUDECLAW_DIR } from '../settings.js';
+import { TranscriptWriter } from '../agents/memory/transcript.js';
 
 export type SessionManagerOptions = {
   model: string;
@@ -23,6 +24,7 @@ type ChatState = {
   input: Pushable<SDKUserMessage>;
   busy: boolean;
   sessionId?: string;
+  transcript: TranscriptWriter;
 };
 
 export type HandleTextResult =
@@ -234,6 +236,7 @@ export class ClaudeSessionManager {
       query: q,
       input,
       busy: false,
+      transcript: new TranscriptWriter(chatId),
     };
 
     this.sessions.set(chatId, state);
@@ -250,6 +253,7 @@ export class ClaudeSessionManager {
     onMessage?: OnAssistantMessage,
   ): Promise<string> {
     console.log(`[query] runTurn start: ${JSON.stringify(userText)}`);
+    state.transcript.appendUser(userText);
     const promptUuid = randomUUID();
     const userMessage: SDKUserMessage = {
       type: 'user',
@@ -292,6 +296,7 @@ export class ClaudeSessionManager {
 
       if (isSystemInitMessage(message)) {
         state.sessionId = message.session_id;
+        state.transcript.setSessionId(message.session_id);
         continue;
       }
 
@@ -304,6 +309,7 @@ export class ClaudeSessionManager {
         const text = extractTextFromMessage(message);
         if (text) {
           finalText = text;
+          state.transcript.appendAssistant(text);
           if (onMessage) {
             try {
               await onMessage(text);
