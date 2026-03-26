@@ -29,6 +29,8 @@ export type HandleTextResult =
   | { kind: 'busy' }
   | { kind: 'ok'; reply: string };
 
+export type OnStreamChunk = (delta: string) => Promise<void>;
+
 class Pushable<T> implements AsyncIterable<T> {
   private queue: T[] = [];
   private resolvers: Array<(value: IteratorResult<T>) => void> = [];
@@ -142,18 +144,41 @@ export class ClaudeSessionManager {
 
     try {
       const reply = await this.runTurn(state, userText);
-
-      if (state.sessionId) {
-        const sessionId = state.sessionId;
-        if (getPersistedSessionId(chatId) !== sessionId) {
-          persistSession(chatId, sessionId);
-          console.log(`[session] persisted session ${sessionId} for chat ${chatId}`);
-        }
-      }
-
+      this.persistIfNeeded(chatId, state);
       return { kind: 'ok', reply };
     } finally {
       state.busy = false;
+    }
+  }
+
+  async handleTextStreaming(
+    chatId: string,
+    userText: string,
+    onChunk: OnStreamChunk,
+  ): Promise<HandleTextResult> {
+    const state = this.getOrCreateChatSession(chatId);
+    if (state.busy) {
+      return { kind: 'busy' };
+    }
+
+    state.busy = true;
+
+    try {
+      const reply = await this.runTurnStreaming(state, userText, onChunk);
+      this.persistIfNeeded(chatId, state);
+      return { kind: 'ok', reply };
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  private persistIfNeeded(chatId: string, state: ChatState): void {
+    if (state.sessionId) {
+      const sessionId = state.sessionId;
+      if (getPersistedSessionId(chatId) !== sessionId) {
+        persistSession(chatId, sessionId);
+        console.log(`[session] persisted session ${sessionId} for chat ${chatId}`);
+      }
     }
   }
 
@@ -231,6 +256,86 @@ export class ClaudeSessionManager {
 
   private getOrCreateChatSession(chatId: string): ChatState {
     return this.sessions.get(chatId) ?? this.createChatSession(chatId);
+  }
+
+  private async runTurnStreaming(
+    state: ChatState,
+    userText: string,
+    onChunk: OnStreamChunk,
+  ): Promise<string> {
+    console.log(`[query] runTurnStreaming start: ${JSON.stringify(userText)}`);
+    const promptUuid = randomUUID();
+    const userMessage: SDKUserMessage = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: userText }],
+      },
+      session_id: promptUuid,
+      parent_tool_use_id: null,
+      uuid: promptUuid,
+    };
+
+    state.input.push(userMessage);
+
+    let emittedLength = 0;
+    let finalText = '';
+    let promptReplayed = false;
+
+    while (true) {
+      const { value: message, done } = await state.query.next();
+      if (message) {
+        console.log(`[query] message type=${message.type}${message.type === 'system' ? ` subtype=${message.subtype}` : ''}`);
+      } else if (done) {
+        console.log('[query] done=true');
+      }
+
+      if (done || !message) {
+        break;
+      }
+
+      if (isSystemInitMessage(message)) {
+        state.sessionId = message.session_id;
+        continue;
+      }
+
+      if (message.type === 'user' && 'uuid' in message && message.uuid === promptUuid) {
+        promptReplayed = true;
+        continue;
+      }
+
+      if (message.type === 'assistant') {
+        const text = extractTextFromMessage(message);
+        if (text) {
+          finalText = text;
+          if (text.length > emittedLength) {
+            const delta = text.slice(emittedLength);
+            emittedLength = text.length;
+            try {
+              await onChunk(delta);
+            } catch (err) {
+              console.error(`[query] onChunk error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        }
+        continue;
+      }
+
+      if (message.type === 'result') {
+        if (!promptReplayed) {
+          continue;
+        }
+
+        if (message.subtype === 'success') {
+          console.log('[query] success result received');
+          return finalText || message.result || '(No text response)';
+        }
+
+        throw new Error(message.errors.join('; ') || 'Claude returned an error');
+      }
+    }
+
+    return finalText || '(No response)';
   }
 
   private async runTurn(state: ChatState, userText: string): Promise<string> {

@@ -38,13 +38,15 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       await saveThreadContext();
     },
 
-    userMessage: async ({ message, say, setStatus }) => {
+    userMessage: async ({ message, say, setStatus, client, context }) => {
       const text = 'text' in message && typeof message.text === 'string' ? message.text.trim() : '';
       const channelId = message.channel;
       const threadTs = 'thread_ts' in message && typeof message.thread_ts === 'string'
         ? message.thread_ts
         : message.ts;
       const threadId = toThreadId(channelId, threadTs);
+      const userId = 'user' in message && typeof message.user === 'string' ? message.user : '';
+      const teamId = context.teamId ?? '';
 
       console.log(`[slack] user message in ${threadId}: ${JSON.stringify(text)}`);
 
@@ -61,14 +63,36 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       await sender.setStatus('생각 중...');
 
       try {
-        const result = await sessionManager.handleText(threadId, text);
+        const canStream = !!(userId && teamId);
 
-        if (result.kind === 'busy') {
-          await sender.sendReply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
-          return;
+        if (canStream) {
+          const streamer = sender.createStreamer({
+            client,
+            channelId,
+            threadTs,
+            teamId,
+            userId,
+          });
+
+          const result = await sessionManager.handleTextStreaming(threadId, text, async (delta) => {
+            await streamer.append(delta);
+          });
+
+          await streamer.stop();
+
+          if (result.kind === 'busy') {
+            await sender.sendReply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
+          }
+        } else {
+          const result = await sessionManager.handleText(threadId, text);
+
+          if (result.kind === 'busy') {
+            await sender.sendReply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
+            return;
+          }
+
+          await sender.sendReply(result.reply);
         }
-
-        await sender.sendReply(result.reply);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`[slack] error handling message in ${threadId}: ${errorMessage}`);

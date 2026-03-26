@@ -67,3 +67,110 @@ test('SlackSender ignores setStatus failures', async () => {
 
   await assert.doesNotReject(sender.setStatus('thinking'));
 });
+
+test('createStreamer returns append and stop functions', () => {
+  const appendCalls = [];
+  let stopped = false;
+  const mockClient = {
+    chatStream: (args) => ({
+      _args: args,
+      append: async (details) => { appendCalls.push(details); },
+      stop: async () => { stopped = true; },
+    }),
+  };
+
+  const sender = new SlackSender({
+    say: async () => {},
+    setStatus: async () => {},
+  });
+
+  const streamer = sender.createStreamer({
+    client: mockClient,
+    channelId: 'C123',
+    threadTs: '1711.22',
+    teamId: 'T123',
+    userId: 'U123',
+  });
+
+  assert.equal(typeof streamer.append, 'function');
+  assert.equal(typeof streamer.stop, 'function');
+});
+
+test('createStreamer.append sends markdown_text to chatStream', async () => {
+  const appendCalls = [];
+  const mockClient = {
+    chatStream: () => ({
+      append: async (details) => { appendCalls.push(details); },
+      stop: async () => {},
+    }),
+  };
+
+  const sender = new SlackSender({
+    say: async () => {},
+    setStatus: async () => {},
+  });
+
+  const streamer = sender.createStreamer({
+    client: mockClient,
+    channelId: 'C123',
+    threadTs: '1711.22',
+    teamId: 'T123',
+    userId: 'U123',
+  });
+
+  await streamer.append('hello ');
+  await streamer.append('world');
+
+  assert.deepEqual(appendCalls, [
+    { markdown_text: 'hello ' },
+    { markdown_text: 'world' },
+  ]);
+});
+
+test('createStreamer.append swallows errors', async () => {
+  const mockClient = {
+    chatStream: () => ({
+      append: async () => { throw new Error('append failed'); },
+      stop: async () => {},
+    }),
+  };
+
+  const sender = new SlackSender({
+    say: async () => {},
+    setStatus: async () => {},
+  });
+
+  const streamer = sender.createStreamer({
+    client: mockClient,
+    channelId: 'C123',
+    threadTs: '1711.22',
+    teamId: 'T123',
+    userId: 'U123',
+  });
+
+  await assert.doesNotReject(streamer.append('test'));
+});
+
+test('createStreamer.stop swallows errors', async () => {
+  const mockClient = {
+    chatStream: () => ({
+      append: async () => {},
+      stop: async () => { throw new Error('stop failed'); },
+    }),
+  };
+
+  const sender = new SlackSender({
+    say: async () => {},
+    setStatus: async () => {},
+  });
+
+  const streamer = sender.createStreamer({
+    client: mockClient,
+    channelId: 'C123',
+    threadTs: '1711.22',
+    teamId: 'T123',
+    userId: 'U123',
+  });
+
+  await assert.doesNotReject(streamer.stop());
+});
