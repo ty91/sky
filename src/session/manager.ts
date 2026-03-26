@@ -7,6 +7,7 @@ import {
   type PermissionMode,
   type Query,
   type SDKMessage,
+  type SDKPartialAssistantMessage,
   type SDKSystemMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -122,6 +123,17 @@ function extractTextFromMessage(message: SDKMessage): string {
 
 function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
   return message.type === 'system' && (message as SDKSystemMessage).subtype === 'init';
+}
+
+function extractStreamDelta(message: SDKPartialAssistantMessage): string | null {
+  const event = message.event;
+  if (
+    event.type === 'content_block_delta' &&
+    event.delta.type === 'text_delta'
+  ) {
+    return event.delta.text;
+  }
+  return null;
 }
 
 export class ClaudeSessionManager {
@@ -278,7 +290,6 @@ export class ClaudeSessionManager {
 
     state.input.push(userMessage);
 
-    let emittedLength = 0;
     let finalText = '';
     let promptReplayed = false;
 
@@ -304,19 +315,22 @@ export class ClaudeSessionManager {
         continue;
       }
 
+      if (message.type === 'stream_event') {
+        const delta = extractStreamDelta(message);
+        if (delta) {
+          try {
+            await onChunk(delta);
+          } catch (err) {
+            console.error(`[query] onChunk error: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        continue;
+      }
+
       if (message.type === 'assistant') {
         const text = extractTextFromMessage(message);
         if (text) {
           finalText = text;
-          if (text.length > emittedLength) {
-            const delta = text.slice(emittedLength);
-            emittedLength = text.length;
-            try {
-              await onChunk(delta);
-            } catch (err) {
-              console.error(`[query] onChunk error: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          }
         }
         continue;
       }
