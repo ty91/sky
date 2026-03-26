@@ -7,7 +7,6 @@ import {
   type PermissionMode,
   type Query,
   type SDKMessage,
-  type SDKPartialAssistantMessage,
   type SDKSystemMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -30,7 +29,7 @@ export type HandleTextResult =
   | { kind: 'busy' }
   | { kind: 'ok'; reply: string };
 
-export type OnStreamChunk = (delta: string) => Promise<void>;
+export type OnAssistantMessage = (text: string) => Promise<void>;
 
 class Pushable<T> implements AsyncIterable<T> {
   private queue: T[] = [];
@@ -125,17 +124,6 @@ function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
   return message.type === 'system' && (message as SDKSystemMessage).subtype === 'init';
 }
 
-function extractStreamDelta(message: SDKPartialAssistantMessage): string | null {
-  const event = message.event;
-  if (
-    event.type === 'content_block_delta' &&
-    event.delta.type === 'text_delta'
-  ) {
-    return event.delta.text;
-  }
-  return null;
-}
-
 export class ClaudeSessionManager {
   private readonly sessions = new Map<string, ChatState>();
 
@@ -146,27 +134,10 @@ export class ClaudeSessionManager {
     this.createChatSession(chatId);
   }
 
-  async handleText(chatId: string, userText: string): Promise<HandleTextResult> {
-    const state = this.getOrCreateChatSession(chatId);
-    if (state.busy) {
-      return { kind: 'busy' };
-    }
-
-    state.busy = true;
-
-    try {
-      const reply = await this.runTurn(state, userText);
-      this.persistIfNeeded(chatId, state);
-      return { kind: 'ok', reply };
-    } finally {
-      state.busy = false;
-    }
-  }
-
-  async handleTextStreaming(
+  async handleText(
     chatId: string,
     userText: string,
-    onChunk: OnStreamChunk,
+    onMessage?: OnAssistantMessage,
   ): Promise<HandleTextResult> {
     const state = this.getOrCreateChatSession(chatId);
     if (state.busy) {
@@ -176,7 +147,7 @@ export class ClaudeSessionManager {
     state.busy = true;
 
     try {
-      const reply = await this.runTurnStreaming(state, userText, onChunk);
+      const reply = await this.runTurn(state, userText, onMessage);
       this.persistIfNeeded(chatId, state);
       return { kind: 'ok', reply };
     } finally {
@@ -238,7 +209,6 @@ export class ClaudeSessionManager {
         'WebSearch',
       ],
       permissionMode: 'bypassPermissions' as PermissionMode,
-      includePartialMessages: true,
       settingSources: [],
       ...({ extraArgs: { 'replay-user-messages': '' } } as unknown as {}),
     };
@@ -270,89 +240,11 @@ export class ClaudeSessionManager {
     return this.sessions.get(chatId) ?? this.createChatSession(chatId);
   }
 
-  private async runTurnStreaming(
+  private async runTurn(
     state: ChatState,
     userText: string,
-    onChunk: OnStreamChunk,
+    onMessage?: OnAssistantMessage,
   ): Promise<string> {
-    console.log(`[query] runTurnStreaming start: ${JSON.stringify(userText)}`);
-    const promptUuid = randomUUID();
-    const userMessage: SDKUserMessage = {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [{ type: 'text', text: userText }],
-      },
-      session_id: promptUuid,
-      parent_tool_use_id: null,
-      uuid: promptUuid,
-    };
-
-    state.input.push(userMessage);
-
-    let finalText = '';
-    let promptReplayed = false;
-
-    while (true) {
-      const { value: message, done } = await state.query.next();
-      if (message) {
-        console.log(`[query] message type=${message.type}${message.type === 'system' ? ` subtype=${message.subtype}` : ''}`);
-      } else if (done) {
-        console.log('[query] done=true');
-      }
-
-      if (done || !message) {
-        break;
-      }
-
-      if (isSystemInitMessage(message)) {
-        state.sessionId = message.session_id;
-        continue;
-      }
-
-      if (message.type === 'user' && 'uuid' in message && message.uuid === promptUuid) {
-        promptReplayed = true;
-        continue;
-      }
-
-      if (message.type === 'stream_event') {
-        const delta = extractStreamDelta(message);
-        if (delta) {
-          try {
-            await onChunk(delta);
-          } catch (err) {
-            console.error(`[query] onChunk error: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-        continue;
-      }
-
-      if (message.type === 'assistant') {
-        const text = extractTextFromMessage(message);
-        if (text) {
-          finalText = text;
-        }
-        continue;
-      }
-
-      if (message.type === 'result') {
-        if (!promptReplayed) {
-          continue;
-        }
-
-        if (message.subtype === 'success') {
-          console.log('[query] success result received');
-          return finalText || message.result || '(No text response)';
-        }
-
-        throw new Error(message.errors.join('; ') || 'Claude returned an error');
-      }
-    }
-
-    return finalText || '(No response)';
-  }
-
-  private async runTurn(state: ChatState, userText: string): Promise<string> {
     console.log(`[query] runTurn start: ${JSON.stringify(userText)}`);
     const promptUuid = randomUUID();
     const userMessage: SDKUserMessage = {
@@ -395,7 +287,16 @@ export class ClaudeSessionManager {
 
       if (message.type === 'assistant') {
         const text = extractTextFromMessage(message);
-        if (text) finalText = text;
+        if (text) {
+          finalText = text;
+          if (onMessage) {
+            try {
+              await onMessage(text);
+            } catch (err) {
+              console.error(`[query] onMessage error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        }
         continue;
       }
 
