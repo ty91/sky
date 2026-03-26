@@ -207,7 +207,7 @@ export class BotRuntime {
   private createHandlers(): TelegramHandlers {
     return {
       onStartCommand: async (event) => {
-        this.sessionManager.prepareFreshSession(event.chatId);
+        this.sessionManager.prepareFreshSession(String(event.chatId));
         await event.reply(
           '안녕하세요. 이 봇은 채팅방별로 long-lived query 세션을 유지합니다.\n\n' +
             '- 같은 채팅방 메시지는 같은 query에 계속 들어갑니다\n' +
@@ -216,7 +216,7 @@ export class BotRuntime {
         );
       },
       onNewCommand: async (event) => {
-        this.sessionManager.prepareFreshSession(event.chatId);
+        this.sessionManager.prepareFreshSession(String(event.chatId));
         await event.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
       },
       onTextMessage: async (event) => {
@@ -228,7 +228,7 @@ export class BotRuntime {
         const typingLoop = event.createTypingLoop();
 
         try {
-          const result = await this.sessionManager.handleText(event.chatId, event.text);
+          const result = await this.sessionManager.handleText(String(event.chatId), event.text);
           if (result.kind === 'busy') {
             await event.reply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
             return;

@@ -10,6 +10,12 @@ const settingsSchema = z.object({
   telegram: z.object({
     botToken: z.string(),
   }),
+  slack: z
+    .object({
+      botToken: z.string(),
+      appToken: z.string(),
+    })
+    .optional(),
   claude: z
     .object({
       model: z.string().default('sonnet'),

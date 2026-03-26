@@ -76,7 +76,7 @@ class Pushable<T> implements AsyncIterable<T> {
   }
 }
 
-const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'telegram-sessions.json');
+const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'sessions.json');
 
 function loadPersistedSessions(): Record<string, string> {
   try {
@@ -86,21 +86,21 @@ function loadPersistedSessions(): Record<string, string> {
   }
 }
 
-function persistSession(chatId: number, sessionId: string): void {
+function persistSession(chatId: string, sessionId: string): void {
   const data = loadPersistedSessions();
-  data[String(chatId)] = sessionId;
+  data[chatId] = sessionId;
   mkdirSync(CLAUDECLAW_DIR, { recursive: true });
   writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
 }
 
-function removePersistedSession(chatId: number): void {
+function removePersistedSession(chatId: string): void {
   const data = loadPersistedSessions();
-  delete data[String(chatId)];
+  delete data[chatId];
   writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
 }
 
-function getPersistedSessionId(chatId: number): string | undefined {
-  return loadPersistedSessions()[String(chatId)];
+function getPersistedSessionId(chatId: string): string | undefined {
+  return loadPersistedSessions()[chatId];
 }
 
 function extractTextFromMessage(message: SDKMessage): string {
@@ -123,16 +123,16 @@ function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
 }
 
 export class ClaudeSessionManager {
-  private readonly sessions = new Map<number, ChatState>();
+  private readonly sessions = new Map<string, ChatState>();
 
   constructor(private readonly options: SessionManagerOptions) {}
 
-  prepareFreshSession(chatId: number): void {
+  prepareFreshSession(chatId: string): void {
     this.resetChatSession(chatId);
     this.createChatSession(chatId);
   }
 
-  async handleText(chatId: number, userText: string): Promise<HandleTextResult> {
+  async handleText(chatId: string, userText: string): Promise<HandleTextResult> {
     const state = this.getOrCreateChatSession(chatId);
     if (state.busy) {
       return { kind: 'busy' };
@@ -157,7 +157,7 @@ export class ClaudeSessionManager {
     }
   }
 
-  resetChatSession(chatId: number): void {
+  resetChatSession(chatId: string): void {
     const existing = this.sessions.get(chatId);
     if (!existing) return;
 
@@ -207,7 +207,7 @@ export class ClaudeSessionManager {
     };
   }
 
-  private createChatSession(chatId: number): ChatState {
+  private createChatSession(chatId: string): ChatState {
     const savedSessionId = getPersistedSessionId(chatId);
     if (savedSessionId) {
       console.log(`[session] resuming session ${savedSessionId} for chat ${chatId}`);
@@ -229,7 +229,7 @@ export class ClaudeSessionManager {
     return state;
   }
 
-  private getOrCreateChatSession(chatId: number): ChatState {
+  private getOrCreateChatSession(chatId: string): ChatState {
     return this.sessions.get(chatId) ?? this.createChatSession(chatId);
   }
 
