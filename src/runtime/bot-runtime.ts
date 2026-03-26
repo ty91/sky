@@ -19,6 +19,7 @@ import { computeBackoffMs, isAbortError, sleep } from './retry.js';
 export type BotRuntimeOptions = {
   settings: Settings;
   systemPrompt: string;
+  sessionManager: ClaudeSessionManager;
 };
 
 const TELEGRAM_PROBE_TIMEOUT_MS = 8000;
@@ -61,11 +62,7 @@ export class BotRuntime {
   private stopRequested = false;
 
   constructor(private readonly options: BotRuntimeOptions) {
-    this.sessionManager = new ClaudeSessionManager({
-      model: options.settings.claude.model,
-      workspace: options.settings.workspace,
-      systemPrompt: options.systemPrompt,
-    });
+    this.sessionManager = options.sessionManager;
     this.networkClient = new TelegramNetworkClient({
       botToken: options.settings.telegram.botToken,
       probeTimeoutMs: TELEGRAM_PROBE_TIMEOUT_MS,
