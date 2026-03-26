@@ -120,6 +120,10 @@ function extractTextFromMessage(message: SDKMessage): string {
   return texts.join('\n').trim();
 }
 
+function truncate(text: string, maxLength = 50): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
 function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
   return message.type === 'system' && (message as SDKSystemMessage).subtype === 'init';
 }
@@ -266,7 +270,18 @@ export class ClaudeSessionManager {
     while (true) {
       const { value: message, done } = await state.query.next();
       if (message) {
-        console.log(`[query] message type=${message.type}${message.type === 'system' ? ` subtype=${message.subtype}` : ''}`);
+        let logLine = `[query] message type=${message.type}`;
+        if (message.type === 'system') {
+          logLine += ` subtype=${message.subtype}`;
+        } else if (message.type === 'user') {
+          const blocks = message.message.content ?? [];
+          const text = blocks.find((b: { type: string }) => b.type === 'text');
+          if (text && text.type === 'text') logLine += ` ${truncate(text.text)}`;
+        } else if (message.type === 'assistant') {
+          const text = extractTextFromMessage(message);
+          if (text) logLine += ` ${truncate(text)}`;
+        }
+        console.log(logLine);
       } else if (done) {
         console.log('[query] done=true');
       }
