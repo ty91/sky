@@ -1,6 +1,28 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
-import { runMemoryAgent } from '../agents/memory/agent.js';
+import { runMemoryAgent, type MemoryAgentResult } from '../agents/memory/agent.js';
+
+const MEMORY_LOG_CHANNEL = 'C0APGL1DKDH';
+
+async function postToSlack(botToken: string, result: MemoryAgentResult): Promise<void> {
+  const text = result.skipped
+    ? '📭 No new transcripts to process.'
+    : `📝 Processed *${result.processed}* transcript(s).\n\n${result.summary}`;
+
+  const res = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify({ channel: MEMORY_LOG_CHANNEL, text }),
+  });
+
+  const body = (await res.json()) as { ok: boolean; error?: string };
+  if (!body.ok) {
+    console.error(`[memory] slack notification failed: ${body.error}`);
+  }
+}
 
 export const memoryCommand = new Command('memory')
   .description('Run the Memory Agent to process new transcripts')
@@ -15,5 +37,14 @@ export const memoryCommand = new Command('memory')
     } else {
       console.log(`[memory] processed ${result.processed} transcript(s)`);
       console.log(`[memory] summary: ${result.summary}`);
+    }
+
+    if (settings.slack) {
+      try {
+        await postToSlack(settings.slack.botToken, result);
+        console.log('[memory] slack notification sent');
+      } catch (error) {
+        console.error(`[memory] slack notification error: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   });
