@@ -1,5 +1,6 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
 import type { ClaudeSessionManager } from '../session/manager.js';
+import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 
 export type SlackAssistantOptions = {
@@ -38,13 +39,27 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       await saveThreadContext();
     },
 
-    userMessage: async ({ message, say, setStatus }) => {
-      const text = 'text' in message && typeof message.text === 'string' ? message.text.trim() : '';
+    userMessage: async ({ message, say, setStatus, client }) => {
+      const rawText = 'text' in message && typeof message.text === 'string' ? message.text.trim() : '';
       const channelId = message.channel;
       const threadTs = 'thread_ts' in message && typeof message.thread_ts === 'string'
         ? message.thread_ts
         : message.ts;
       const threadId = toThreadId(channelId, threadTs);
+
+      // Handle file attachments
+      const files = 'files' in message && Array.isArray(message.files) ? message.files as SlackFile[] : [];
+      let attachmentsLine = '';
+
+      if (files.length > 0) {
+        console.log(`[slack] ${files.length} file(s) attached in ${threadId}`);
+        const downloaded = await downloadSlackFiles(files, client);
+        attachmentsLine = formatAttachmentsLine(downloaded);
+      }
+
+      const text = attachmentsLine
+        ? [rawText, attachmentsLine].filter(Boolean).join('\n\n')
+        : rawText;
 
       console.log(`[slack] user message in ${threadId}: ${JSON.stringify(text)}`);
 
