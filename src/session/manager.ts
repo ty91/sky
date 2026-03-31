@@ -1,38 +1,40 @@
-import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import {
-  query,
-  type Options,
-  type PermissionMode,
-  type Query,
-  type SDKMessage,
-  type SDKSystemMessage,
-  type SDKUserMessage,
-} from '@anthropic-ai/claude-agent-sdk';
-import { CLAUDECLAW_DIR } from '../settings.js';
 import { TranscriptWriter } from '../agents/memory/transcript.js';
-import { Pushable } from './pushable.js';
-
-export type SessionManagerOptions = {
-  model: string;
-  workspace: string;
-  systemPrompt: string;
-};
-
-type ChatState = {
-  query: Query;
-  input: Pushable<SDKUserMessage>;
-  busy: boolean;
-  sessionId?: string;
-  transcript: TranscriptWriter;
-};
+import type { AgentConfig } from '../agents/types.js';
+import { createClaudeProviderFactory } from '../providers/claude.js';
+import type { CollectOptions } from '../providers/types.js';
+import { CLAUDECLAW_DIR } from '../settings.js';
+import type {
+  OpenSessionOptions,
+  SendResult,
+  SessionEntry,
+  SessionManager,
+  SessionManagerOptions,
+} from './types.js';
 
 export type HandleTextResult =
   | { kind: 'busy' }
   | { kind: 'ok'; reply: string };
 
 export type OnAssistantMessage = (text: string) => Promise<void>;
+
+export { type SendResult, type SessionManager, type SessionManagerOptions } from './types.js';
+
+const DEFAULT_MAIN_TOOLS = [
+  'Bash',
+  'Glob',
+  'Grep',
+  'Read',
+  'Edit',
+  'Write',
+  'Skill',
+  'TaskOutput',
+  'TaskStop',
+  'TodoWrite',
+  'WebFetch',
+  'WebSearch',
+] as const;
 
 const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'sessions.json');
 
@@ -61,37 +63,116 @@ function getPersistedSessionId(chatId: string): string | undefined {
   return loadPersistedSessions()[chatId];
 }
 
-function extractTextFromMessage(message: SDKMessage): string {
-  if (message.type !== 'assistant') return '';
-
-  const blocks = message.message.content ?? [];
-  const texts: string[] = [];
-
-  for (const block of blocks) {
-    if (block.type === 'text') {
-      texts.push(block.text);
-    }
-  }
-
-  return texts.join('\n').trim();
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
-function truncate(text: string, maxLength = 50): string {
-  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+function createProviderConfig(agent: AgentConfig, options: SessionManagerOptions, resume?: string) {
+  return {
+    systemPrompt: agent.systemPrompt,
+    model: agent.model,
+    tools: agent.tools,
+    maxTurns: agent.maxTurns,
+    cwd: agent.cwd ?? options.defaultCwd,
+    ...(resume ? { resume } : {}),
+  };
 }
 
-function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
-  return message.type === 'system' && (message as SDKSystemMessage).subtype === 'init';
+export function createSessionManager(options: SessionManagerOptions): SessionManager {
+  const sessions = new Map<string, SessionEntry>();
+
+  return {
+    open(key: string, agent: AgentConfig, sessionOptions?: OpenSessionOptions): void {
+      if (sessions.has(key)) {
+        return;
+      }
+
+      sessions.set(key, {
+        provider: options.providerFactory.create(createProviderConfig(agent, options, sessionOptions?.resume)),
+        busy: false,
+        sessionId: sessionOptions?.resume,
+      });
+    },
+
+    async send(key: string, text: string, collectOptions?: CollectOptions): Promise<SendResult> {
+      const entry = sessions.get(key);
+      if (!entry) {
+        return { kind: 'error', error: new Error(`Session not open for key: ${key}`) };
+      }
+
+      if (entry.busy) {
+        return { kind: 'busy' };
+      }
+
+      entry.busy = true;
+
+      try {
+        await entry.provider.send(text);
+        const result = await entry.provider.collect(collectOptions);
+        if (result.sessionId && result.sessionId !== entry.sessionId) {
+          entry.sessionId = result.sessionId;
+          options.onSessionCreated?.(key, result.sessionId);
+        }
+        return { kind: 'ok', text: result.text };
+      } catch (error) {
+        return { kind: 'error', error: toError(error) };
+      } finally {
+        entry.busy = false;
+      }
+    },
+
+    getSessionId(key: string): string | undefined {
+      return sessions.get(key)?.sessionId;
+    },
+
+    async close(key: string): Promise<void> {
+      const entry = sessions.get(key);
+      if (!entry) {
+        return;
+      }
+
+      sessions.delete(key);
+      await entry.provider.close();
+    },
+
+    async closeAll(): Promise<void> {
+      const keys = [...sessions.keys()];
+      for (const key of keys) {
+        await this.close(key);
+      }
+    },
+  };
 }
 
 export class ClaudeSessionManager {
-  private readonly sessions = new Map<string, ChatState>();
+  private readonly sessionManager: SessionManager;
+  private readonly agent: AgentConfig;
+  private readonly transcripts = new Map<string, TranscriptWriter>();
 
-  constructor(private readonly options: SessionManagerOptions) {}
+  constructor(options: { model: string; workspace: string; systemPrompt: string }) {
+    this.agent = {
+      name: 'main',
+      systemPrompt: options.systemPrompt,
+      model: options.model,
+      tools: [...DEFAULT_MAIN_TOOLS],
+    };
+    this.sessionManager = createSessionManager({
+      providerFactory: createClaudeProviderFactory({ cwd: options.workspace }),
+      defaultCwd: options.workspace,
+      onSessionCreated: (chatId, sessionId) => {
+        if (getPersistedSessionId(chatId) === sessionId) {
+          return;
+        }
+
+        persistSession(chatId, sessionId);
+        console.log(`[session] persisted session ${sessionId} for chat ${chatId}`);
+      },
+    });
+  }
 
   prepareFreshSession(chatId: string): void {
     this.resetChatSession(chatId);
-    this.createChatSession(chatId);
+    this.sessionManager.open(chatId, this.agent);
   }
 
   async handleText(
@@ -99,196 +180,77 @@ export class ClaudeSessionManager {
     userText: string,
     onMessage?: OnAssistantMessage,
   ): Promise<HandleTextResult> {
-    const state = this.getOrCreateChatSession(chatId);
-    if (state.busy) {
+    this.openChatSession(chatId);
+
+    const transcript = this.getTranscript(chatId);
+    const sessionId = this.sessionManager.getSessionId(chatId);
+    if (sessionId) {
+      transcript.setSessionId(sessionId);
+    }
+    transcript.appendUser(userText);
+
+    const result = await this.sessionManager.send(chatId, userText, {
+      onMessage: async (text) => {
+        transcript.appendAssistant(text);
+        if (!onMessage) {
+          return;
+        }
+
+        try {
+          await onMessage(text);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[query] onMessage error: ${message}`);
+        }
+      },
+    });
+
+    if (result.kind === 'error') {
+      throw result.error;
+    }
+
+    if (result.kind === 'busy') {
       return { kind: 'busy' };
     }
 
-    state.busy = true;
-
-    try {
-      const reply = await this.runTurn(state, userText, onMessage);
-      this.persistIfNeeded(chatId, state);
-      return { kind: 'ok', reply };
-    } finally {
-      state.busy = false;
+    const updatedSessionId = this.sessionManager.getSessionId(chatId);
+    if (updatedSessionId) {
+      transcript.setSessionId(updatedSessionId);
     }
-  }
 
-  private persistIfNeeded(chatId: string, state: ChatState): void {
-    if (state.sessionId) {
-      const sessionId = state.sessionId;
-      if (getPersistedSessionId(chatId) !== sessionId) {
-        persistSession(chatId, sessionId);
-        console.log(`[session] persisted session ${sessionId} for chat ${chatId}`);
-      }
-    }
+    return { kind: 'ok', reply: result.text };
   }
 
   resetChatSession(chatId: string): void {
-    const existing = this.sessions.get(chatId);
-    if (!existing) return;
-
-    existing.input.end();
-    existing.query.close();
-    this.sessions.delete(chatId);
+    void this.sessionManager.close(chatId).catch((error) => {
+      console.error(`[session] failed to close session for chat ${chatId}: ${toError(error).message}`);
+    });
+    this.transcripts.delete(chatId);
     removePersistedSession(chatId);
     console.log(`[session] reset session for chat ${chatId}`);
   }
 
   closeAll(): void {
-    for (const [chatId, state] of this.sessions.entries()) {
-      state.input.end();
-      state.query.close();
-      this.sessions.delete(chatId);
-    }
-  }
-
-  private buildOptions(resumeId?: string): Options {
-    return {
-      model: this.options.model,
-      cwd: this.options.workspace,
-      systemPrompt: this.options.systemPrompt,
-      ...(resumeId ? { resume: resumeId } : {}),
-      env: {
-        ...process.env,
-        CLAUDE_AGENT_SDK_CLIENT_APP: 'claudeclaw/0.5.0',
-      },
-      tools: [
-        'Bash',
-        'Glob',
-        'Grep',
-        'Read',
-        'Edit',
-        'Write',
-        'Skill',
-        'TaskOutput',
-        'TaskStop',
-        'TodoWrite',
-        'WebFetch',
-        'WebSearch',
-      ],
-      permissionMode: 'bypassPermissions' as PermissionMode,
-      settingSources: [],
-      ...({ extraArgs: { 'replay-user-messages': '' } } as unknown as {}),
-    };
-  }
-
-  private createChatSession(chatId: string): ChatState {
-    const savedSessionId = getPersistedSessionId(chatId);
-    if (savedSessionId) {
-      console.log(`[session] resuming session ${savedSessionId} for chat ${chatId}`);
-    }
-
-    const input = new Pushable<SDKUserMessage>();
-    const q = query({
-      prompt: input,
-      options: this.buildOptions(savedSessionId),
+    void this.sessionManager.closeAll().catch((error) => {
+      console.error(`[session] failed to close all sessions: ${toError(error).message}`);
     });
-
-    const state: ChatState = {
-      query: q,
-      input,
-      busy: false,
-      transcript: new TranscriptWriter(chatId),
-    };
-
-    this.sessions.set(chatId, state);
-    return state;
   }
 
-  private getOrCreateChatSession(chatId: string): ChatState {
-    return this.sessions.get(chatId) ?? this.createChatSession(chatId);
-  }
-
-  private async runTurn(
-    state: ChatState,
-    userText: string,
-    onMessage?: OnAssistantMessage,
-  ): Promise<string> {
-    console.log(`[query] runTurn start: ${JSON.stringify(userText)}`);
-    state.transcript.appendUser(userText);
-    const promptUuid = randomUUID();
-    const userMessage: SDKUserMessage = {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [{ type: 'text', text: userText }],
-      },
-      session_id: promptUuid,
-      parent_tool_use_id: null,
-      uuid: promptUuid,
-    };
-
-    state.input.push(userMessage);
-
-    let finalText = '';
-    let promptReplayed = false;
-
-    while (true) {
-      const { value: message, done } = await state.query.next();
-      if (message) {
-        let logLine = `[query] message type=${message.type}`;
-        if (message.type === 'system') {
-          logLine += ` subtype=${message.subtype}`;
-        } else if (message.type === 'user') {
-          const blocks = message.message.content ?? [];
-          const text = blocks.find((b: { type: string }) => b.type === 'text');
-          if (text && text.type === 'text') logLine += ` ${truncate(text.text)}`;
-        } else if (message.type === 'assistant') {
-          const text = extractTextFromMessage(message);
-          if (text) logLine += ` ${truncate(text)}`;
-        }
-        console.log(logLine);
-      } else if (done) {
-        console.log('[query] done=true');
-      }
-
-      if (done || !message) {
-        break;
-      }
-
-      if (isSystemInitMessage(message)) {
-        state.sessionId = message.session_id;
-        state.transcript.setSessionId(message.session_id);
-        continue;
-      }
-
-      if (message.type === 'user' && 'uuid' in message && message.uuid === promptUuid) {
-        promptReplayed = true;
-        continue;
-      }
-
-      if (message.type === 'assistant') {
-        const text = extractTextFromMessage(message);
-        if (text) {
-          finalText = text;
-          state.transcript.appendAssistant(text);
-          if (onMessage) {
-            try {
-              await onMessage(text);
-            } catch (err) {
-              console.error(`[query] onMessage error: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          }
-        }
-        continue;
-      }
-
-      if (message.type === 'result') {
-        if (!promptReplayed) {
-          continue;
-        }
-
-        if (message.subtype === 'success') {
-          console.log('[query] success result received');
-          return finalText || message.result || '(No text response)';
-        }
-
-        throw new Error(message.errors.join('; ') || 'Claude returned an error');
-      }
+  private openChatSession(chatId: string): void {
+    const resume = getPersistedSessionId(chatId);
+    if (resume) {
+      console.log(`[session] resuming session ${resume} for chat ${chatId}`);
     }
 
-    return finalText || '(No response)';
+    this.sessionManager.open(chatId, this.agent, { resume });
+  }
+
+  private getTranscript(chatId: string): TranscriptWriter {
+    let transcript = this.transcripts.get(chatId);
+    if (!transcript) {
+      transcript = new TranscriptWriter(chatId);
+      this.transcripts.set(chatId, transcript);
+    }
+    return transcript;
   }
 }
