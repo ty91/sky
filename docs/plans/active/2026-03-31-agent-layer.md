@@ -129,7 +129,7 @@ export type ProviderFactory = {
 **참조:** `slack-code-team/src/providers/types.ts` — `CollectOptions`와 `kind` 필드 제외 외 동일 구조
 
 **Verification:**
-- [ ] `pnpm typecheck` 통과
+- [x] `pnpm typecheck` 통과
 
 ---
 
@@ -352,3 +352,4 @@ export async function runMemoryAgent(options: {
 ## Progress Log
 
 - 2026-03-31: Step 1 완료 — `Pushable`을 `src/session/pushable.ts`로 분리하고 `pnpm typecheck`로 검증함.
+- 2026-03-31: Step 2 완료 — `src/providers/types.ts`에 Provider 레이어 타입을 추가하고 `pnpm typecheck`로 검증함.
