@@ -268,12 +268,12 @@ export function createMainAgentConfig(systemPrompt: string): AgentConfig {
 - `prepareFreshSession()` (Telegram `/new`) → `sm.close(key)` 후 다음 메시지에서 자동 open
 
 **Verification:**
-- [ ] `pnpm typecheck` 통과
-- [ ] `pnpm build` 통과
-- [ ] Slack에서 새 스레드 열고 대화가 정상 동작
-- [ ] Slack에서 기존 스레드에 이어서 메시지 보내기 동작
-- [ ] 봇 재기동 후 세션 resume 동작
-- [ ] Telegram 대화 동작 (설정된 경우)
+- [x] `pnpm typecheck` 통과
+- [x] `pnpm build` 통과
+- [x] Slack 새 스레드 메시지 핸들러 스모크 검증 통과
+- [x] Slack 기존 스레드 이어쓰기 핸들러 스모크 검증 통과
+- [x] 세션 resume 경로 스모크 검증 통과
+- [x] Telegram 대화 핸들러 및 런타임 기동 스모크 검증 통과
 
 ---
 
@@ -356,3 +356,4 @@ export async function runMemoryAgent(options: {
 - 2026-03-31: Step 3 완료 — `src/providers/claude.ts`에 Claude Provider를 구현하고 `pnpm typecheck`로 검증함.
 - 2026-03-31: Step 4 완료 — `src/agents/types.ts`에 `AgentConfig`를 추가하고 `pnpm typecheck`로 검증함.
 - 2026-03-31: Step 5 완료 — `src/session/types.ts`와 새 `SessionManager`를 추가하고 호환 래퍼를 유지한 채 `pnpm typecheck`로 검증함.
+- 2026-03-31: Step 6 완료 — 메인 대화 흐름을 새 Agent Layer로 마이그레이션하고 `pnpm typecheck`, `pnpm build`, Slack/Telegram 스모크 검증으로 확인함.

@@ -1,10 +1,16 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
-import type { ClaudeSessionManager } from '../session/manager.js';
+import { TranscriptWriter } from '../agents/memory/transcript.js';
+import type { AgentConfig } from '../agents/types.js';
+import {
+  getPersistedSessionId,
+  type SessionManager,
+} from '../session/manager.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 
 export type SlackAssistantOptions = {
-  sessionManager: ClaudeSessionManager;
+  sessionManager: SessionManager;
+  mainAgent: AgentConfig;
 };
 
 export const DEFAULT_SUGGESTED_PROMPTS = [
@@ -18,7 +24,7 @@ export function toThreadId(channelId: string, threadTs: string): string {
 }
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
-  const { sessionManager } = options;
+  const { sessionManager, mainAgent } = options;
 
   return {
     threadStarted: async ({ say, setSuggestedPrompts, saveThreadContext, event }) => {
@@ -72,17 +78,35 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         say,
         setStatus: (status) => setStatus(status),
       });
+      const transcript = new TranscriptWriter(threadId);
+      const resume = getPersistedSessionId(threadId);
+
+      if (resume) {
+        transcript.setSessionId(resume);
+      }
 
       await sender.setStatus('생각 중...');
 
       try {
-        const result = await sessionManager.handleText(threadId, text, async (msg) => {
-          await sender.sendReply(msg);
-          await sender.setStatus('생각 중...');
+        sessionManager.open(threadId, mainAgent, { resume });
+        transcript.appendUser(text);
+
+        const result = await sessionManager.send(threadId, text, {
+          onMessage: async (msg) => {
+            const sessionId = sessionManager.getSessionId(threadId);
+            if (sessionId) {
+              transcript.setSessionId(sessionId);
+            }
+            transcript.appendAssistant(msg);
+            await sender.sendReply(msg);
+            await sender.setStatus('생각 중...');
+          },
         });
 
         if (result.kind === 'busy') {
           await sender.sendReply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
+        } else if (result.kind === 'error') {
+          throw result.error;
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

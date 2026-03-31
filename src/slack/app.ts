@@ -1,11 +1,13 @@
 import { App } from '@slack/bolt';
-import type { ClaudeSessionManager } from '../session/manager.js';
+import type { AgentConfig } from '../agents/types.js';
+import type { SessionManager } from '../session/manager.js';
 import { createSlackAssistant } from './assistant.js';
 
 export type SlackAppOptions = {
   botToken: string;
   appToken: string;
-  sessionManager: ClaudeSessionManager;
+  sessionManager: SessionManager;
+  mainAgent: AgentConfig;
 };
 
 export async function startSlackApp(options: SlackAppOptions): Promise<App> {
@@ -17,6 +19,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
 
   const assistant = createSlackAssistant({
     sessionManager: options.sessionManager,
+    mainAgent: options.mainAgent,
   });
 
   app.assistant(assistant);

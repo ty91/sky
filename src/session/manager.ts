@@ -46,20 +46,20 @@ function loadPersistedSessions(): Record<string, string> {
   }
 }
 
-function persistSession(chatId: string, sessionId: string): void {
+export function persistSession(chatId: string, sessionId: string): void {
   const data = loadPersistedSessions();
   data[chatId] = sessionId;
   mkdirSync(CLAUDECLAW_DIR, { recursive: true });
   writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
 }
 
-function removePersistedSession(chatId: string): void {
+export function removePersistedSession(chatId: string): void {
   const data = loadPersistedSessions();
   delete data[chatId];
   writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
 }
 
-function getPersistedSessionId(chatId: string): string | undefined {
+export function getPersistedSessionId(chatId: string): string | undefined {
   return loadPersistedSessions()[chatId];
 }
 

@@ -1,5 +1,11 @@
+import { TranscriptWriter } from '../agents/memory/transcript.js';
+import type { AgentConfig } from '../agents/types.js';
 import type { Settings } from '../settings.js';
-import { ClaudeSessionManager } from '../session/manager.js';
+import {
+  getPersistedSessionId,
+  removePersistedSession,
+  type SessionManager,
+} from '../session/manager.js';
 import { formatDirectGetMeProbe, type DirectGetMeProbe } from '../telegram/getme-diagnostics.js';
 import { TelegramNetworkClient } from '../telegram/network-client.js';
 import { TelegramPollingSession } from '../telegram/polling-session.js';
@@ -22,7 +28,8 @@ type TelegramEnabledSettings = Settings & {
 
 export type BotRuntimeOptions = {
   settings: TelegramEnabledSettings;
-  sessionManager: ClaudeSessionManager;
+  sessionManager: SessionManager;
+  mainAgent: AgentConfig;
 };
 
 const TELEGRAM_PROBE_TIMEOUT_MS = 8000;
@@ -56,7 +63,8 @@ function toProbeSnapshot(probe: DirectGetMeProbe | Omit<DirectGetMeProbe, 'ok'>,
 }
 
 export class BotRuntime {
-  private readonly sessionManager: ClaudeSessionManager;
+  private readonly sessionManager: SessionManager;
+  private readonly mainAgent: AgentConfig;
   private readonly networkClient: TelegramNetworkClient;
   private readonly health: RuntimeHealth = createInitialHealth();
   private readonly stopController = new AbortController();
@@ -66,6 +74,7 @@ export class BotRuntime {
 
   constructor(private readonly options: BotRuntimeOptions) {
     this.sessionManager = options.sessionManager;
+    this.mainAgent = options.mainAgent;
     this.networkClient = new TelegramNetworkClient({
       botToken: options.settings.telegram.botToken,
       probeTimeoutMs: TELEGRAM_PROBE_TIMEOUT_MS,
@@ -207,7 +216,6 @@ export class BotRuntime {
   private createHandlers(): TelegramHandlers {
     return {
       onStartCommand: async (event) => {
-        this.sessionManager.prepareFreshSession(String(event.chatId));
         await event.reply(
           '안녕하세요. 이 봇은 채팅방별로 long-lived query 세션을 유지합니다.\n\n' +
             '- 같은 채팅방 메시지는 같은 query에 계속 들어갑니다\n' +
@@ -216,7 +224,9 @@ export class BotRuntime {
         );
       },
       onNewCommand: async (event) => {
-        this.sessionManager.prepareFreshSession(String(event.chatId));
+        const chatId = String(event.chatId);
+        await this.sessionManager.close(chatId);
+        removePersistedSession(chatId);
         await event.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
       },
       onTextMessage: async (event) => {
@@ -225,16 +235,35 @@ export class BotRuntime {
           return;
         }
 
+        const chatId = String(event.chatId);
         const typingLoop = event.createTypingLoop();
+        const transcript = new TranscriptWriter(chatId);
+        const resume = getPersistedSessionId(chatId);
+
+        if (resume) {
+          transcript.setSessionId(resume);
+        }
 
         try {
-          const result = await this.sessionManager.handleText(String(event.chatId), event.text);
+          this.sessionManager.open(chatId, this.mainAgent, { resume });
+          transcript.appendUser(event.text);
+
+          const result = await this.sessionManager.send(chatId, event.text);
           if (result.kind === 'busy') {
             await event.reply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
             return;
           }
+          if (result.kind === 'error') {
+            throw result.error;
+          }
 
-          const chunks = result.reply.match(/[\s\S]{1,3500}/g) ?? ['(빈 응답)'];
+          const sessionId = this.sessionManager.getSessionId(chatId);
+          if (sessionId) {
+            transcript.setSessionId(sessionId);
+          }
+          transcript.appendAssistant(result.text);
+
+          const chunks = result.text.match(/[\s\S]{1,3500}/g) ?? ['(빈 응답)'];
           for (const chunk of chunks) {
             await event.reply(chunk);
           }
@@ -365,7 +394,7 @@ export class BotRuntime {
       });
     }
 
-    this.sessionManager.closeAll();
+    await this.sessionManager.closeAll();
     await this.networkClient.close();
 
     if (this.health.state !== 'fatal') {

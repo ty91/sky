@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createMainAgentConfig } from './agents/main.js';
 import { BotRuntime } from './runtime/bot-runtime.js';
-import { ClaudeSessionManager } from './session/manager.js';
+import { createClaudeProviderFactory } from './providers/claude.js';
+import {
+  createSessionManager,
+  persistSession,
+} from './session/manager.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import { loadSettings } from './settings.js';
 
@@ -70,10 +75,15 @@ export async function startBot(): Promise<void> {
   console.log(`[startup] model: ${settings.claude.model}`);
   console.log(`[startup] workspace: ${settings.workspace}`);
 
-  const sessionManager = new ClaudeSessionManager({
-    model: settings.claude.model,
-    workspace: settings.workspace,
-    systemPrompt,
+  const mainAgent = createMainAgentConfig(systemPrompt);
+  mainAgent.model = settings.claude.model;
+
+  const sessionManager = createSessionManager({
+    providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
+    defaultCwd: settings.workspace,
+    onSessionCreated: (key, sessionId) => {
+      persistSession(key, sessionId);
+    },
   });
 
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
@@ -85,6 +95,7 @@ export async function startBot(): Promise<void> {
         botToken: settings.slack.botToken,
         appToken: settings.slack.appToken,
         sessionManager,
+        mainAgent,
       });
     } else {
       console.log('[startup] no slack config, skipping slack app');
@@ -98,6 +109,7 @@ export async function startBot(): Promise<void> {
           telegram: settings.telegram,
         },
         sessionManager,
+        mainAgent,
       });
 
       await telegramRuntime.start();
@@ -107,7 +119,7 @@ export async function startBot(): Promise<void> {
     console.log('[startup] no telegram config, running slack-only mode');
     await waitForShutdownSignal();
   } finally {
-    sessionManager.closeAll();
+    await sessionManager.closeAll();
     if (slackApp) {
       await stopSlackApp(slackApp);
     }
