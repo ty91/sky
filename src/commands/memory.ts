@@ -7,9 +7,7 @@ import { createSessionManager } from '../session/manager.js';
 const MEMORY_LOG_CHANNEL = 'C0APGL1DKDH';
 
 async function postToSlack(botToken: string, result: MemoryAgentResult): Promise<void> {
-  const text = result.skipped
-    ? '📭 No new transcripts to process.'
-    : `📝 Processed *${result.processed}* transcript(s).\n\n${result.summary}`;
+  const text = `📝 Processed *${result.processed}* transcript(s).\n\n${result.summary}`;
 
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
@@ -48,7 +46,7 @@ export const memoryCommand = new Command('memory')
       console.log(`[memory] summary: ${result.summary}`);
     }
 
-    if (settings.slack) {
+    if (settings.slack && !result.skipped) {
       try {
         await postToSlack(settings.slack.botToken, result);
         console.log('[memory] slack notification sent');
