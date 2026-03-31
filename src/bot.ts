@@ -75,8 +75,7 @@ export async function startBot(): Promise<void> {
   console.log(`[startup] model: ${settings.claude.model}`);
   console.log(`[startup] workspace: ${settings.workspace}`);
 
-  const mainAgent = createMainAgentConfig(systemPrompt);
-  mainAgent.model = settings.claude.model;
+  const mainAgent = createMainAgentConfig(systemPrompt, settings.claude.model);
 
   const sessionManager = createSessionManager({
     providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),

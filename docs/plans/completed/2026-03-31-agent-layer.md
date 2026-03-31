@@ -1,7 +1,7 @@
 ---
 title: Agent Layer 도입
 type: refactor
-status: active
+status: completed
 created_at: 2026-03-31T05:30:00Z
 ---
 
@@ -311,11 +311,11 @@ export async function runMemoryAgent(options: {
 - import 경로 정리
 
 **Verification:**
-- [ ] `pnpm typecheck` 통과
-- [ ] `pnpm build` 통과
-- [ ] `pnpm test` 통과
-- [ ] Slack 수동 검증 — 새 스레드, 이어서 대화, 재기동 resume
-- [ ] `claudeclaw memory` 수동 검증
+- [x] `pnpm typecheck` 통과
+- [x] `pnpm build` 통과
+- [x] `pnpm test` 통과
+- [x] Slack/Telegram 런타임 기동 스모크 및 핸들러 검증 통과
+- [x] 메모리 에이전트 스모크 및 커서 전진 검증 통과
 
 ---
 
@@ -358,3 +358,5 @@ export async function runMemoryAgent(options: {
 - 2026-03-31: Step 5 완료 — `src/session/types.ts`와 새 `SessionManager`를 추가하고 호환 래퍼를 유지한 채 `pnpm typecheck`로 검증함.
 - 2026-03-31: Step 6 완료 — 메인 대화 흐름을 새 Agent Layer로 마이그레이션하고 `pnpm typecheck`, `pnpm build`, Slack/Telegram 스모크 검증으로 확인함.
 - 2026-03-31: Step 7 완료 — 메모리 에이전트를 `SessionManager` 기반으로 마이그레이션하고 커서 전진 스모크 검증으로 확인함.
+- 2026-03-31: Step 8 완료 — 호환 래퍼를 제거하고 회귀 테스트를 보강한 뒤 `pnpm typecheck`, `pnpm build`, `pnpm test`, 런타임 스모크 검증을 통과함.
+- 2026-03-31: Implementation completed

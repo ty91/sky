@@ -15,11 +15,11 @@ const MAIN_AGENT_TOOLS = [
   'WebSearch',
 ] as const;
 
-export function createMainAgentConfig(systemPrompt: string): AgentConfig {
+export function createMainAgentConfig(systemPrompt: string, model = 'sonnet'): AgentConfig {
   return {
     name: 'main',
     systemPrompt,
-    model: 'sonnet',
+    model,
     tools: [...MAIN_AGENT_TOOLS],
   };
 }
