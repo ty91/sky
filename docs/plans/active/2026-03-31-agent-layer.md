@@ -156,7 +156,7 @@ export function createClaudeProviderFactory(defaults: {
 - `src/agents/memory/agent.ts` — one-shot 패턴
 
 **Verification:**
-- [ ] `pnpm typecheck` 통과
+- [x] `pnpm typecheck` 통과
 
 ---
 
@@ -353,3 +353,4 @@ export async function runMemoryAgent(options: {
 
 - 2026-03-31: Step 1 완료 — `Pushable`을 `src/session/pushable.ts`로 분리하고 `pnpm typecheck`로 검증함.
 - 2026-03-31: Step 2 완료 — `src/providers/types.ts`에 Provider 레이어 타입을 추가하고 `pnpm typecheck`로 검증함.
+- 2026-03-31: Step 3 완료 — `src/providers/claude.ts`에 Claude Provider를 구현하고 `pnpm typecheck`로 검증함.
