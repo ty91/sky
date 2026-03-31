@@ -1,26 +1,16 @@
-import { randomUUID } from 'node:crypto';
-import {
-  query,
-  type Options,
-  type PermissionMode,
-  type SDKMessage,
-  type SDKSystemMessage,
-  type SDKUserMessage,
-} from '@anthropic-ai/claude-agent-sdk';
+import type { AgentConfig } from '../types.js';
 import { getUnreadTranscripts, advanceCursors, type UnreadTranscript } from './cursors.js';
 import { MEMORY_AGENT_SYSTEM_PROMPT } from './prompt.js';
+import type { SessionManager } from '../../session/manager.js';
 
 const MEMORY_AGENT_MODEL = 'sonnet';
 
 const MEMORY_AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 
 type MemoryAgentOptions = {
+  sessionManager: SessionManager;
   workspace: string;
 };
-
-function isSystemInitMessage(message: SDKMessage): message is SDKSystemMessage {
-  return message.type === 'system' && (message as SDKSystemMessage).subtype === 'init';
-}
 
 function buildUserPrompt(transcripts: UnreadTranscript[]): string {
   const parts = ['# New Conversation Transcripts\n'];
@@ -35,33 +25,21 @@ function buildUserPrompt(transcripts: UnreadTranscript[]): string {
   return parts.join('\n');
 }
 
-function buildOptions(workspace: string): Options {
-  return {
-    model: MEMORY_AGENT_MODEL,
-    cwd: workspace,
-    systemPrompt: MEMORY_AGENT_SYSTEM_PROMPT,
-    env: {
-      ...process.env,
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'claudeclaw-memory/0.1.0',
-    },
-    tools: [...MEMORY_AGENT_TOOLS],
-    permissionMode: 'bypassPermissions' as PermissionMode,
-    settingSources: [],
-  };
-}
-
-/**
- * Single async iterable that yields one user message then ends.
- */
-async function* singleMessage(message: SDKUserMessage): AsyncIterable<SDKUserMessage> {
-  yield message;
-}
-
 export type MemoryAgentResult = {
   processed: number;
   skipped: boolean;
   summary: string;
 };
+
+function createMemoryAgentConfig(workspace: string): AgentConfig {
+  return {
+    name: 'memory',
+    systemPrompt: MEMORY_AGENT_SYSTEM_PROMPT,
+    model: MEMORY_AGENT_MODEL,
+    tools: [...MEMORY_AGENT_TOOLS],
+    cwd: workspace,
+  };
+}
 
 /**
  * Run the Memory Agent once: read unprocessed transcripts, invoke Claude to
@@ -80,57 +58,29 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
   }
 
   const userText = buildUserPrompt(transcripts);
-  const promptUuid = randomUUID();
-
-  const userMessage: SDKUserMessage = {
-    type: 'user',
-    message: {
-      role: 'user',
-      content: [{ type: 'text', text: userText }],
-    },
-    session_id: promptUuid,
-    parent_tool_use_id: null,
-    uuid: promptUuid,
-  };
-
-  const q = query({
-    prompt: singleMessage(userMessage),
-    options: buildOptions(options.workspace),
-  });
-
+  const key = 'memory:run';
+  const memoryAgent = createMemoryAgentConfig(options.workspace);
   let finalText = '';
 
-  while (true) {
-    const { value: message, done } = await q.next();
+  options.sessionManager.open(key, memoryAgent);
 
-    if (done || !message) break;
-
-    if (isSystemInitMessage(message)) {
-      console.log(`[memory-agent] session: ${message.session_id}`);
-      continue;
+  try {
+    const result = await options.sessionManager.send(key, userText);
+    if (result.kind === 'busy') {
+      throw new Error('Memory agent session is unexpectedly busy');
+    }
+    if (result.kind === 'error') {
+      throw new Error(`Memory agent failed: ${result.error.message}`);
     }
 
-    if (message.type === 'assistant') {
-      const blocks = message.message.content ?? [];
-      for (const block of blocks) {
-        if (block.type === 'text') {
-          finalText = block.text;
-        }
-      }
-      continue;
-    }
+    finalText = result.text;
+    console.log('[memory-agent] completed successfully');
 
-    if (message.type === 'result') {
-      if (message.subtype === 'success') {
-        console.log('[memory-agent] completed successfully');
-        break;
-      }
-      throw new Error(`Memory agent failed: ${message.errors.join('; ')}`);
-    }
+    advanceCursors(transcripts);
+    console.log(`[memory-agent] cursors advanced for ${transcripts.length} transcript(s)`);
+  } finally {
+    await options.sessionManager.close(key);
   }
-
-  advanceCursors(transcripts);
-  console.log(`[memory-agent] cursors advanced for ${transcripts.length} transcript(s)`);
 
   return {
     processed: transcripts.length,

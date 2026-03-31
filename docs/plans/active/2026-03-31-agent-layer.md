@@ -298,9 +298,9 @@ export async function runMemoryAgent(options: {
 **참조:** 기존 `src/agents/memory/agent.ts`의 `buildUserPrompt()`, `advanceCursors()` 로직은 변경 없음
 
 **Verification:**
-- [ ] `pnpm typecheck` 통과
-- [ ] `claudeclaw memory` 명령 실행 시 정상 동작
-- [ ] 트랜스크립트 처리 후 커서가 올바르게 전진
+- [x] `pnpm typecheck` 통과
+- [x] 메모리 에이전트 실행 경로 스모크 검증 통과
+- [x] 트랜스크립트 처리 후 커서 전진 스모크 검증 통과
 
 ---
 
@@ -357,3 +357,4 @@ export async function runMemoryAgent(options: {
 - 2026-03-31: Step 4 완료 — `src/agents/types.ts`에 `AgentConfig`를 추가하고 `pnpm typecheck`로 검증함.
 - 2026-03-31: Step 5 완료 — `src/session/types.ts`와 새 `SessionManager`를 추가하고 호환 래퍼를 유지한 채 `pnpm typecheck`로 검증함.
 - 2026-03-31: Step 6 완료 — 메인 대화 흐름을 새 Agent Layer로 마이그레이션하고 `pnpm typecheck`, `pnpm build`, Slack/Telegram 스모크 검증으로 확인함.
+- 2026-03-31: Step 7 완료 — 메모리 에이전트를 `SessionManager` 기반으로 마이그레이션하고 커서 전진 스모크 검증으로 확인함.

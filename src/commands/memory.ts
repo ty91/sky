@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
 import { runMemoryAgent, type MemoryAgentResult } from '../agents/memory/agent.js';
+import { createClaudeProviderFactory } from '../providers/claude.js';
+import { createSessionManager } from '../session/manager.js';
 
 const MEMORY_LOG_CHANNEL = 'C0APGL1DKDH';
 
@@ -29,8 +31,15 @@ export const memoryCommand = new Command('memory')
   .action(async () => {
     const settings = loadSettings({ silent: true });
     console.log('[memory] starting memory agent...');
+    const sessionManager = createSessionManager({
+      providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
+      defaultCwd: settings.workspace,
+    });
 
-    const result = await runMemoryAgent({ workspace: settings.workspace });
+    const result = await runMemoryAgent({
+      sessionManager,
+      workspace: settings.workspace,
+    });
 
     if (result.skipped) {
       console.log('[memory] no new transcripts to process');
