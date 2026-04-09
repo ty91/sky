@@ -8,6 +8,39 @@ import {
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 
+// ── Reaction helpers ──
+
+type ReactionsClient = {
+  reactions: {
+    add(params: { channel: string; name: string; timestamp: string }): Promise<unknown>;
+    remove(params: { channel: string; name: string; timestamp: string }): Promise<unknown>;
+  };
+};
+
+async function addReaction(client: ReactionsClient, channel: string, timestamp: string, name: string): Promise<void> {
+  try {
+    await client.reactions.add({ channel, name, timestamp });
+  } catch (error: unknown) {
+    // already_reacted is harmless — ignore it, log everything else
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes('already_reacted')) {
+      console.error(`[slack] reactions.add(${name}) failed: ${msg}`);
+    }
+  }
+}
+
+async function removeReaction(client: ReactionsClient, channel: string, timestamp: string, name: string): Promise<void> {
+  try {
+    await client.reactions.remove({ channel, name, timestamp });
+  } catch (error: unknown) {
+    // no_reaction means it was already removed — harmless
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes('no_reaction')) {
+      console.error(`[slack] reactions.remove(${name}) failed: ${msg}`);
+    }
+  }
+}
+
 export type SlackAssistantOptions = {
   sessionManager: SessionManager;
   mainAgent: AgentConfig;
@@ -74,6 +107,8 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         return;
       }
 
+      const messageTs = message.ts;
+
       const sender = new SlackSender({
         say,
         setStatus: (status) => setStatus(status),
@@ -85,6 +120,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         transcript.setSessionId(resume);
       }
 
+      await addReaction(client, channelId, messageTs, 'thought_balloon');
       await sender.setStatus('생각 중...');
 
       try {
@@ -104,15 +140,18 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         });
 
         if (result.kind === 'interrupted') {
-          // 조용히 무시 — 새 메시지가 이미 처리 중
+          await addReaction(client, channelId, messageTs, 'hand');
         } else if (result.kind === 'error') {
           throw result.error;
+        } else {
+          await addReaction(client, channelId, messageTs, 'white_check_mark');
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`[slack] error handling message in ${threadId}: ${errorMessage}`);
         await sender.sendReply(`오류가 났습니다: ${errorMessage}`);
       } finally {
+        await removeReaction(client, channelId, messageTs, 'thought_balloon');
         await sender.setStatus('');
       }
     },
