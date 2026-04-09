@@ -4,6 +4,7 @@ import type { AgentConfig } from '../agents/types.js';
 import type { CollectOptions } from '../providers/types.js';
 import { CLAUDECLAW_DIR } from '../settings.js';
 import type {
+  Deferred,
   OpenSessionOptions,
   SendResult,
   SessionEntry,
@@ -56,8 +57,68 @@ function createProviderConfig(agent: AgentConfig, options: SessionManagerOptions
   };
 }
 
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 export function createSessionManager(options: SessionManagerOptions): SessionManager {
   const sessions = new Map<string, SessionEntry>();
+
+  async function runWorker(key: string, entry: SessionEntry): Promise<void> {
+    entry.workerRunning = true;
+
+    while (entry.pending && !entry.closed) {
+      const req = entry.pending;
+      entry.pending = undefined;
+
+      const turnId = ++entry.turnCounter;
+      entry.activeTurnId = turnId;
+      entry.activeTurnInterrupted = false;
+
+      try {
+        await entry.provider.send(req.text);
+        const result = await entry.provider.collect({
+          onMessage: req.collectOptions?.onMessage
+            ? async (msg) => {
+                // turnId 가드: stale turn의 콜백 차단
+                if (entry.activeTurnId === turnId && !entry.activeTurnInterrupted) {
+                  await req.collectOptions!.onMessage!(msg);
+                }
+              }
+            : undefined,
+        });
+
+        if (entry.activeTurnInterrupted || entry.activeTurnId !== turnId || entry.closed) {
+          req.deferred.resolve({ kind: 'interrupted' });
+        } else {
+          if (result.sessionId && result.sessionId !== entry.sessionId) {
+            entry.sessionId = result.sessionId;
+            // stale persist 방지: 아직 맵에 있는지 확인
+            if (sessions.get(key) === entry) {
+              options.onSessionCreated?.(key, result.sessionId);
+            }
+          }
+          req.deferred.resolve({ kind: 'ok', text: result.text });
+        }
+      } catch (error) {
+        if (entry.activeTurnInterrupted || entry.activeTurnId !== turnId || entry.closed) {
+          req.deferred.resolve({ kind: 'interrupted' });
+        } else {
+          req.deferred.resolve({ kind: 'error', error: toError(error) });
+        }
+      } finally {
+        if (entry.activeTurnId === turnId) {
+          entry.activeTurnId = undefined;
+        }
+      }
+    }
+
+    entry.workerRunning = false;
+  }
 
   return {
     open(key: string, agent: AgentConfig, sessionOptions?: OpenSessionOptions): void {
@@ -66,9 +127,15 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       }
 
       sessions.set(key, {
-        provider: options.providerFactory.create(createProviderConfig(agent, options, sessionOptions?.resume)),
-        busy: false,
+        provider: options.providerFactory.create(
+          createProviderConfig(agent, options, sessionOptions?.resume),
+        ),
+        agent,
         sessionId: sessionOptions?.resume,
+        turnCounter: 0,
+        activeTurnInterrupted: false,
+        workerRunning: false,
+        closed: false,
       });
     },
 
@@ -78,25 +145,27 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         return { kind: 'error', error: new Error(`Session not open for key: ${key}`) };
       }
 
-      if (entry.busy) {
-        return { kind: 'busy' };
+      const deferred = createDeferred<SendResult>();
+
+      // 이전 pending이 있으면 즉시 interrupted로 resolve (latest-wins)
+      if (entry.pending) {
+        entry.pending.deferred.resolve({ kind: 'interrupted' });
       }
 
-      entry.busy = true;
+      entry.pending = { text, collectOptions, deferred };
 
-      try {
-        await entry.provider.send(text);
-        const result = await entry.provider.collect(collectOptions);
-        if (result.sessionId && result.sessionId !== entry.sessionId) {
-          entry.sessionId = result.sessionId;
-          options.onSessionCreated?.(key, result.sessionId);
-        }
-        return { kind: 'ok', text: result.text };
-      } catch (error) {
-        return { kind: 'error', error: toError(error) };
-      } finally {
-        entry.busy = false;
+      // active turn이 있으면 interrupt
+      if (entry.activeTurnId !== undefined) {
+        entry.activeTurnInterrupted = true;
+        await entry.provider.interrupt();
       }
+
+      // worker가 안 돌고 있으면 시작
+      if (!entry.workerRunning) {
+        void runWorker(key, entry);
+      }
+
+      return deferred.promise;
     },
 
     getSessionId(key: string): string | undefined {
@@ -109,7 +178,25 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         return;
       }
 
+      entry.closed = true;
       sessions.delete(key);
+
+      // pending이 있으면 interrupted로 resolve
+      if (entry.pending) {
+        entry.pending.deferred.resolve({ kind: 'interrupted' });
+        entry.pending = undefined;
+      }
+
+      // active turn interrupt
+      if (entry.activeTurnId !== undefined) {
+        entry.activeTurnInterrupted = true;
+        try {
+          await entry.provider.interrupt();
+        } catch {
+          // interrupt 실패해도 close는 진행
+        }
+      }
+
       await entry.provider.close();
     },
 

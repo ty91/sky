@@ -103,8 +103,8 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
           },
         });
 
-        if (result.kind === 'busy') {
-          await sender.sendReply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
+        if (result.kind === 'interrupted') {
+          // 조용히 무시 — 새 메시지가 이미 처리 중
         } else if (result.kind === 'error') {
           throw result.error;
         }

@@ -1,15 +1,32 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { CollectOptions, ProviderFactory, ProviderSession } from '../providers/types.js';
 
+export type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
+export type PendingRequest = {
+  text: string;
+  collectOptions?: CollectOptions;
+  deferred: Deferred<SendResult>;
+};
+
 export type SessionEntry = {
   provider: ProviderSession;
-  busy: boolean;
+  agent: AgentConfig;
   sessionId?: string;
+  turnCounter: number;
+  activeTurnId?: number;
+  activeTurnInterrupted: boolean;
+  pending?: PendingRequest;
+  workerRunning: boolean;
+  closed: boolean;
 };
 
 export type SendResult =
   | { kind: 'ok'; text: string }
-  | { kind: 'busy' }
+  | { kind: 'interrupted' }
   | { kind: 'error'; error: Error };
 
 export type SessionManagerOptions = {

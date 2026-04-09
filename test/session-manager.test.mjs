@@ -2,6 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSessionManager } from '../dist/session/manager.js';
 
+const AGENT = {
+  name: 'main',
+  systemPrompt: 'system',
+  model: 'opus',
+  tools: ['Read'],
+};
+
+function createMockProvider(overrides = {}) {
+  return {
+    send: async () => {},
+    collect: async () => ({ text: 'reply', sessionId: 'session-1' }),
+    interrupt: async () => {},
+    close: async () => {},
+    ...overrides,
+  };
+}
+
 test('session manager creates sessions and persists new session ids', async () => {
   const created = [];
   const sendCalls = [];
@@ -12,11 +29,10 @@ test('session manager creates sessions and persists new session ids', async () =
       created.push({ key, sessionId });
     },
     providerFactory: {
-      create: (config) => ({
+      create: (config) => createMockProvider({
         send: async (text) => {
           sendCalls.push({ text, config });
         },
-        collect: async () => ({ text: 'reply', sessionId: 'session-1' }),
         close: async () => {
           closeCalls.push(config.systemPrompt);
         },
@@ -24,12 +40,7 @@ test('session manager creates sessions and persists new session ids', async () =
     },
   });
 
-  manager.open('thread-1', {
-    name: 'main',
-    systemPrompt: 'system',
-    model: 'opus',
-    tools: ['Read'],
-  });
+  manager.open('thread-1', AGENT);
 
   const result = await manager.send('thread-1', 'hello');
 
@@ -43,31 +54,187 @@ test('session manager creates sessions and persists new session ids', async () =
   assert.deepEqual(closeCalls, ['system']);
 });
 
-test('session manager reports busy and missing sessions', async () => {
+test('session manager returns error for missing sessions', async () => {
   const manager = createSessionManager({
     defaultCwd: '/tmp/workspace',
     providerFactory: {
-      create: () => ({
-        send: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        },
-        collect: async () => ({ text: 'reply' }),
-        close: async () => {},
-      }),
+      create: () => createMockProvider(),
     },
   });
 
   const missing = await manager.send('missing', 'hello');
   assert.equal(missing.kind, 'error');
+});
 
-  manager.open('thread-1', {
-    name: 'main',
-    systemPrompt: 'system',
+test('session manager interrupts previous request on new message', async () => {
+  let collectResolve;
+  let interruptCalled = false;
+  let collectCallCount = 0;
+
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    providerFactory: {
+      create: () => createMockProvider({
+        collect: async () => {
+          collectCallCount++;
+          if (collectCallCount === 1) {
+            // 첫 번째 collect는 interrupt될 때까지 대기
+            return new Promise((resolve) => {
+              collectResolve = resolve;
+            });
+          }
+          // 두 번째 collect는 즉시 응답
+          return { text: 'second reply' };
+        },
+        interrupt: async () => {
+          interruptCalled = true;
+          // interrupt 시 pending collect를 resolve
+          collectResolve?.({ text: '(interrupted)' });
+        },
+      }),
+    },
   });
 
-  const first = manager.send('thread-1', 'hello');
-  const second = await manager.send('thread-1', 'again');
+  manager.open('t1', AGENT);
 
-  assert.deepEqual(second, { kind: 'busy' });
-  await first;
+  const first = manager.send('t1', 'hello');
+
+  // 첫 번째 collect가 블록된 상태에서 microtask가 돌 수 있게 양보
+  await new Promise((r) => setTimeout(r, 10));
+
+  const second = manager.send('t1', 'world');
+
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+
+  assert.equal(firstResult.kind, 'interrupted');
+  assert.equal(interruptCalled, true);
+  assert.equal(secondResult.kind, 'ok');
+  assert.equal(secondResult.text, 'second reply');
+});
+
+test('rapid messages resolve intermediate ones as interrupted immediately', async () => {
+  let collectResolve;
+  let collectCallCount = 0;
+
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    providerFactory: {
+      create: () => createMockProvider({
+        collect: async () => {
+          collectCallCount++;
+          if (collectCallCount === 1) {
+            return new Promise((resolve) => {
+              collectResolve = resolve;
+            });
+          }
+          return { text: 'final reply' };
+        },
+        interrupt: async () => {
+          collectResolve?.({ text: '(interrupted)' });
+        },
+      }),
+    },
+  });
+
+  manager.open('t1', AGENT);
+
+  const first = manager.send('t1', 'A');
+  await new Promise((r) => setTimeout(r, 10));
+
+  // B와 C가 연속 도착 — B는 pending에 들어갔다가 C에 의해 즉시 교체
+  const second = manager.send('t1', 'B');
+  const third = manager.send('t1', 'C');
+
+  const [firstResult, secondResult, thirdResult] = await Promise.all([first, second, third]);
+
+  assert.equal(firstResult.kind, 'interrupted');
+  assert.equal(secondResult.kind, 'interrupted');  // B는 pending 교체로 즉시 interrupted
+  assert.equal(thirdResult.kind, 'ok');
+  assert.equal(thirdResult.text, 'final reply');
+});
+
+test('onMessage callback is guarded by turnId', async () => {
+  let collectResolve;
+  let collectCallCount = 0;
+  const messagesReceived = [];
+
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    providerFactory: {
+      create: () => createMockProvider({
+        collect: async (options) => {
+          collectCallCount++;
+          if (collectCallCount === 1) {
+            // 첫 번째 turn: onMessage 한 번 호출 후 interrupt 대기
+            if (options?.onMessage) {
+              await options.onMessage('partial from turn 1');
+            }
+            return new Promise((resolve) => {
+              collectResolve = resolve;
+            });
+          }
+          // 두 번째 turn
+          if (options?.onMessage) {
+            await options.onMessage('from turn 2');
+          }
+          return { text: 'done' };
+        },
+        interrupt: async () => {
+          collectResolve?.({ text: '(interrupted)' });
+        },
+      }),
+    },
+  });
+
+  manager.open('t1', AGENT);
+
+  const first = manager.send('t1', 'hello', {
+    onMessage: async (msg) => {
+      messagesReceived.push({ turn: 1, msg });
+    },
+  });
+
+  await new Promise((r) => setTimeout(r, 10));
+
+  const second = manager.send('t1', 'world', {
+    onMessage: async (msg) => {
+      messagesReceived.push({ turn: 2, msg });
+    },
+  });
+
+  await Promise.all([first, second]);
+
+  // turn 1의 onMessage는 interrupt 전에 호출됨 (이건 이미 나간 것이므로 ok)
+  // turn 2의 onMessage는 정상 호출
+  assert.ok(messagesReceived.some((m) => m.turn === 2 && m.msg === 'from turn 2'));
+});
+
+test('close resolves pending requests as interrupted', async () => {
+  let collectResolve;
+
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    providerFactory: {
+      create: () => createMockProvider({
+        collect: async () => {
+          return new Promise((resolve) => {
+            collectResolve = resolve;
+          });
+        },
+        interrupt: async () => {
+          collectResolve?.({ text: '(interrupted)' });
+        },
+      }),
+    },
+  });
+
+  manager.open('t1', AGENT);
+
+  const sendPromise = manager.send('t1', 'hello');
+  await new Promise((r) => setTimeout(r, 10));
+
+  await manager.close('t1');
+
+  const result = await sendPromise;
+  assert.equal(result.kind, 'interrupted');
 });

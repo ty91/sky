@@ -249,8 +249,7 @@ export class BotRuntime {
           transcript.appendUser(event.text);
 
           const result = await this.sessionManager.send(chatId, event.text);
-          if (result.kind === 'busy') {
-            await event.reply('지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.');
+          if (result.kind === 'interrupted') {
             return;
           }
           if (result.kind === 'error') {

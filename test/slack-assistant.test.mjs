@@ -111,7 +111,7 @@ test('userMessage rejects empty text', async () => {
   assert.deepEqual(replies, ['빈 메시지는 처리할 수 없습니다.']);
 });
 
-test('userMessage opens a session and reports busy sessions', async () => {
+test('userMessage opens a session and silently ignores interrupted result', async () => {
   const statuses = [];
   const openCalls = [];
   const config = createSlackAssistantConfig({
@@ -120,7 +120,7 @@ test('userMessage opens a session and reports busy sessions', async () => {
       open: (key, agent, options) => {
         openCalls.push({ key, agent, options });
       },
-      send: async () => ({ kind: 'busy' }),
+      send: async () => ({ kind: 'interrupted' }),
     }),
   });
 
@@ -140,7 +140,7 @@ test('userMessage opens a session and reports busy sessions', async () => {
   assert.equal(openCalls[0].key, 'C999:1888.55');
   assert.equal(openCalls[0].agent.name, 'main');
   assert.deepEqual(statuses, ['생각 중...', '']);
-  assert.deepEqual(replies, ['지금 이전 요청을 처리 중입니다. 잠시 후 다시 보내주세요.']);
+  assert.deepEqual(replies, []);  // interrupted일 때는 아무 응답도 보내지 않음
 });
 
 test('userMessage sends each assistant message individually via onMessage callback', async () => {

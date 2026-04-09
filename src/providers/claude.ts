@@ -178,6 +178,10 @@ function createClaudeSession(
     async collect(options?: CollectOptions): Promise<ProviderResult> {
       return await collectResult(state, options);
     },
+    async interrupt(): Promise<void> {
+      state.pendingPromptUuid = undefined;
+      await state.runner.interrupt();
+    },
     async close(): Promise<void> {
       state.input.end();
       state.runner.close();

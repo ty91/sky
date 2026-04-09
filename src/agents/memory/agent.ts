@@ -3,7 +3,7 @@ import { getUnreadTranscripts, advanceCursors, type UnreadTranscript } from './c
 import { MEMORY_AGENT_SYSTEM_PROMPT } from './prompt.js';
 import type { SessionManager } from '../../session/manager.js';
 
-const MEMORY_AGENT_MODEL = 'sonnet';
+const MEMORY_AGENT_MODEL = 'claude-sonnet-4-6';
 
 const MEMORY_AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 
@@ -66,8 +66,8 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
 
   try {
     const result = await options.sessionManager.send(key, userText);
-    if (result.kind === 'busy') {
-      throw new Error('Memory agent session is unexpectedly busy');
+    if (result.kind === 'interrupted') {
+      throw new Error('Memory agent session was unexpectedly interrupted');
     }
     if (result.kind === 'error') {
       throw new Error(`Memory agent failed: ${result.error.message}`);

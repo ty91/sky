@@ -19,6 +19,7 @@ export type CollectOptions = {
 export type ProviderSession = {
   send(text: string): Promise<void>;
   collect(options?: CollectOptions): Promise<ProviderResult>;
+  interrupt(): Promise<void>;
   close(): Promise<void>;
 };
 
