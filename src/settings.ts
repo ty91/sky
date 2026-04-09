@@ -21,9 +21,9 @@ const settingsSchema = z
     slack: slackSettingsSchema.optional(),
     claude: z
       .object({
-        model: z.string().default('sonnet'),
+        model: z.string().default('claude-opus-4-6'),
       })
-      .default({ model: 'sonnet' }),
+      .default({ model: 'claude-opus-4-6' }),
     workspace: z.string().default(path.join(os.homedir(), '.claudeclaw', 'workspace')),
   })
   .refine((value) => value.telegram || value.slack, {
