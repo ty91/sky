@@ -20,7 +20,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.81",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.114",
     "@grammyjs/runner": "^2.0.3",
     "@slack/bolt": "^4.6.0",
     "commander": "^14.0.3",

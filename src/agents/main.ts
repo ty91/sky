@@ -15,7 +15,7 @@ const MAIN_AGENT_TOOLS = [
   'WebSearch',
 ] as const;
 
-export function createMainAgentConfig(systemPrompt: string, model = 'claude-opus-4-6'): AgentConfig {
+export function createMainAgentConfig(systemPrompt: string, model = 'claude-opus-4-7'): AgentConfig {
   return {
     name: 'main',
     systemPrompt,
