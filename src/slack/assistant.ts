@@ -19,7 +19,9 @@ type ReactionsClient = {
 
 async function addReaction(client: ReactionsClient, channel: string, timestamp: string, name: string): Promise<void> {
   try {
-    await client.reactions.add({ channel, name, timestamp });
+    console.log(`[slack] reactions.add(${name}) channel=${channel} ts=${timestamp}`);
+    const result = await client.reactions.add({ channel, name, timestamp });
+    console.log(`[slack] reactions.add(${name}) result: ${JSON.stringify(result)}`);
   } catch (error: unknown) {
     // already_reacted is harmless — ignore it, log everything else
     const msg = error instanceof Error ? error.message : String(error);
