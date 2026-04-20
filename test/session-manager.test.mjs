@@ -19,15 +19,37 @@ function createMockProvider(overrides = {}) {
   };
 }
 
-test('session manager creates sessions and persists new session ids', async () => {
-  const created = [];
+function createMockStore(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  const calls = { get: [], put: [], remove: [] };
+  return {
+    store: {
+      get: (key) => {
+        calls.get.push(key);
+        return data.get(key);
+      },
+      put: (key, session) => {
+        calls.put.push({ key, session });
+        data.set(key, session);
+      },
+      remove: (key) => {
+        calls.remove.push(key);
+        data.delete(key);
+      },
+      close: () => {},
+    },
+    calls,
+    data,
+  };
+}
+
+test('session manager creates sessions and persists new session ids via store', async () => {
+  const { store, calls } = createMockStore();
   const sendCalls = [];
   const closeCalls = [];
   const manager = createSessionManager({
     defaultCwd: '/tmp/workspace',
-    onSessionCreated: (key, sessionId) => {
-      created.push({ key, sessionId });
-    },
+    store,
     providerFactory: {
       create: (config) => createMockProvider({
         send: async (text) => {
@@ -47,11 +69,76 @@ test('session manager creates sessions and persists new session ids', async () =
   assert.deepEqual(result, { kind: 'ok', text: 'reply' });
   assert.equal(sendCalls.length, 1);
   assert.equal(sendCalls[0].config.cwd, '/tmp/workspace');
-  assert.deepEqual(created, [{ key: 'thread-1', sessionId: 'session-1' }]);
+  assert.deepEqual(calls.put, [
+    { key: 'thread-1', session: { sessionId: 'session-1', systemPrompt: '' } },
+  ]);
   assert.equal(manager.getSessionId('thread-1'), 'session-1');
 
   await manager.close('thread-1');
   assert.deepEqual(closeCalls, ['system']);
+  // close는 persist를 건드리지 않음
+  assert.deepEqual(calls.remove, []);
+});
+
+test('session manager auto-resumes from store on open', async () => {
+  const { store, calls } = createMockStore({
+    'thread-1': { sessionId: 'resumed-session', systemPrompt: '' },
+  });
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider();
+      },
+    },
+  });
+
+  manager.open('thread-1', AGENT);
+
+  assert.equal(createdWith.resume, 'resumed-session');
+  assert.equal(manager.getSessionId('thread-1'), 'resumed-session');
+  assert.deepEqual(calls.get, ['thread-1']);
+});
+
+test('session manager works without a store (ephemeral mode)', async () => {
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider();
+      },
+    },
+  });
+
+  manager.open('memory:run', AGENT);
+  assert.equal(createdWith.resume, undefined);
+
+  const result = await manager.send('memory:run', 'hi');
+  assert.equal(result.kind, 'ok');
+});
+
+test('purge removes persisted record and closes session', async () => {
+  const { store, calls } = createMockStore({
+    'thread-1': { sessionId: 'old', systemPrompt: '' },
+  });
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: () => createMockProvider(),
+    },
+  });
+
+  manager.open('thread-1', AGENT);
+  await manager.purge('thread-1');
+
+  assert.deepEqual(calls.remove, ['thread-1']);
+  assert.equal(manager.getSessionId('thread-1'), undefined);
 });
 
 test('session manager returns error for missing sessions', async () => {

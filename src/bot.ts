@@ -3,10 +3,8 @@ import path from 'node:path';
 import { createMainAgentConfig } from './agents/main.js';
 import { BotRuntime } from './runtime/bot-runtime.js';
 import { createClaudeProviderFactory } from './providers/claude.js';
-import {
-  createSessionManager,
-  persistSession,
-} from './session/manager.js';
+import { createSessionManager } from './session/manager.js';
+import { openSessionStore } from './session/store.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import { loadSettings } from './settings.js';
 
@@ -77,12 +75,12 @@ export async function startBot(): Promise<void> {
 
   const mainAgent = createMainAgentConfig(systemPrompt, settings.claude.model);
 
+  const sessionStore = openSessionStore();
+
   const sessionManager = createSessionManager({
     providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
     defaultCwd: settings.workspace,
-    onSessionCreated: (key, sessionId) => {
-      persistSession(key, sessionId);
-    },
+    store: sessionStore,
   });
 
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
@@ -122,6 +120,7 @@ export async function startBot(): Promise<void> {
     if (slackApp) {
       await stopSlackApp(slackApp);
     }
+    sessionStore.close();
   }
 }
 

@@ -1,10 +1,7 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
 import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
-import {
-  getPersistedSessionId,
-  type SessionManager,
-} from '../session/manager.js';
+import type { SessionManager } from '../session/manager.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 
@@ -116,17 +113,18 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         setStatus: (status) => setStatus(status),
       });
       const transcript = new TranscriptWriter(threadId);
-      const resume = getPersistedSessionId(threadId);
-
-      if (resume) {
-        transcript.setSessionId(resume);
-      }
 
       await addReaction(client, channelId, messageTs, 'thought_balloon');
       await sender.setStatus('생각 중...');
 
       try {
-        sessionManager.open(threadId, mainAgent, { resume });
+        sessionManager.open(threadId, mainAgent);
+
+        const resumedId = sessionManager.getSessionId(threadId);
+        if (resumedId) {
+          transcript.setSessionId(resumedId);
+        }
+
         transcript.appendUser(text);
 
         const result = await sessionManager.send(threadId, text, {

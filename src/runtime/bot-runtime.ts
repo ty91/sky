@@ -1,11 +1,7 @@
 import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { Settings } from '../settings.js';
-import {
-  getPersistedSessionId,
-  removePersistedSession,
-  type SessionManager,
-} from '../session/manager.js';
+import type { SessionManager } from '../session/manager.js';
 import { formatDirectGetMeProbe, type DirectGetMeProbe } from '../telegram/getme-diagnostics.js';
 import { TelegramNetworkClient } from '../telegram/network-client.js';
 import { TelegramPollingSession } from '../telegram/polling-session.js';
@@ -225,8 +221,7 @@ export class BotRuntime {
       },
       onNewCommand: async (event) => {
         const chatId = String(event.chatId);
-        await this.sessionManager.close(chatId);
-        removePersistedSession(chatId);
+        await this.sessionManager.purge(chatId);
         await event.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
       },
       onTextMessage: async (event) => {
@@ -238,14 +233,15 @@ export class BotRuntime {
         const chatId = String(event.chatId);
         const typingLoop = event.createTypingLoop();
         const transcript = new TranscriptWriter(chatId);
-        const resume = getPersistedSessionId(chatId);
-
-        if (resume) {
-          transcript.setSessionId(resume);
-        }
 
         try {
-          this.sessionManager.open(chatId, this.mainAgent, { resume });
+          this.sessionManager.open(chatId, this.mainAgent);
+
+          const resumedId = this.sessionManager.getSessionId(chatId);
+          if (resumedId) {
+            transcript.setSessionId(resumedId);
+          }
+
           transcript.appendUser(event.text);
 
           const result = await this.sessionManager.send(chatId, event.text);

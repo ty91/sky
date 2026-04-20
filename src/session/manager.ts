@@ -1,11 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import type { AgentConfig } from '../agents/types.js';
 import type { CollectOptions } from '../providers/types.js';
-import { CLAUDECLAW_DIR } from '../settings.js';
 import type {
   Deferred,
-  OpenSessionOptions,
   SendResult,
   SessionEntry,
   SessionManager,
@@ -13,34 +9,6 @@ import type {
 } from './types.js';
 
 export { type SendResult, type SessionManager, type SessionManagerOptions } from './types.js';
-
-const SESSIONS_FILE = path.join(CLAUDECLAW_DIR, 'sessions.json');
-
-function loadPersistedSessions(): Record<string, string> {
-  try {
-    return JSON.parse(readFileSync(SESSIONS_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-export function persistSession(chatId: string, sessionId: string): void {
-  const data = loadPersistedSessions();
-  data[chatId] = sessionId;
-  mkdirSync(CLAUDECLAW_DIR, { recursive: true });
-  writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
-}
-
-export function removePersistedSession(chatId: string): void {
-  const data = loadPersistedSessions();
-  delete data[chatId];
-  mkdirSync(CLAUDECLAW_DIR, { recursive: true });
-  writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
-}
-
-export function getPersistedSessionId(chatId: string): string | undefined {
-  return loadPersistedSessions()[chatId];
-}
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -99,7 +67,10 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
             entry.sessionId = result.sessionId;
             // stale persist 방지: 아직 맵에 있는지 확인
             if (sessions.get(key) === entry) {
-              options.onSessionCreated?.(key, result.sessionId);
+              options.store?.put(key, {
+                sessionId: result.sessionId,
+                systemPrompt: '',
+              });
             }
           }
           req.deferred.resolve({ kind: 'ok', text: result.text });
@@ -120,18 +91,19 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     entry.workerRunning = false;
   }
 
-  return {
-    open(key: string, agent: AgentConfig, sessionOptions?: OpenSessionOptions): void {
+  const manager: SessionManager = {
+    open(key: string, agent: AgentConfig): void {
       if (sessions.has(key)) {
         return;
       }
 
+      const persisted = options.store?.get(key);
+      const resume = persisted?.sessionId;
+
       sessions.set(key, {
-        provider: options.providerFactory.create(
-          createProviderConfig(agent, options, sessionOptions?.resume),
-        ),
+        provider: options.providerFactory.create(createProviderConfig(agent, options, resume)),
         agent,
-        sessionId: sessionOptions?.resume,
+        sessionId: resume,
         turnCounter: 0,
         activeTurnInterrupted: false,
         workerRunning: false,
@@ -200,11 +172,18 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       await entry.provider.close();
     },
 
+    async purge(key: string): Promise<void> {
+      await manager.close(key);
+      options.store?.remove(key);
+    },
+
     async closeAll(): Promise<void> {
       const keys = [...sessions.keys()];
       for (const key of keys) {
-        await this.close(key);
+        await manager.close(key);
       }
     },
   };
+
+  return manager;
 }
