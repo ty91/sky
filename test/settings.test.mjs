@@ -15,7 +15,7 @@ test('parseSettings accepts slack-only configuration', () => {
     appToken: 'xapp-test',
   });
   assert.equal(settings.telegram, undefined);
-  assert.equal(settings.claude.model, 'claude-opus-4-6');
+  assert.equal(settings.claude.model, 'claude-opus-4-7');
   assert.equal(typeof settings.workspace, 'string');
 });
 

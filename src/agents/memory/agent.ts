@@ -3,7 +3,7 @@ import { getUnreadTranscripts, advanceCursors, type UnreadTranscript } from './c
 import { MEMORY_AGENT_SYSTEM_PROMPT } from './prompt.js';
 import type { SessionManager } from '../../session/manager.js';
 
-const MEMORY_AGENT_MODEL = 'claude-sonnet-4-6';
+const MEMORY_AGENT_MODEL = 'claude-opus-4-7';
 
 const MEMORY_AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 

@@ -16,11 +16,15 @@ Always use this symlink path. The raw iCloud path (\`~/Library/Mobile Documents/
 
 ### Directory Structure
 
-The vault has two hemispheres: **태영님's world** (personal, concrete, contextual) and **world knowledge** (general, sourced, reusable).
+The vault has three layers: **time axis** (when), **태영님's world** (personal, concrete, contextual), and **world knowledge** (general, sourced, reusable).
 
 \`\`\`
 memory/
 ├── index.md                 # 🔑 Wiki catalog — read this FIRST
+├── _recent.md               # 🕐 7-day rolling summary (you regenerate this every run)
+├── episodes/
+│   └── daily/
+│       └── YYYY-MM-DD.md    # 🕐 one file per day (Asia/Seoul)
 ├── people/                  # 태영님's inner circle
 ├── projects/                # projects & orgs 태영님 owns/participates in
 ├── context/                 # 태영님's environment, health, prefs, habits
@@ -30,6 +34,7 @@ memory/
 \`\`\`
 
 **Sort principle**:
+- Time axis ("what happened when")? → \`_recent.md\` | \`episodes/daily/\` (your exclusive domain)
 - Directly tied to 태영님? → \`people/\` | \`projects/\` | \`context/\`
 - Exists in the world at large (tools, papers, frameworks, concepts)? → \`knowledge/tools/\` | \`knowledge/concepts/\`
 - When in doubt: pick one home, cross-link with \`[[wikilinks]]\`.
@@ -122,6 +127,90 @@ tags: [person/inner-circle]
 
 - 에이전틱 엔지니어링을 위한 하네스를 만들어보는 중
 \`\`\`
+
+## Episode Logging (🕐 Daily Episodes + Rolling Recent)
+
+This is the **time-axis layer** of memory. While \`people/\`, \`projects/\`, \`knowledge/\` handle the "what", this section handles the "when" — so claudeclaw can recall recent activity without reconstructing from raw transcripts.
+
+### Daily Episode: \`memory/episodes/daily/YYYY-MM-DD.md\`
+
+Every run:
+1. For each transcript entry, convert its timestamp from UTC (ISO) to **Asia/Seoul** (UTC+9) to determine its local date.
+2. Group new entries by local date.
+3. For each date, Read → Edit (or Write if new) the corresponding \`episodes/daily/YYYY-MM-DD.md\` file.
+4. **Never copy raw transcripts.** Extract, summarize, and structure only.
+
+**Daily file format** (include only sections that have content):
+
+\`\`\`markdown
+---
+date: YYYY-MM-DD
+tags: [episode/daily]
+updated: <ISO timestamp with +09:00>
+---
+
+# YYYY-MM-DD (<weekday in Korean: 월/화/수/목/금/토/일>)
+
+## 한 줄 요약
+<One sentence. This gets harvested into _recent.md.>
+
+## 진행한 일
+- <Concrete things done>
+
+## 결정
+- <Decisions with lasting implications only>
+
+## 열린 질문
+- <Unresolved items to pick up next session>
+
+## 아티팩트
+- <Commits, files, [[wikilinks]]>
+\`\`\`
+
+### Today's file vs past files
+
+- **Today's file** = living. Append/update on every run.
+- **Past files** = confirmed. Avoid edits beyond typo-level fixes.
+- On the first run after midnight (Asia/Seoul), if you detect yesterday's file exists and has not been finalized, polish it once: deduplicate sections, tighten the \`한 줄 요약\` line, ensure structure is clean. Then leave it alone.
+
+### Rolling Summary: \`memory/_recent.md\`
+
+Regenerate **every run** (simpler than conditional regeneration). Format:
+
+\`\`\`markdown
+---
+updated: <ISO with +09:00>
+window: <YYYY-MM-DD> ~ <YYYY-MM-DD>
+tags: [meta/recent]
+---
+
+# 최근 7일
+
+> 세션 부트 시 이 파일을 읽고 최근 맥락을 즉시 회상한다. 특정 날짜 상세는 episodes/daily/YYYY-MM-DD.md로 drill down.
+
+## 🔥 진행 중 (세션 넘어가는 일)
+- <Threads spanning multiple days — look for repeated topics across daily files>
+
+## 🎯 하이라이트
+- **[M/D]** <harvest from each day's 한 줄 요약>
+
+## ❓ 열린 질문
+- <Aggregate unresolved 열린 질문 from recent dailies>
+
+## 📅 일별
+- [[YYYY-MM-DD]] — <one-line>
+- [[YYYY-MM-DD]] — (기록 없음)  ← use this for days with no daily file
+\`\`\`
+
+**Window**: today and the past 6 days (7 days total). Days older than 7 are dropped from \`_recent.md\` but their daily files remain permanent.
+
+### Episode logging rules
+
+1. **Be concise.** Daily files should be scannable — a person reading should grasp the day in 30 seconds. Bullet points over prose.
+2. **No raw transcript.** If the user said "fix this typo" and you fixed it, that doesn't belong. Only outcomes with lasting value.
+3. **Cross-link.** When a daily mentions a project/person/tool that has its own page, use \`[[wikilinks]]\`.
+4. **Wikilinks in _recent.md**: \`[[2026-04-20]]\` resolves to \`episodes/daily/2026-04-20.md\` (Obsidian finds by filename).
+5. **Empty day**: if no transcripts exist for a date in the window, don't create a daily file — just mark it \`(기록 없음)\` in \`_recent.md\`'s 일별 section.
 
 ## Reorganization
 
