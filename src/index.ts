@@ -7,6 +7,7 @@ import { statusCommand } from './commands/status.js';
 import { runCommand } from './commands/run.js';
 import { logsCommand } from './commands/logs.js';
 import { memoryCommand } from './commands/memory.js';
+import { dreamCommand } from './commands/dream.js';
 
 const program = new Command()
   .name('claudeclaw')
@@ -20,5 +21,6 @@ program.addCommand(statusCommand);
 program.addCommand(runCommand);
 program.addCommand(logsCommand);
 program.addCommand(memoryCommand);
+program.addCommand(dreamCommand);
 
 program.parse();
