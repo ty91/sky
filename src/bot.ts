@@ -69,11 +69,19 @@ function waitForShutdownSignal(): Promise<void> {
 export async function startBot(): Promise<void> {
   console.log('[startup] loading settings...');
   const settings = loadSettings();
-  const systemPrompt = loadSystemPrompt(settings.workspace);
+  const loadPrompt = () => loadSystemPrompt(settings.workspace);
+  const initialPrompt = loadPrompt();
   console.log(`[startup] model: ${settings.claude.model}`);
   console.log(`[startup] workspace: ${settings.workspace}`);
 
-  const mainAgent = createMainAgentConfig(systemPrompt, settings.claude.model);
+  // `initialPrompt` is a fallback for legacy resumed sessions that have no
+  // stored snapshot. `loadPrompt` runs again on every new session so edits to
+  // AGENTS.md / MEMORY.md / SOUL.md / USER.md take effect without a restart.
+  const mainAgent = createMainAgentConfig({
+    systemPrompt: initialPrompt,
+    systemPromptLoader: loadPrompt,
+    model: settings.claude.model,
+  });
 
   const sessionStore = openSessionStore();
 

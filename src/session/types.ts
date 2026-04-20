@@ -17,6 +17,13 @@ export type SessionEntry = {
   provider: ProviderSession;
   agent: AgentConfig;
   sessionId?: string;
+  /**
+   * The exact system prompt handed to the underlying provider. Captured at
+   * `open()` so that when the first turn assigns a session id we can persist
+   * the snapshot next to it. Subsequent resumes replay this snapshot to keep
+   * Anthropic prompt caching coherent.
+   */
+  resolvedSystemPrompt: string;
   turnCounter: number;
   activeTurnId?: number;
   activeTurnInterrupted: boolean;

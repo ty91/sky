@@ -14,9 +14,34 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function createProviderConfig(agent: AgentConfig, options: SessionManagerOptions, resume?: string) {
+/**
+ * Decide which system prompt to hand to the provider.
+ *
+ * - Resumed sessions replay the snapshot stored alongside the session id so
+ *   the bytes match what Anthropic has already cached. Empty snapshots
+ *   (legacy records from before we persisted prompts) fall back to the
+ *   baseline prompt — the snapshot will be rewritten on the next successful
+ *   turn.
+ * - Fresh sessions invoke the loader, giving AGENTS.md / MEMORY.md edits a
+ *   chance to apply without a bot restart. Agents that do not care about
+ *   hot reload (e.g. the Memory Agent) simply omit the loader and reuse
+ *   `agent.systemPrompt` unchanged.
+ */
+function resolveSystemPrompt(agent: AgentConfig, persistedPrompt?: string): string {
+  if (persistedPrompt !== undefined) {
+    return persistedPrompt || agent.systemPrompt;
+  }
+  return agent.systemPromptLoader ? agent.systemPromptLoader() : agent.systemPrompt;
+}
+
+function createProviderConfig(
+  agent: AgentConfig,
+  systemPrompt: string,
+  options: SessionManagerOptions,
+  resume?: string,
+) {
   return {
-    systemPrompt: agent.systemPrompt,
+    systemPrompt,
     model: agent.model,
     tools: agent.tools,
     maxTurns: agent.maxTurns,
@@ -69,7 +94,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
             if (sessions.get(key) === entry) {
               options.store?.put(key, {
                 sessionId: result.sessionId,
-                systemPrompt: '',
+                systemPrompt: entry.resolvedSystemPrompt,
               });
             }
           }
@@ -99,16 +124,27 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
 
       const persisted = options.store?.get(key);
       const resume = persisted?.sessionId;
+      const systemPrompt = resolveSystemPrompt(agent, persisted?.systemPrompt);
 
       sessions.set(key, {
-        provider: options.providerFactory.create(createProviderConfig(agent, options, resume)),
+        provider: options.providerFactory.create(
+          createProviderConfig(agent, systemPrompt, options, resume),
+        ),
         agent,
         sessionId: resume,
+        resolvedSystemPrompt: systemPrompt,
         turnCounter: 0,
         activeTurnInterrupted: false,
         workerRunning: false,
         closed: false,
       });
+
+      // Legacy self-healing: a resumed record that predates prompt persistence
+      // has systemPrompt === ''. Backfill it with the resolved snapshot so the
+      // very next resume replays a matching prompt and hits Anthropic's cache.
+      if (resume && persisted?.systemPrompt === '' && systemPrompt) {
+        options.store?.put(key, { sessionId: resume, systemPrompt });
+      }
     },
 
     async send(key: string, text: string, collectOptions?: CollectOptions): Promise<SendResult> {

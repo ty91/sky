@@ -69,8 +69,9 @@ test('session manager creates sessions and persists new session ids via store', 
   assert.deepEqual(result, { kind: 'ok', text: 'reply' });
   assert.equal(sendCalls.length, 1);
   assert.equal(sendCalls[0].config.cwd, '/tmp/workspace');
+  // system_prompt snapshot is persisted alongside the session id
   assert.deepEqual(calls.put, [
-    { key: 'thread-1', session: { sessionId: 'session-1', systemPrompt: '' } },
+    { key: 'thread-1', session: { sessionId: 'session-1', systemPrompt: 'system' } },
   ]);
   assert.equal(manager.getSessionId('thread-1'), 'session-1');
 
@@ -82,7 +83,7 @@ test('session manager creates sessions and persists new session ids via store', 
 
 test('session manager auto-resumes from store on open', async () => {
   const { store, calls } = createMockStore({
-    'thread-1': { sessionId: 'resumed-session', systemPrompt: '' },
+    'thread-1': { sessionId: 'resumed-session', systemPrompt: 'frozen-S0' },
   });
   let createdWith;
   const manager = createSessionManager({
@@ -99,8 +100,119 @@ test('session manager auto-resumes from store on open', async () => {
   manager.open('thread-1', AGENT);
 
   assert.equal(createdWith.resume, 'resumed-session');
+  assert.equal(createdWith.systemPrompt, 'frozen-S0');
   assert.equal(manager.getSessionId('thread-1'), 'resumed-session');
   assert.deepEqual(calls.get, ['thread-1']);
+  // A record with a non-empty stored prompt does not trigger self-healing.
+  assert.deepEqual(calls.put, []);
+});
+
+test('new sessions call systemPromptLoader; loader output is passed to provider and persisted', async () => {
+  const { store, calls } = createMockStore();
+  let loaderCallCount = 0;
+  const loaderAgent = {
+    ...AGENT,
+    systemPrompt: 'stale-baseline',
+    systemPromptLoader: () => {
+      loaderCallCount++;
+      return 'fresh-prompt-v' + loaderCallCount;
+    },
+  };
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider({
+          collect: async () => ({ text: 'reply', sessionId: 'new-session' }),
+        });
+      },
+    },
+  });
+
+  manager.open('thread-new', loaderAgent);
+  assert.equal(loaderCallCount, 1);
+  assert.equal(createdWith.systemPrompt, 'fresh-prompt-v1');
+
+  await manager.send('thread-new', 'hi');
+  // The freshly-loaded prompt is frozen into the store for future resumes.
+  assert.deepEqual(calls.put, [
+    { key: 'thread-new', session: { sessionId: 'new-session', systemPrompt: 'fresh-prompt-v1' } },
+  ]);
+});
+
+test('resumed sessions skip systemPromptLoader and replay the stored snapshot', async () => {
+  const { store } = createMockStore({
+    'thread-1': { sessionId: 'resumed', systemPrompt: 'frozen-S0' },
+  });
+  let loaderCallCount = 0;
+  const loaderAgent = {
+    ...AGENT,
+    systemPrompt: 'current-file-S2',
+    systemPromptLoader: () => {
+      loaderCallCount++;
+      return 'current-file-S2';
+    },
+  };
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider();
+      },
+    },
+  });
+
+  manager.open('thread-1', loaderAgent);
+
+  assert.equal(loaderCallCount, 0, 'loader must not run on resume');
+  assert.equal(createdWith.resume, 'resumed');
+  assert.equal(
+    createdWith.systemPrompt,
+    'frozen-S0',
+    'provider must receive the frozen snapshot, not the current file contents',
+  );
+});
+
+test('legacy records (empty stored prompt) fall back to agent.systemPrompt and self-heal', async () => {
+  const { store, calls } = createMockStore({
+    'thread-1': { sessionId: 'legacy', systemPrompt: '' },
+  });
+  let loaderCallCount = 0;
+  const loaderAgent = {
+    ...AGENT,
+    systemPrompt: 'baseline',
+    systemPromptLoader: () => {
+      loaderCallCount++;
+      return 'loader-result';
+    },
+  };
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider();
+      },
+    },
+  });
+
+  manager.open('thread-1', loaderAgent);
+
+  assert.equal(loaderCallCount, 0, 'loader must not run on resume, even for legacy records');
+  assert.equal(createdWith.systemPrompt, 'baseline', 'legacy fallback uses agent.systemPrompt');
+  // open() should backfill the store synchronously so the next resume gets a
+  // matching snapshot and hits Anthropic's prompt cache.
+  assert.deepEqual(calls.put, [
+    { key: 'thread-1', session: { sessionId: 'legacy', systemPrompt: 'baseline' } },
+  ]);
 });
 
 test('session manager works without a store (ephemeral mode)', async () => {

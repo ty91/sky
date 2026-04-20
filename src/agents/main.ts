@@ -15,11 +15,20 @@ const MAIN_AGENT_TOOLS = [
   'WebSearch',
 ] as const;
 
-export function createMainAgentConfig(systemPrompt: string, model = 'claude-opus-4-7'): AgentConfig {
+export type MainAgentConfigOptions = {
+  /** Baseline prompt; also used for resumed sessions that have no stored snapshot. */
+  systemPrompt: string;
+  /** Called on new sessions so AGENTS.md/MEMORY.md edits take effect without a bot restart. */
+  systemPromptLoader?: () => string;
+  model?: string;
+};
+
+export function createMainAgentConfig(options: MainAgentConfigOptions): AgentConfig {
   return {
     name: 'main',
-    systemPrompt,
-    model,
+    systemPrompt: options.systemPrompt,
+    systemPromptLoader: options.systemPromptLoader,
+    model: options.model ?? 'claude-opus-4-7',
     tools: [...MAIN_AGENT_TOOLS],
   };
 }
