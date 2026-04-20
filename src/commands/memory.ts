@@ -1,34 +1,19 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
-import { runMemoryAgent, type MemoryAgentResult } from '../agents/memory/agent.js';
+import { runMemoryAgent } from '../agents/memory/agent.js';
 import { createClaudeProviderFactory } from '../providers/claude.js';
 import { createSessionManager } from '../session/manager.js';
 
-const MEMORY_LOG_CHANNEL = 'C0APGL1DKDH';
-
-async function postToSlack(botToken: string, result: MemoryAgentResult): Promise<void> {
-  const text = `📝 Processed *${result.processed}* transcript(s).\n\n${result.summary}`;
-
-  const res = await fetch('https://slack.com/api/chat.postMessage', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      Authorization: `Bearer ${botToken}`,
-    },
-    body: JSON.stringify({ channel: MEMORY_LOG_CHANNEL, text }),
-  });
-
-  const body = (await res.json()) as { ok: boolean; error?: string };
-  if (!body.ok) {
-    console.error(`[memory] slack notification failed: ${body.error}`);
-  }
-}
+// L2 Working Memory Agent runs every 5 minutes via cron.
+// Slack notifications are intentionally OFF — see docs/plans/active/2026-04-20-memory-v2.md.
+// Logs go to ~/.claudeclaw/memory-agent.log (stdout/stderr redirected by cron).
+// Phase 2/3/4 (dream, weekly, archive) will add their own Slack commands with prefixes.
 
 export const memoryCommand = new Command('memory')
-  .description('Run the Memory Agent to process new transcripts')
+  .description('Run the Memory Agent (L2 working memory — silent, no Slack notification)')
   .action(async () => {
     const settings = loadSettings({ silent: true });
-    console.log('[memory] starting memory agent...');
+    console.log('[memory] starting L2 working memory agent...');
     const sessionManager = createSessionManager({
       providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
       defaultCwd: settings.workspace,
@@ -40,18 +25,9 @@ export const memoryCommand = new Command('memory')
     });
 
     if (result.skipped) {
-      console.log('[memory] no new transcripts to process');
+      console.log('[memory] skipped (no meaningful update)');
     } else {
       console.log(`[memory] processed ${result.processed} transcript(s)`);
       console.log(`[memory] summary: ${result.summary}`);
-    }
-
-    if (settings.slack && !result.skipped) {
-      try {
-        await postToSlack(settings.slack.botToken, result);
-        console.log('[memory] slack notification sent');
-      } catch (error) {
-        console.error(`[memory] slack notification error: ${error instanceof Error ? error.message : String(error)}`);
-      }
     }
   });

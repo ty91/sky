@@ -3,9 +3,14 @@ import { getUnreadTranscripts, advanceCursors, type UnreadTranscript } from './c
 import { MEMORY_AGENT_SYSTEM_PROMPT } from './prompt.js';
 import type { SessionManager } from '../../session/manager.js';
 
-const MEMORY_AGENT_MODEL = 'claude-opus-4-7';
+// L2 Working Memory Agent — see docs/plans/active/2026-04-20-memory-v2.md
+// Fast, 5-minute polling cadence. Sonnet is sufficient for single-file rolling summary.
+const MEMORY_AGENT_MODEL = 'claude-sonnet-4-6';
 
 const MEMORY_AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
+
+/** Sentinel that the agent emits when it decides no meaningful update is needed. */
+const SKIP_SENTINEL = 'SKIP';
 
 type MemoryAgentOptions = {
   sessionManager: SessionManager;
@@ -13,11 +18,25 @@ type MemoryAgentOptions = {
 };
 
 function buildUserPrompt(transcripts: UnreadTranscript[]): string {
-  const parts = ['# New Conversation Transcripts\n'];
-  parts.push('Process the following new conversation excerpts and update memory accordingly.\n');
+  const now = new Date();
+  // `sv-SE` locale formats as `YYYY-MM-DD HH:mm:ss` — clean for Asia/Seoul.
+  const kstNow = now.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' });
+
+  const parts = [
+    '# L2 Working Memory Update',
+    '',
+    `**Current time (Asia/Seoul):** ${kstNow} KST`,
+    `**Current time (UTC):** ${now.toISOString()}`,
+    '',
+    'Below are new transcript entries since your last run. Integrate these into ' +
+      '`memory/_recent.md` per your system prompt rules. Keep only the last 24 hours ' +
+      'of activity; drop anything older. If there is no meaningful update, output `SKIP`.',
+    '',
+  ];
 
   for (const t of transcripts) {
-    parts.push(`## Transcript: ${t.relativePath}\n`);
+    parts.push(`## Transcript: ${t.relativePath}`);
+    parts.push('');
     parts.push(t.newContent);
     parts.push('');
   }
@@ -74,10 +93,28 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
     }
 
     finalText = result.text;
-    console.log('[memory-agent] completed successfully');
 
+    // The L2 agent emits exactly "SKIP" when there is no meaningful update.
+    const isSkip = finalText.trim() === SKIP_SENTINEL;
+
+    if (isSkip) {
+      console.log('[memory-agent] agent decided to SKIP (no meaningful update)');
+    } else {
+      console.log('[memory-agent] completed successfully');
+    }
+
+    // Advance cursors either way — we consumed the transcripts. A SKIP means
+    // we intentionally chose not to rewrite _recent.md for these entries.
     advanceCursors(transcripts);
     console.log(`[memory-agent] cursors advanced for ${transcripts.length} transcript(s)`);
+
+    if (isSkip) {
+      return {
+        processed: transcripts.length,
+        skipped: true,
+        summary: 'SKIP (no meaningful update)',
+      };
+    }
   } finally {
     await options.sessionManager.close(key);
   }
