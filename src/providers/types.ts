@@ -1,3 +1,5 @@
+import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+
 export type ProviderConfig = {
   systemPrompt: string;
   model?: string;
@@ -5,6 +7,11 @@ export type ProviderConfig = {
   maxTurns?: number;
   cwd?: string;
   resume?: string;
+  /**
+   * In-process MCP servers to expose to the underlying Claude Agent SDK
+   * `query()` call. Values are typically produced by `createSdkMcpServer()`.
+   */
+  mcpServers?: Record<string, McpServerConfig>;
 };
 
 export type ProviderResult = {

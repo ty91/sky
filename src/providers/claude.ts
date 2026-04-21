@@ -49,6 +49,7 @@ function buildOptions(config: ProviderConfig, defaults: ClaudeProviderDefaults):
     systemPrompt: config.systemPrompt,
     maxTurns: config.maxTurns,
     ...(config.resume ? { resume: config.resume } : {}),
+    ...(config.mcpServers ? { mcpServers: config.mcpServers } : {}),
     env: {
       ...process.env,
       CLAUDE_AGENT_SDK_CLIENT_APP: 'claudeclaw/0.5.0',

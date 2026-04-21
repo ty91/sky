@@ -1,3 +1,17 @@
+import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+
+/**
+ * Context handed to {@link AgentConfig.mcpServersFactory} when the session
+ * manager opens a new session. Lets the factory close over the session key so
+ * in-process MCP tools (e.g. `restart_harness`) know which thread they're
+ * acting on.
+ */
+export type McpFactoryContext = {
+  sessionKey: string;
+};
+
+export type McpServersFactory = (ctx: McpFactoryContext) => Record<string, McpServerConfig>;
+
 export type AgentConfig = {
   name: string;
   description?: string;
@@ -15,6 +29,12 @@ export type AgentConfig = {
    * Anthropic prompt caching intact.
    */
   systemPromptLoader?: () => string;
+  /**
+   * Optional factory for per-session in-process MCP servers. Invoked every
+   * time the session manager opens a session so each session can receive its
+   * own bound tools (session key, channel, etc. captured in closures).
+   */
+  mcpServersFactory?: McpServersFactory;
   model?: string;
   tools?: string[];
   maxTurns?: number;

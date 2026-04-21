@@ -38,8 +38,10 @@ function createProviderConfig(
   agent: AgentConfig,
   systemPrompt: string,
   options: SessionManagerOptions,
+  sessionKey: string,
   resume?: string,
 ) {
+  const mcpServers = agent.mcpServersFactory?.({ sessionKey });
   return {
     systemPrompt,
     model: agent.model,
@@ -47,6 +49,7 @@ function createProviderConfig(
     maxTurns: agent.maxTurns,
     cwd: agent.cwd ?? options.defaultCwd,
     ...(resume ? { resume } : {}),
+    ...(mcpServers ? { mcpServers } : {}),
   };
 }
 
@@ -128,7 +131,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
 
       sessions.set(key, {
         provider: options.providerFactory.create(
-          createProviderConfig(agent, systemPrompt, options, resume),
+          createProviderConfig(agent, systemPrompt, options, key, resume),
         ),
         agent,
         sessionId: resume,
