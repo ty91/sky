@@ -1,7 +1,7 @@
 ---
 title: Memory System v2 Phase 3 — L3 Dream Agent
 type: feature
-status: active
+status: completed
 created_at: 2026-04-20T18:30:00+09:00
 parent: 2026-04-20-memory-v2.md
 ---

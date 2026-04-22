@@ -1,7 +1,7 @@
 ---
 title: 메시지 인터럽트 기능
 type: feat
-status: active
+status: completed
 created_at: 2026-04-09T12:00:00Z
 ---
 
