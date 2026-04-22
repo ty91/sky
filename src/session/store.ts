@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { CLAUDECLAW_DIR } from '../settings.js';
+import { JOY_DIR } from '../settings.js';
 
-const DEFAULT_DB_PATH = path.join(CLAUDECLAW_DIR, 'claudeclaw.db');
-const LEGACY_JSON_PATH = path.join(CLAUDECLAW_DIR, 'sessions.json');
+const DEFAULT_DB_PATH = path.join(JOY_DIR, 'joy.db');
+const LEGACY_JSON_PATH = path.join(JOY_DIR, 'sessions.json');
 
 export type PersistedSession = {
   sessionId: string;
@@ -58,7 +58,7 @@ function ensureSchema(db: DatabaseSync): void {
 }
 
 /**
- * Import legacy `~/.claudeclaw/sessions.json` into the sqlite store.
+ * Import legacy `~/.joy/sessions.json` into the sqlite store.
  *
  * Only runs when:
  *   - The legacy file exists.

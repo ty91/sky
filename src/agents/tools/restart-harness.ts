@@ -4,9 +4,9 @@ import { requestRestart, type PendingRestart } from '../../runtime/pending-resta
 
 /**
  * MCP tool name suffix. The full name exposed to the allowlist is
- * `mcp__<server>__<tool>`, i.e. `mcp__claudeclaw__restart_harness`.
+ * `mcp__<server>__<tool>`, i.e. `mcp__joy__restart_harness`.
  */
-export const RESTART_HARNESS_SERVER_NAME = 'claudeclaw';
+export const RESTART_HARNESS_SERVER_NAME = 'joy';
 export const RESTART_HARNESS_TOOL_NAME = 'restart_harness';
 export const RESTART_HARNESS_FQ_TOOL_NAME = `mcp__${RESTART_HARNESS_SERVER_NAME}__${RESTART_HARNESS_TOOL_NAME}`;
 
@@ -32,7 +32,7 @@ export type RestartHarnessContext = {
 };
 
 const TOOL_DESCRIPTION = [
-  'Restart the claudeclaw harness (this very process).',
+  'Restart the joy harness (this very process).',
   '',
   'Use ONLY when the user explicitly tells you the harness code has been',
   'rebuilt and must be reloaded. Do NOT call this on your own initiative.',

@@ -7,10 +7,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { CLAUDECLAW_DIR } from '../settings.js';
+import { JOY_DIR } from '../settings.js';
 
-const PENDING_PATH = path.join(CLAUDECLAW_DIR, 'pending-restart.json');
-const HISTORY_PATH = path.join(CLAUDECLAW_DIR, 'restart-history.json');
+const PENDING_PATH = path.join(JOY_DIR, 'pending-restart.json');
+const HISTORY_PATH = path.join(JOY_DIR, 'restart-history.json');
 
 /** Minimum interval between two accepted restart requests (ms). */
 export const MIN_RESTART_INTERVAL_MS = 60_000;
@@ -27,7 +27,7 @@ export type PendingRestart = {
   channelId: string;
   /** Slack thread ts (same duplication reasoning). */
   threadTs: string;
-  /** Optional short reason shown back to Alan in the post-restart notice. */
+  /** Optional short reason shown back to Joy in the post-restart notice. */
   reason?: string;
   /** Unix millis when the tool was invoked (not when the restart actually occurs). */
   requestedAt: number;
@@ -55,7 +55,7 @@ function readHistory(): HistoryFile {
 }
 
 function writeHistory(history: HistoryFile): void {
-  mkdirSync(CLAUDECLAW_DIR, { recursive: true });
+  mkdirSync(JOY_DIR, { recursive: true });
   writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2));
 }
 
@@ -65,7 +65,7 @@ function writeHistory(history: HistoryFile): void {
  * the primary guard against restart loops.
  */
 export function requestRestart(info: PendingRestart): RestartRequestResult {
-  mkdirSync(CLAUDECLAW_DIR, { recursive: true });
+  mkdirSync(JOY_DIR, { recursive: true });
 
   const history = readHistory();
   const last = history.lastRestartAt ?? 0;

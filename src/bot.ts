@@ -108,7 +108,7 @@ function makeRestartScheduler(): () => void {
 /**
  * Build the synthetic post-restart user message injected into the session
  * that originally asked for the restart. Rendered as a `<system-reminder>`
- * block — same pattern Claude Code uses for meta guidance — so Alan parses
+ * block — same pattern Claude Code uses for meta guidance — so Joy parses
  * it as an instruction rather than a normal user prompt.
  */
 function buildPostRestartNotice(pending: PendingRestart): string {

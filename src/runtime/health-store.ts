@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { CLAUDECLAW_DIR } from '../settings.js';
+import { JOY_DIR } from '../settings.js';
 
 export type BotLifecycleState = 'idle' | 'running' | 'stopping' | 'stopped' | 'fatal';
 export type TelegramPhase =
@@ -69,7 +69,7 @@ export type RuntimeHealth = {
   lastError?: RuntimeErrorInfo;
 };
 
-export const HEALTH_FILE = path.join(CLAUDECLAW_DIR, 'runtime-health.json');
+export const HEALTH_FILE = path.join(JOY_DIR, 'runtime-health.json');
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -93,7 +93,7 @@ export function createInitialHealth(pid = process.pid): RuntimeHealth {
 }
 
 export function writeHealthSnapshot(snapshot: RuntimeHealth): void {
-  mkdirSync(CLAUDECLAW_DIR, { recursive: true });
+  mkdirSync(JOY_DIR, { recursive: true });
   const nextSnapshot: RuntimeHealth = {
     ...snapshot,
     updatedAt: nowIso(),

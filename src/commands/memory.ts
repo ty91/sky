@@ -6,7 +6,7 @@ import { createSessionManager } from '../session/manager.js';
 
 // L2 Working Memory Agent runs every 5 minutes via cron.
 // Slack notifications are intentionally OFF — see docs/plans/active/2026-04-20-memory-v2.md.
-// Logs go to ~/.claudeclaw/memory-agent.log (stdout/stderr redirected by cron).
+// Logs go to ~/.joy/memory-agent.log (stdout/stderr redirected by cron).
 // Phase 2/3/4 (dream, weekly, archive) will add their own Slack commands with prefixes.
 
 export const memoryCommand = new Command('memory')

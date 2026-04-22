@@ -1,11 +1,11 @@
 {
-  "name": "claudeclaw",
+  "name": "joy",
   "version": "0.1.0",
   "description": "Telegram chatbot with per-chat Claude Agent SDK sessions",
   "type": "module",
   "private": true,
   "bin": {
-    "claudeclaw": "dist/index.js"
+    "joy": "dist/index.js"
   },
   "scripts": {
     "dev": "tsx src/bot.ts",
