@@ -108,6 +108,7 @@ test('ACP provider creates a session and collects buffered text chunks', async (
   assert.equal(fake.calls.newSession.length, 1);
   assert.equal(fake.calls.newSession[0]._meta.systemPrompt, 'system');
   assert.equal(fake.calls.newSession[0]._meta.claudeCode.options.model, 'claude-opus-4-7');
+  assert.deepEqual(fake.calls.newSession[0]._meta.claudeCode.options.settingSources, []);
   assert.deepEqual(fake.calls.prompt[0].prompt, [{ type: 'text', text: 'hi' }]);
 });
 

@@ -134,6 +134,7 @@ function buildSessionParams(config: ProviderConfig, defaults: AcpProviderDefault
           model: parsed.modelId,
           maxTurns: config.maxTurns,
           tools: config.tools,
+          settingSources: [],
           env: {
             ...process.env,
             CLAUDE_AGENT_SDK_CLIENT_APP: 'sky/0.5.0',
