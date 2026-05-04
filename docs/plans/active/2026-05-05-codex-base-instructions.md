@@ -189,7 +189,7 @@ Document the new prompt ordering and Codex isolation behavior.
   home when present.
 
 **Verification:**
-- [ ] `rg -n "AGENTS.md.*SOUL.md|SOUL.md.*AGENTS.md" README.md src`
+- [x] `rg -n "AGENTS.md.*SOUL.md|SOUL.md.*AGENTS.md" README.md src`
 
 ---
 
@@ -251,3 +251,6 @@ pnpm test
 - 2026-05-05: Step 2 completed. OpenAI ACP sessions now force Sky-owned
   `CODEX_HOME` and pass Sky's prompt through `model_instructions_file` without
   `developer_instructions`.
+- 2026-05-05: Step 3 completed. README now documents the `SOUL.md`,
+  `AGENTS.md`, `USER.md`, `MEMORY.md` order and the isolated Codex home,
+  auth symlink, and `model_instructions_file` behavior.

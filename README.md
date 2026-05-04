@@ -12,7 +12,7 @@ Slack에서 ACP 기반 에이전트 봇을 **CLI + 데몬**으로 다루는 프�
 - public/private Slack 채널에서는 Sky를 한 번 멘션하면 해당 Slack thread에서 ACP 세션이 시작됩니다.
 - ACP 세션이 저장된 채널 thread는 이후 멘션 없이도 같은 세션으로 이어집니다.
 - 채널 thread 중간에서 Sky를 처음 멘션하면 이전 thread 메시지가 첫 요청 앞에 포함됩니다.
-- `~/.sky/settings.json`의 `workspace` 아래 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 `systemPrompt`로 넣습니다.
+- `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, 모델, workspace를 보여줍니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `mcp__sky__restart_harness`로 제한되어 있습니다.
@@ -33,7 +33,9 @@ Slack에서 ACP 기반 에이전트 봇을 **CLI + 데몬**으로 다루는 프�
 
 즉, 이 머신에서 `claude` CLI가 이미 로그인되어 있다면 보통 `ANTHROPIC_API_KEY` 없이도 동작할 수 있습니다.
 
-`openai/*` 모델을 사용할 때는 `@agentclientprotocol/codex-acp`가 Codex 인증을 처리합니다. Codex/ChatGPT 로그인이 되어 있거나 `CODEX_API_KEY` 또는 `OPENAI_API_KEY`가 설정되어 있으면 동작할 수 있습니다.
+`openai/*` 모델을 사용할 때는 `@agentclientprotocol/codex-acp`가 Codex 인증을 처리합니다. Sky는 `~/.sky/codex-home`을 Codex 전용 home으로 사용하고, 기본 Codex 인증 파일인 `~/.codex/auth.json`이 있으면 `~/.sky/codex-home/auth.json` 심링크를 만듭니다. Codex/ChatGPT 로그인이 되어 있거나 `CODEX_API_KEY` 또는 `OPENAI_API_KEY`가 설정되어 있으면 동작할 수 있습니다.
+
+Sky가 조립한 에이전트 지침은 `~/.sky/codex-home/sky-system-prompt.md`에 기록되고 Codex의 `model_instructions_file`로 전달됩니다. OpenAI 세션은 Sky 전용 Codex home에서 실행되며 프로젝트 문서 자동 주입을 끄기 때문에 사용자 기본 `~/.codex/AGENTS.md`는 Sky 세션에 포함되지 않습니다.
 
 ## 설정
 
@@ -58,7 +60,7 @@ pnpm install
 - `slack.botToken` — Slack bot token.
 - `slack.appToken` — Socket Mode용 app token.
 - `model` — 필수. `<provider>/<model>` 형식입니다. `anthropic/*`, `openai/*`를 지원합니다.
-- `workspace` — 선택. 기본값 `~/.sky/workspace`. 이 디렉토리 아래의 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 시스템 프롬프트로 사용합니다.
+- `workspace` — 선택. 기본값 `~/.sky/workspace`. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
 - `slack` 설정은 필수입니다.
 
 ## 실행
