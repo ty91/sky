@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSlackMessage } from '../dist/slack/messages.js';
+import {
+  prependSlackThreadHistoryToPrompt,
+  readSlackThreadMessages,
+} from '../dist/slack/thread-history.js';
 
 test('normalizeSlackMessage replaces bot mentions with a readable label', () => {
   const result = normalizeSlackMessage({
@@ -72,4 +76,78 @@ test('normalizeSlackMessage ignores bot messages, unsupported subtypes, empty te
     }),
     { ignored: true, reason: 'unknown_bot' },
   );
+});
+
+test('prependSlackThreadHistoryToPrompt prepends user, bot, and unknown-author messages', () => {
+  const result = prependSlackThreadHistoryToPrompt({
+    currentContent: '@sky 정리해줘',
+    messages: [
+      { text: '사용자 메시지', ts: '1777901000.000000', user: 'U123' },
+      { bot_id: 'B123', text: '봇 메시지', ts: '1777901100.000000' },
+      { text: '작성자 없음', ts: '1777901200.000000' },
+      { text: '   ', ts: '1777901300.000000', user: 'U456' },
+    ],
+  });
+
+  assert.equal(
+    result,
+    [
+      '[Slack thread history]',
+      '1777901000.000000 U123: 사용자 메시지',
+      '1777901100.000000 BOT:B123: 봇 메시지',
+      '1777901200.000000 UNKNOWN: 작성자 없음',
+      '',
+      '[User request]',
+      '@sky 정리해줘',
+    ].join('\n'),
+  );
+});
+
+test('prependSlackThreadHistoryToPrompt returns current content when history is empty', () => {
+  const result = prependSlackThreadHistoryToPrompt({
+    currentContent: '@sky 봐줘',
+    messages: [{ text: '   ', ts: '1777901000.000000', user: 'U123' }],
+  });
+
+  assert.equal(result, '@sky 봐줘');
+});
+
+test('prependSlackThreadHistoryToPrompt truncates by message and character limits', () => {
+  const byMessages = prependSlackThreadHistoryToPrompt({
+    currentContent: '@sky 봐줘',
+    maxMessages: 1,
+    messages: [
+      { text: '첫 번째', ts: '1777901000.000000', user: 'U123' },
+      { text: '두 번째', ts: '1777901100.000000', user: 'U456' },
+    ],
+  });
+  const byCharacters = prependSlackThreadHistoryToPrompt({
+    currentContent: '@sky 봐줘',
+    maxCharacters: 80,
+    messages: [
+      { text: '짧은 말', ts: '1777901000.000000', user: 'U123' },
+      { text: '아주 긴 두 번째 메시지입니다'.repeat(10), ts: '1777901100.000000', user: 'U456' },
+    ],
+  });
+
+  assert.match(byMessages, /\[Slack thread history truncated\]/);
+  assert.doesNotMatch(byMessages, /두 번째/);
+  assert.match(byCharacters, /\[Slack thread history truncated\]/);
+  assert.doesNotMatch(byCharacters, /아주 긴 두 번째/);
+});
+
+test('readSlackThreadMessages parses valid Slack message records only', () => {
+  const messages = readSlackThreadMessages([
+    { text: 'hello', ts: '1777901000.000000', user: 'U123' },
+    { bot_id: 'B123', text: 'bot', ts: '1777901100.000000' },
+    { text: 'missing ts', user: 'U456' },
+    null,
+    'bad',
+  ]);
+
+  assert.deepEqual(messages, [
+    { bot_id: undefined, text: 'hello', ts: '1777901000.000000', user: 'U123' },
+    { bot_id: 'B123', text: 'bot', ts: '1777901100.000000', user: undefined },
+  ]);
+  assert.deepEqual(readSlackThreadMessages({ messages: [] }), []);
 });

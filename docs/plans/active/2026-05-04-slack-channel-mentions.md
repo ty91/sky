@@ -146,7 +146,7 @@ Use conservative defaults of 100 messages and 20,000 formatted characters. If tr
 - Slack docs: `conversations.replies` requires `channel` and `ts`, supports cursor pagination, and has channel-history scope/rate-limit constraints.
 
 **Verification:**
-- [ ] Formatting tests cover normal prepend, empty history no-op, truncation, user author, bot author, and unknown author fallback.
+- [x] Formatting tests cover normal prepend, empty history no-op, truncation, user author, bot author, and unknown author fallback.
 
 ---
 
@@ -274,3 +274,4 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 
 - 2026-05-04: Step 0 completed. Added `SessionManager.has()` for in-memory and persisted session checks without opening provider sessions.
 - 2026-05-04: Step 1 completed. Added channel message normalization for bot mentions, existing-thread follow-ups, and ignored Slack messages.
+- 2026-05-04: Step 2 completed. Added Slack thread history parsing and bounded prompt prepend formatting.
