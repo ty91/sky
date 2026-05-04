@@ -173,8 +173,8 @@ return {
 Do not add `_meta.claudeCode`, Claude tools, `maxTurns`, `settingSources`, or Claude `extraArgs` to OpenAI sessions. The new adapter converts ACP `mcpServers` into Codex app-server config internally.
 
 **Verification:**
-- [ ] Existing test still asserts OpenAI sessions omit Claude metadata.
-- [ ] Existing MCP server filtering behavior remains covered by provider tests or existing config paths.
+- [x] Existing test still asserts OpenAI sessions omit Claude metadata.
+- [x] Existing MCP server filtering behavior remains covered by provider tests or existing config paths.
 
 ---
 
@@ -240,3 +240,4 @@ For end-to-end smoke verification after unit tests pass, configure `~/.sky/setti
 - 2026-05-04: Replaced the Codex ACP dependency with `@agentclientprotocol/codex-acp` and verified the lockfile with `pnpm install --frozen-lockfile`.
 - 2026-05-04: Updated the OpenAI runtime resolver to launch `@agentclientprotocol/codex-acp/dist/index.js` with Node and verified `node --test test/acp-provider.test.mjs`.
 - 2026-05-04: Added `CODEX_CONFIG` runtime env construction and expanded the Codex env allowlist, verified with `pnpm build` and `node --test test/acp-provider.test.mjs`.
+- 2026-05-04: Confirmed OpenAI session params remain minimal and omit Claude metadata with `node --test test/acp-provider.test.mjs`.
