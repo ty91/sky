@@ -136,8 +136,8 @@ Auth symlink behavior:
   creating `SKY_DIR` recursively before writing Sky runtime files.
 
 **Verification:**
-- [ ] Unit test covers prompt file creation with exact system prompt contents.
-- [ ] Unit test covers auth symlink creation with a temporary `HOME`.
+- [x] Unit test covers prompt file creation with exact system prompt contents.
+- [x] Unit test covers auth symlink creation with a temporary `HOME`.
 
 ---
 
@@ -245,3 +245,6 @@ pnpm test
 - 2026-05-05: Step 0 completed. Prompt loading now uses
   `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md` order and has regression tests
   for ordering and missing files.
+- 2026-05-05: Step 1 completed. Codex runtime preparation now creates a
+  Sky-owned Codex home, writes the prompt snapshot file, and links auth from the
+  configured Codex auth source when present.
