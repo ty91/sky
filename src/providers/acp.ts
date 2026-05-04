@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
@@ -14,6 +17,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from '@agentclientprotocol/sdk';
+import { SKY_DIR } from '../settings.js';
 import { parseProviderModel, type ParsedModel } from './model.js';
 import type {
   CollectOptions,
@@ -26,7 +30,14 @@ import type {
 
 type AcpProviderDefaults = {
   cwd: string;
+  codexAuthPath?: string;
+  codexHome?: string;
   createAgentConnection?: (client: Client, runtime: AcpAgentRuntime) => AcpAgentConnection;
+};
+
+type PreparedCodexRuntime = {
+  codexHome: string;
+  promptPath: string;
 };
 
 type AcpAgentRuntime = {
@@ -84,6 +95,46 @@ const CODEX_ENV_KEYS = [
   'NODE_EXTRA_CA_CERTS',
   'RUST_LOG',
 ] as const;
+
+function defaultCodexAuthPath(): string {
+  return path.join(os.homedir(), '.codex', 'auth.json');
+}
+
+function ensureCodexAuthSymlink(codexHome: string, authPath: string): void {
+  const targetPath = path.join(codexHome, 'auth.json');
+  if (existsSync(targetPath)) {
+    console.log(`[startup] codex auth already present: ${targetPath}`);
+    return;
+  }
+  if (!existsSync(authPath)) {
+    console.log(`[startup] codex auth source missing: ${authPath}`);
+    return;
+  }
+
+  try {
+    symlinkSync(authPath, targetPath);
+    console.log(`[startup] codex auth symlink created: ${targetPath} -> ${authPath}`);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+      console.log(`[startup] codex auth already present: ${targetPath}`);
+      return;
+    }
+    throw error;
+  }
+}
+
+function prepareCodexRuntime(config: ProviderConfig, defaults: AcpProviderDefaults): PreparedCodexRuntime {
+  const codexHome = defaults.codexHome ?? path.join(SKY_DIR, 'codex-home');
+  const promptPath = path.join(codexHome, 'sky-system-prompt.md');
+
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(promptPath, config.systemPrompt, 'utf8');
+  ensureCodexAuthSymlink(codexHome, defaults.codexAuthPath ?? defaultCodexAuthPath());
+
+  console.log(`[startup] codex home: ${codexHome}`);
+  console.log(`[startup] codex model instructions file: ${promptPath}`);
+  return { codexHome, promptPath };
+}
 
 async function flushStreamText(state: AcpSessionState): Promise<void> {
   const text = state.streamText;
@@ -230,22 +281,27 @@ function resolveCodexAgentAcpPath(): string {
   return fileURLToPath(import.meta.resolve('@agentclientprotocol/codex-acp/dist/index.js'));
 }
 
-function buildCodexAgentEnv(config: ProviderConfig, modelId: string): NodeJS.ProcessEnv {
+function buildCodexAgentEnv(modelId: string, runtime: PreparedCodexRuntime): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of CODEX_ENV_KEYS) {
     if (process.env[key] !== undefined) {
       env[key] = process.env[key];
     }
   }
+  env.CODEX_HOME = runtime.codexHome;
   env.CODEX_CONFIG = JSON.stringify({
     model: modelId,
-    developer_instructions: config.systemPrompt,
+    model_instructions_file: runtime.promptPath,
     project_doc_max_bytes: 0,
   });
   return env;
 }
 
-function resolveAcpAgentRuntime(parsed: ParsedModel, config: ProviderConfig): AcpAgentRuntime {
+function resolveAcpAgentRuntime(
+  parsed: ParsedModel,
+  config: ProviderConfig,
+  defaults: AcpProviderDefaults,
+): AcpAgentRuntime {
   switch (parsed.provider) {
     case 'anthropic':
       return {
@@ -253,10 +309,11 @@ function resolveAcpAgentRuntime(parsed: ParsedModel, config: ProviderConfig): Ac
         args: [resolveClaudeAgentAcpPath()],
       };
     case 'openai':
+      const codexRuntime = prepareCodexRuntime(config, defaults);
       return {
         command: process.execPath,
         args: [resolveCodexAgentAcpPath()],
-        env: buildCodexAgentEnv(config, parsed.modelId),
+        env: buildCodexAgentEnv(parsed.modelId, codexRuntime),
       };
   }
 }
@@ -332,7 +389,7 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
     closed: false,
   };
   const client = createClient(config, state);
-  const runtime = resolveAcpAgentRuntime(parsed, config);
+  const runtime = resolveAcpAgentRuntime(parsed, config, defaults);
   const agent = defaults.createAgentConnection
     ? defaults.createAgentConnection(client, runtime)
     : createProcessConnection(client, runtime);

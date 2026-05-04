@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createAcpProviderFactory } from '../dist/providers/acp.js';
 
@@ -16,6 +18,15 @@ function restoreEnv(key, value) {
     delete process.env[key];
   } else {
     process.env[key] = value;
+  }
+}
+
+async function withTempDir(fn) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'sky-acp-'));
+  try {
+    await fn(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -137,75 +148,105 @@ test('ACP provider creates a session and collects buffered text chunks', async (
   assert.deepEqual(fake.calls.prompt[0].prompt, [{ type: 'text', text: 'hi' }]);
 });
 
-test('ACP provider selects Codex ACP runtime for openai models', () => {
-  const fake = createFakeConnection();
-  const systemPrompt = 'system "quoted"\nnext';
-  const originalAppServerLogs = process.env.APP_SERVER_LOGS;
-  const originalCodexApiKey = process.env.CODEX_API_KEY;
-  const originalCodexHome = process.env.CODEX_HOME;
-  const originalCodexPath = process.env.CODEX_PATH;
-  const originalModelProvider = process.env.MODEL_PROVIDER;
-  const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
-  const originalSecret = process.env.SKY_SECRET_FOR_TEST;
+test('ACP provider selects Codex ACP runtime for openai models', async () => {
+  await withTempDir(async (tmp) => {
+    const fake = createFakeConnection();
+    const systemPrompt = 'system "quoted"\nnext';
+    const originalAppServerLogs = process.env.APP_SERVER_LOGS;
+    const originalCodexApiKey = process.env.CODEX_API_KEY;
+    const originalCodexHome = process.env.CODEX_HOME;
+    const originalCodexPath = process.env.CODEX_PATH;
+    const originalModelProvider = process.env.MODEL_PROVIDER;
+    const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+    const originalSecret = process.env.SKY_SECRET_FOR_TEST;
 
-  try {
-    process.env.APP_SERVER_LOGS = '/tmp/test-codex-logs';
-    process.env.CODEX_API_KEY = 'test-codex-key';
-    process.env.CODEX_HOME = '/tmp/test-codex-home';
-    process.env.CODEX_PATH = '/tmp/test-codex';
-    process.env.MODEL_PROVIDER = 'test-provider';
-    process.env.OPENAI_API_KEY = 'test-openai-key';
-    process.env.SKY_SECRET_FOR_TEST = 'hidden';
+    try {
+      process.env.APP_SERVER_LOGS = '/tmp/test-codex-logs';
+      process.env.CODEX_API_KEY = 'test-codex-key';
+      process.env.CODEX_HOME = '/tmp/test-codex-home';
+      process.env.CODEX_PATH = '/tmp/test-codex';
+      process.env.MODEL_PROVIDER = 'test-provider';
+      process.env.OPENAI_API_KEY = 'test-openai-key';
+      process.env.SKY_SECRET_FOR_TEST = 'hidden';
+
+      createAcpProviderFactory({
+        cwd: '/tmp/workspace',
+        codexHome: path.join(tmp, 'codex-home'),
+        createAgentConnection: fake.createAgentConnection,
+      }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
+
+      const runtime = fake.calls.runtimes[0];
+      const codexHome = path.join(tmp, 'codex-home');
+      const codexConfig = JSON.parse(runtime.env.CODEX_CONFIG);
+      assert.equal(runtime.command, process.execPath);
+      assert.equal(runtime.args.length, 1);
+      assert.equal(path.basename(runtime.args[0]), 'index.js');
+      assert.match(runtime.args[0], /@agentclientprotocol[+/]codex-acp/);
+      assert.match(runtime.args[0], /dist[/\\]index\.js$/);
+      assert.deepEqual(codexConfig, {
+        model: 'gpt-5.5',
+        model_instructions_file: path.join(codexHome, 'sky-system-prompt.md'),
+        project_doc_max_bytes: 0,
+      });
+      assert.equal('developer_instructions' in codexConfig, false);
+      assert.equal(runtime.env.APP_SERVER_LOGS, undefined);
+      assert.equal(runtime.env.CODEX_API_KEY, 'test-codex-key');
+      assert.equal(runtime.env.CODEX_HOME, codexHome);
+      assert.equal(runtime.env.CODEX_PATH, undefined);
+      assert.equal(runtime.env.MODEL_PROVIDER, undefined);
+      assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
+      assert.equal(runtime.env.SKY_SECRET_FOR_TEST, undefined);
+    } finally {
+      restoreEnv('APP_SERVER_LOGS', originalAppServerLogs);
+      restoreEnv('CODEX_API_KEY', originalCodexApiKey);
+      restoreEnv('CODEX_HOME', originalCodexHome);
+      restoreEnv('CODEX_PATH', originalCodexPath);
+      restoreEnv('MODEL_PROVIDER', originalModelProvider);
+      restoreEnv('OPENAI_API_KEY', originalOpenAiApiKey);
+      restoreEnv('SKY_SECRET_FOR_TEST', originalSecret);
+    }
+  });
+});
+
+test('ACP provider prepares isolated Codex home with prompt file and auth symlink', async () => {
+  await withTempDir(async (tmp) => {
+    const fake = createFakeConnection();
+    const codexHome = path.join(tmp, 'codex-home');
+    const codexAuthPath = path.join(tmp, 'auth.json');
+    const systemPrompt = 'system prompt\nfor codex';
+    await writeFile(codexAuthPath, '{"auth":true}', 'utf8');
 
     createAcpProviderFactory({
       cwd: '/tmp/workspace',
+      codexAuthPath,
+      codexHome,
       createAgentConnection: fake.createAgentConnection,
     }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
 
-    const runtime = fake.calls.runtimes[0];
-    assert.equal(runtime.command, process.execPath);
-    assert.equal(runtime.args.length, 1);
-    assert.equal(path.basename(runtime.args[0]), 'index.js');
-    assert.match(runtime.args[0], /@agentclientprotocol[+/]codex-acp/);
-    assert.match(runtime.args[0], /dist[/\\]index\.js$/);
-    assert.deepEqual(JSON.parse(runtime.env.CODEX_CONFIG), {
-      model: 'gpt-5.5',
-      developer_instructions: systemPrompt,
-      project_doc_max_bytes: 0,
-    });
-    assert.equal(runtime.env.APP_SERVER_LOGS, undefined);
-    assert.equal(runtime.env.CODEX_API_KEY, 'test-codex-key');
-    assert.equal(runtime.env.CODEX_HOME, '/tmp/test-codex-home');
-    assert.equal(runtime.env.CODEX_PATH, undefined);
-    assert.equal(runtime.env.MODEL_PROVIDER, undefined);
-    assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
-    assert.equal(runtime.env.SKY_SECRET_FOR_TEST, undefined);
-  } finally {
-    restoreEnv('APP_SERVER_LOGS', originalAppServerLogs);
-    restoreEnv('CODEX_API_KEY', originalCodexApiKey);
-    restoreEnv('CODEX_HOME', originalCodexHome);
-    restoreEnv('CODEX_PATH', originalCodexPath);
-    restoreEnv('MODEL_PROVIDER', originalModelProvider);
-    restoreEnv('OPENAI_API_KEY', originalOpenAiApiKey);
-    restoreEnv('SKY_SECRET_FOR_TEST', originalSecret);
-  }
+    const promptPath = path.join(codexHome, 'sky-system-prompt.md');
+    assert.equal(await readFile(promptPath, 'utf8'), systemPrompt);
+    assert.equal(await readlink(path.join(codexHome, 'auth.json')), codexAuthPath);
+  });
 });
 
 test('ACP provider creates openai sessions without Claude metadata', async () => {
-  const fake = createFakeConnection();
-  const provider = createAcpProviderFactory({
-    cwd: '/tmp/workspace',
-    createAgentConnection: fake.createAgentConnection,
-  }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5' });
+  await withTempDir(async (tmp) => {
+    const fake = createFakeConnection();
+    const provider = createAcpProviderFactory({
+      cwd: '/tmp/workspace',
+      codexHome: path.join(tmp, 'codex-home'),
+      createAgentConnection: fake.createAgentConnection,
+    }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5' });
 
-  await provider.send('hi');
-  const result = await provider.collect();
+    await provider.send('hi');
+    const result = await provider.collect();
 
-  assert.equal(result.sessionId, 'session-new');
-  assert.equal(fake.calls.newSession.length, 1);
-  assert.equal(fake.calls.newSession[0].cwd, '/tmp/workspace');
-  assert.deepEqual(fake.calls.newSession[0].mcpServers, []);
-  assert.equal('_meta' in fake.calls.newSession[0], false);
+    assert.equal(result.sessionId, 'session-new');
+    assert.equal(fake.calls.newSession.length, 1);
+    assert.equal(fake.calls.newSession[0].cwd, '/tmp/workspace');
+    assert.deepEqual(fake.calls.newSession[0].mcpServers, []);
+    assert.equal('_meta' in fake.calls.newSession[0], false);
+  });
 });
 
 test('ACP provider flushes buffered text when a non-agent update arrives', async () => {
