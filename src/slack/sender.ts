@@ -3,7 +3,6 @@ import { computeBackoffMs, sleep } from '../runtime/retry.js';
 
 export type SlackSenderOptions = {
   say: SayFn;
-  setStatus: (status: string) => Promise<unknown>;
   computeDelayMs?: (attempt: number) => number;
   sleep?: (delayMs: number) => Promise<void>;
 };
@@ -12,14 +11,6 @@ const MAX_SLACK_MESSAGE_LENGTH = 3500;
 
 export class SlackSender {
   constructor(private readonly options: SlackSenderOptions) {}
-
-  async setStatus(status: string): Promise<void> {
-    try {
-      await this.options.setStatus(status);
-    } catch (error) {
-      console.error(`[slack] setStatus failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
 
   async sendReply(text: string): Promise<void> {
     const chunks = text.match(new RegExp(`[\\s\\S]{1,${MAX_SLACK_MESSAGE_LENGTH}}`, 'g')) ?? ['(빈 응답)'];

@@ -97,7 +97,7 @@ posting Slack replies with chunking and retry.
 - `src/runtime/retry.ts` — keep existing retry/backoff helpers.
 
 **Verification:**
-- [ ] `pnpm build`
+- [x] `pnpm build`
 
 ---
 
@@ -172,3 +172,4 @@ or `생각 중`.
 
 - 2026-05-04: Started implementation on branch `remove-slack-assistant-status`.
 - 2026-05-04: Removed Slack Assistant status usage from `src/slack/assistant.ts`.
+- 2026-05-04: Simplified `SlackSender` to reply sending and retry only.
