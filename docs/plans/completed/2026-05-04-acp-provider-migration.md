@@ -1,7 +1,7 @@
 ---
 title: ACP Provider Migration
 type: refactor
-status: active
+status: completed
 created_at: 2026-05-04T05:54:03Z
 ---
 
@@ -429,3 +429,4 @@ Manual end-to-end verification:
 - 2026-05-04: Added model ownership to persisted sessions and ignored legacy or mismatched session records.
 - 2026-05-04: Moved `restart_harness` to a stdio MCP server and removed direct Claude Agent SDK dependency.
 - 2026-05-04: Updated README, CLI metadata, and Telegram copy for ACP sessions.
+- 2026-05-04: Implementation completed.
