@@ -138,7 +138,7 @@ function toAcpMcpServers(config: ProviderConfig): McpServer[] {
   return servers.filter(isAcpMcpServer);
 }
 
-function buildSessionParams(config: ProviderConfig, defaults: AcpProviderDefaults): NewSessionRequest {
+function buildClaudeSessionParams(config: ProviderConfig, defaults: AcpProviderDefaults): NewSessionRequest {
   const parsed = parseProviderModel(config.model);
   return {
     cwd: config.cwd ?? defaults.cwd,
@@ -162,6 +162,21 @@ function buildSessionParams(config: ProviderConfig, defaults: AcpProviderDefault
       },
     },
   };
+}
+
+function buildCodexSessionParams(config: ProviderConfig, defaults: AcpProviderDefaults): NewSessionRequest {
+  return {
+    cwd: config.cwd ?? defaults.cwd,
+    mcpServers: toAcpMcpServers(config),
+  };
+}
+
+function buildSessionParams(config: ProviderConfig, defaults: AcpProviderDefaults): NewSessionRequest {
+  const parsed = parseProviderModel(config.model);
+  if (parsed.provider === 'anthropic') {
+    return buildClaudeSessionParams(config, defaults);
+  }
+  return buildCodexSessionParams(config, defaults);
 }
 
 function resolveClaudeAgentAcpPath(): string {
@@ -196,6 +211,21 @@ function resolveCodexAgentAcpPath(): string {
   return requireFromCodexAcp.resolve(`${packageName}/bin/${binaryName}`);
 }
 
+function formatTomlValue(value: string): string {
+  return JSON.stringify(value);
+}
+
+function buildCodexAgentArgs(config: ProviderConfig, modelId: string): string[] {
+  return [
+    '-c',
+    `model=${formatTomlValue(modelId)}`,
+    '-c',
+    `developer_instructions=${formatTomlValue(config.systemPrompt)}`,
+    '-c',
+    'project_doc_max_bytes=0',
+  ];
+}
+
 function resolveAcpAgentRuntime(config: ProviderConfig): AcpAgentRuntime {
   const parsed = parseProviderModel(config.model);
   if (parsed.provider === 'anthropic') {
@@ -207,7 +237,7 @@ function resolveAcpAgentRuntime(config: ProviderConfig): AcpAgentRuntime {
 
   return {
     command: resolveCodexAgentAcpPath(),
-    args: [],
+    args: buildCodexAgentArgs(config, parsed.modelId),
   };
 }
 

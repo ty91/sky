@@ -191,9 +191,9 @@ Do not pass Claude `tools`, `maxTurns`, `settingSources`, or `extraArgs` to Code
 - `/Users/taeyoung/Developer/oss/codex/codex-rs/core/src/project_doc.rs` — `project_doc_max_bytes=0` disables project-doc reading.
 
 **Verification:**
-- [ ] Tests assert `openai/gpt-5.5` produces Codex args with model, developer instructions, and `project_doc_max_bytes=0`.
-- [ ] Tests assert OpenAI session params do not include `_meta.claudeCode`.
-- [ ] Tests assert Anthropic session params remain unchanged.
+- [x] Tests assert `openai/gpt-5.5` produces Codex args with model, developer instructions, and `project_doc_max_bytes=0`.
+- [x] Tests assert OpenAI session params do not include `_meta.claudeCode`.
+- [x] Tests assert Anthropic session params remain unchanged.
 
 ---
 
@@ -294,3 +294,4 @@ Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expe
 - 2026-05-04: Added `@zed-industries/codex-acp` dependency and verified the lockfile with `pnpm install --frozen-lockfile`.
 - 2026-05-04: Extended provider model parsing to accept `openai/*` and verified with `pnpm build` and `pnpm test`.
 - 2026-05-04: Added provider-specific ACP runtime selection and verified Codex runtime selection plus `pnpm typecheck`.
+- 2026-05-04: Added Codex CLI config overrides and OpenAI session params without Claude metadata, verified with ACP provider tests.

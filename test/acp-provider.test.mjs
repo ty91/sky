@@ -125,15 +125,40 @@ test('ACP provider creates a session and collects buffered text chunks', async (
 
 test('ACP provider selects Codex ACP runtime for openai models', () => {
   const fake = createFakeConnection();
+  const systemPrompt = 'system "quoted"\nnext';
 
   createAcpProviderFactory({
     cwd: '/tmp/workspace',
     createAgentConnection: fake.createAgentConnection,
-  }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5' });
+  }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
 
   const runtime = fake.calls.runtimes[0];
   assert.equal(path.basename(runtime.command), process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp');
-  assert.deepEqual(runtime.args, []);
+  assert.deepEqual(runtime.args, [
+    '-c',
+    'model="gpt-5.5"',
+    '-c',
+    `developer_instructions=${JSON.stringify(systemPrompt)}`,
+    '-c',
+    'project_doc_max_bytes=0',
+  ]);
+});
+
+test('ACP provider creates openai sessions without Claude metadata', async () => {
+  const fake = createFakeConnection();
+  const provider = createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5' });
+
+  await provider.send('hi');
+  const result = await provider.collect();
+
+  assert.equal(result.sessionId, 'session-new');
+  assert.equal(fake.calls.newSession.length, 1);
+  assert.equal(fake.calls.newSession[0].cwd, '/tmp/workspace');
+  assert.deepEqual(fake.calls.newSession[0].mcpServers, []);
+  assert.equal('_meta' in fake.calls.newSession[0], false);
 });
 
 test('ACP provider flushes buffered text when a non-agent update arrives', async () => {
