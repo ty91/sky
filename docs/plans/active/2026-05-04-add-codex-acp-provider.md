@@ -240,7 +240,7 @@ Update public docs so settings examples and feature descriptions match the new p
 Do not use relative-time phrases. Describe only the repository's state after the implementation.
 
 **Verification:**
-- [ ] README examples are internally consistent.
+- [x] README examples are internally consistent.
 
 ---
 
@@ -296,3 +296,4 @@ Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expe
 - 2026-05-04: Added provider-specific ACP runtime selection and verified Codex runtime selection plus `pnpm typecheck`.
 - 2026-05-04: Added Codex CLI config overrides and OpenAI session params without Claude metadata, verified with ACP provider tests.
 - 2026-05-04: Added permission selection regression tests for Claude metadata, title fallback, and unknown tool names.
+- 2026-05-04: Updated README provider, settings, and authentication examples for `openai/gpt-5.5`.
