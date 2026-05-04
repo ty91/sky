@@ -132,22 +132,42 @@ test('ACP provider creates a session and collects buffered text chunks', async (
 test('ACP provider selects Codex ACP runtime for openai models', () => {
   const fake = createFakeConnection();
   const systemPrompt = 'system "quoted"\nnext';
+  const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+  const originalSecret = process.env.SKY_SECRET_FOR_TEST;
 
-  createAcpProviderFactory({
-    cwd: '/tmp/workspace',
-    createAgentConnection: fake.createAgentConnection,
-  }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.SKY_SECRET_FOR_TEST = 'hidden';
 
-  const runtime = fake.calls.runtimes[0];
-  assert.equal(path.basename(runtime.command), process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp');
-  assert.deepEqual(runtime.args, [
-    '-c',
-    'model="gpt-5.5"',
-    '-c',
-    `developer_instructions=${JSON.stringify(systemPrompt)}`,
-    '-c',
-    'project_doc_max_bytes=0',
-  ]);
+    createAcpProviderFactory({
+      cwd: '/tmp/workspace',
+      createAgentConnection: fake.createAgentConnection,
+    }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
+
+    const runtime = fake.calls.runtimes[0];
+    assert.equal(path.basename(runtime.command), process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp');
+    assert.deepEqual(runtime.args, [
+      '-c',
+      'model="gpt-5.5"',
+      '-c',
+      `developer_instructions=${JSON.stringify(systemPrompt)}`,
+      '-c',
+      'project_doc_max_bytes=0',
+    ]);
+    assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
+    assert.equal(runtime.env.SKY_SECRET_FOR_TEST, undefined);
+  } finally {
+    if (originalOpenAiApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+    }
+    if (originalSecret === undefined) {
+      delete process.env.SKY_SECRET_FOR_TEST;
+    } else {
+      process.env.SKY_SECRET_FOR_TEST = originalSecret;
+    }
+  }
 });
 
 test('ACP provider creates openai sessions without Claude metadata', async () => {
@@ -288,12 +308,37 @@ test('ACP provider permission selection falls back to tool title', async () => {
   });
 });
 
-test('ACP provider permission selection allows unknown tool names', async () => {
+test('ACP provider permission selection rejects unknown tool names when tools are configured', async () => {
   const fake = createFakeConnection();
   createAcpProviderFactory({
     cwd: '/tmp/workspace',
     createAgentConnection: fake.createAgentConnection,
   }).create({ ...BASE_CONFIG, tools: ['Read'] });
+
+  const response = await fake.requestPermission({
+    toolCall: {
+      _meta: {},
+    },
+    options: [
+      { optionId: 'allow-unknown', kind: 'allow_once' },
+      { optionId: 'reject-unknown', kind: 'reject_once' },
+    ],
+  });
+
+  assert.deepEqual(response, {
+    outcome: {
+      outcome: 'selected',
+      optionId: 'reject-unknown',
+    },
+  });
+});
+
+test('ACP provider permission selection allows unknown tool names without a tools allowlist', async () => {
+  const fake = createFakeConnection();
+  createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create({ ...BASE_CONFIG, tools: undefined });
 
   const response = await fake.requestPermission({
     toolCall: {
