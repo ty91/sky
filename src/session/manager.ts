@@ -189,6 +189,19 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       return deferred.promise;
     },
 
+    has(key: string, agent?: AgentConfig): boolean {
+      if (sessions.has(key)) {
+        return true;
+      }
+
+      const persisted = options.store?.get(key);
+      if (!persisted) {
+        return false;
+      }
+
+      return agent ? persisted.model === resolveAgentModel(agent) : true;
+    },
+
     getSessionId(key: string): string | undefined {
       return sessions.get(key)?.sessionId;
     },

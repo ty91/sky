@@ -1,8 +1,9 @@
-import type { SayFn } from '@slack/bolt';
 import { computeBackoffMs, sleep } from '../runtime/retry.js';
 
+export type SlackSayFn = (text: string) => Promise<unknown>;
+
 export type SlackSenderOptions = {
-  say: SayFn;
+  say: SlackSayFn;
   computeDelayMs?: (attempt: number) => number;
   sleep?: (delayMs: number) => Promise<void>;
 };

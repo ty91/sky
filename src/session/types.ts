@@ -58,6 +58,8 @@ export type SessionManager = {
    */
   open(key: string, agent: AgentConfig): void;
   send(key: string, text: string, options?: CollectOptions): Promise<SendResult>;
+  /** Return whether a session is open in memory or resumable from the store for `agent`. */
+  has(key: string, agent?: AgentConfig): boolean;
   getSessionId(key: string): string | undefined;
   /** Terminate the in-memory session; keeps any persisted record for later resume. */
   close(key: string): Promise<void>;

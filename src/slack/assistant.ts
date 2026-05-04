@@ -3,42 +3,9 @@ import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { SessionManager } from '../session/manager.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
+import { addReaction, removeReaction } from './reactions.js';
 import { SlackSender } from './sender.js';
-
-// ── Reaction helpers ──
-
-type ReactionsClient = {
-  reactions: {
-    add(params: { channel: string; name: string; timestamp: string }): Promise<unknown>;
-    remove(params: { channel: string; name: string; timestamp: string }): Promise<unknown>;
-  };
-};
-
-async function addReaction(client: ReactionsClient, channel: string, timestamp: string, name: string): Promise<void> {
-  try {
-    console.log(`[slack] reactions.add(${name}) channel=${channel} ts=${timestamp}`);
-    const result = await client.reactions.add({ channel, name, timestamp });
-    console.log(`[slack] reactions.add(${name}) result: ${JSON.stringify(result)}`);
-  } catch (error: unknown) {
-    // already_reacted is harmless — ignore it, log everything else
-    const msg = error instanceof Error ? error.message : String(error);
-    if (!msg.includes('already_reacted')) {
-      console.error(`[slack] reactions.add(${name}) failed: ${msg}`);
-    }
-  }
-}
-
-async function removeReaction(client: ReactionsClient, channel: string, timestamp: string, name: string): Promise<void> {
-  try {
-    await client.reactions.remove({ channel, name, timestamp });
-  } catch (error: unknown) {
-    // no_reaction means it was already removed — harmless
-    const msg = error instanceof Error ? error.message : String(error);
-    if (!msg.includes('no_reaction')) {
-      console.error(`[slack] reactions.remove(${name}) failed: ${msg}`);
-    }
-  }
-}
+import { toThreadId } from './thread-id.js';
 
 export type SlackAssistantOptions = {
   sessionManager: SessionManager;
@@ -50,10 +17,6 @@ export const DEFAULT_SUGGESTED_PROMPTS = [
   { title: '코드 리뷰', message: '최근 변경사항을 리뷰해줘' },
   { title: '아이디어 브레인스토밍', message: '새로운 기능 아이디어를 함께 생각해보자' },
 ] as const;
-
-export function toThreadId(channelId: string, threadTs: string): string {
-  return `${channelId}:${threadTs}`;
-}
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
   const { sessionManager, mainAgent } = options;
