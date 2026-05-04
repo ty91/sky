@@ -8,7 +8,6 @@ export type SlackCommandEvent = {
 
 export type SlackMessageEvent = SlackCommandEvent & {
   text: string;
-  setStatus(status: string): Promise<void>;
 };
 
 export type SlackHandlers = {
