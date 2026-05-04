@@ -97,8 +97,8 @@ Rules:
 - `test/provider-model.test.mjs` — existing parser regression tests.
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] `pnpm test`
+- [x] `pnpm build`
+- [x] `pnpm test`
 
 ---
 
@@ -292,3 +292,4 @@ Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expe
 ## Progress Log
 
 - 2026-05-04: Added `@zed-industries/codex-acp` dependency and verified the lockfile with `pnpm install --frozen-lockfile`.
+- 2026-05-04: Extended provider model parsing to accept `openai/*` and verified with `pnpm build` and `pnpm test`.

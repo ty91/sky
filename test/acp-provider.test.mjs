@@ -249,7 +249,7 @@ test('ACP provider rejects unsupported model providers', () => {
       createAcpProviderFactory({
         cwd: '/tmp/workspace',
         createAgentConnection: fake.createAgentConnection,
-      }).create({ ...BASE_CONFIG, model: 'openai/gpt-5-5' }),
-    /Unsupported model provider: openai/,
+      }).create({ ...BASE_CONFIG, model: 'google/gemini-pro' }),
+    /Unsupported model provider: google/,
   );
 });
