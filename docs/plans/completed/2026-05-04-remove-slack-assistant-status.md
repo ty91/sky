@@ -1,7 +1,7 @@
 ---
 title: Remove Slack Assistant Status
 type: refactor
-status: active
+status: completed
 created_at: 2026-05-04T12:59:54Z
 ---
 
@@ -175,3 +175,4 @@ or `생각 중`.
 - 2026-05-04: Simplified `SlackSender` to reply sending and retry only.
 - 2026-05-04: Removed stale status typing from `src/slack/transport.ts`.
 - 2026-05-04: Updated Slack tests to verify replies and reaction lifecycle without status calls.
+- 2026-05-04: Implementation completed.
