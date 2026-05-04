@@ -79,7 +79,7 @@ pnpm remove grammy @grammyjs/runner
 - `pnpm-lock.yaml` — package manager generated dependency graph update.
 
 **Verification:**
-- [ ] `rg -n "grammy|@grammyjs/runner" package.json pnpm-lock.yaml` returns no live dependency references.
+- [x] `rg -n "grammy|@grammyjs/runner" package.json pnpm-lock.yaml` returns no live dependency references.
 
 ---
 
@@ -223,3 +223,7 @@ rg -n "telegram|Telegram|grammy|polling" src test README.md package.json
 
 If the final `rg` reports only historical completed plan references, leave them
 unchanged because they document past repo state.
+
+## Progress Log
+
+- 2026-05-04: Removed Telegram package dependencies and updated package metadata.
