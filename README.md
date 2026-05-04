@@ -9,6 +9,9 @@ Slack에서 ACP 기반 에이전트 봇을 **CLI + 데몬**으로 다루는 프�
 - 지원되는 모델 provider는 `anthropic/*`, `openai/*`입니다. 예시는 `anthropic/claude-opus-4-7`, `openai/gpt-5.5`입니다.
 - `anthropic/*`는 `@agentclientprotocol/claude-agent-acp`를 사용하고, `openai/*`는 `@agentclientprotocol/codex-acp`를 통해 Codex `app-server`를 사용합니다.
 - 같은 Slack assistant thread의 메시지를 같은 ACP 세션 컨텍스트로 처리합니다.
+- public/private Slack 채널에서는 Sky를 한 번 멘션하면 해당 Slack thread에서 ACP 세션이 시작됩니다.
+- ACP 세션이 저장된 채널 thread는 이후 멘션 없이도 같은 세션으로 이어집니다.
+- 채널 thread 중간에서 Sky를 처음 멘션하면 이전 thread 메시지가 첫 요청 앞에 포함됩니다.
 - `~/.sky/settings.json`의 `workspace` 아래 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 `systemPrompt`로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, 모델, workspace를 보여줍니다.
@@ -19,6 +22,8 @@ Slack에서 ACP 기반 에이전트 봇을 **CLI + 데몬**으로 다루는 프�
 
 - Node.js 18+
 - Slack bot token + app token (Socket Mode 사용 시)
+- Slack app event subscriptions: `app_mention`, public channel message events, private channel message events
+- Slack scopes: `app_mentions.read`, `channels:history`, `groups:history`
 - `anthropic/*` 사용 시 **Claude Code 로컬 로그인 또는 Anthropic API key 중 하나**
 - `openai/*` 사용 시 **Codex/ChatGPT 로그인 또는 `CODEX_API_KEY`/`OPENAI_API_KEY` 중 하나**
 
@@ -117,3 +122,6 @@ sky run
 
 - Slack에서는 Assistant DM thread를 열면 새 세션이 시작됩니다.
 - 같은 Slack thread에 이어서 메시지를 보내면 같은 세션으로 이어집니다.
+- public/private 채널에서는 루트 메시지 또는 thread reply에서 Sky를 멘션하면 해당 Slack thread에 답변합니다.
+- ACP 세션 ID가 `~/.sky/sky.db`에 저장된 채널 thread는 멘션 없는 후속 reply도 같은 세션으로 처리합니다.
+- 채널 thread에서 처음 Sky를 멘션한 요청에는 해당 멘션 이전의 Slack thread history가 함께 전달됩니다.

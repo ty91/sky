@@ -226,7 +226,7 @@ Update Slack usage and requirements:
 Use current-state wording only.
 
 **Verification:**
-- [ ] README accurately reflects the implemented behavior and does not use relative-time phrases.
+- [x] README accurately reflects the implemented behavior and does not use relative-time phrases.
 
 ---
 
@@ -277,3 +277,4 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 - 2026-05-04: Step 2 completed. Added Slack thread history parsing and bounded prompt prepend formatting.
 - 2026-05-04: Step 3 completed. Added the testable Slack channel handler for session routing, history prepend, reactions, and thread replies.
 - 2026-05-04: Step 4 completed. Wired Slack channel handlers into the Bolt app while preserving the existing Assistant registration.
+- 2026-05-04: Step 5 completed. Documented Slack channel mention behavior and required app events/scopes.
