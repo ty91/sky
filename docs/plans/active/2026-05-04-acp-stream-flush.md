@@ -82,7 +82,7 @@ callback reference for the active collection.
 - Avoid changing exported provider types in `src/providers/types.ts`.
 
 **Verification:**
-- [ ] `pnpm build`
+- [x] `pnpm build`
 
 ---
 
@@ -158,3 +158,7 @@ completion.
 
 Run `pnpm build` first because tests import from `dist/`, then run the focused
 provider test. Run the full `pnpm test` gate before handoff.
+
+## Progress Log
+
+- 2026-05-04: Added ACP provider stream state and verified `pnpm build`.

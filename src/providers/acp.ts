@@ -45,6 +45,8 @@ type AcpSessionState = {
   sessionId?: string;
   pendingText?: string;
   finalText: string;
+  streamText: string;
+  streamOnMessage?: CollectOptions['onMessage'];
   closed: boolean;
 };
 
@@ -206,6 +208,7 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
   const state: AcpSessionState = {
     sessionId: config.resume,
     finalText: '',
+    streamText: '',
     closed: false,
   };
   const client = createClient(config, state);
