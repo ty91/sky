@@ -68,6 +68,8 @@ test('session manager creates sessions and persists new session ids via store', 
 
   assert.deepEqual(result, { kind: 'ok', text: 'reply' });
   assert.equal(sendCalls.length, 1);
+  assert.equal(sendCalls[0].config.sessionKey, 'thread-1');
+  assert.equal(sendCalls[0].config.model, 'opus');
   assert.equal(sendCalls[0].config.cwd, '/tmp/workspace');
   // system_prompt snapshot is persisted alongside the session id
   assert.deepEqual(calls.put, [

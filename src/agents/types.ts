@@ -1,4 +1,4 @@
-import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { ProviderMcpServerConfig } from '../providers/types.js';
 
 /**
  * Context handed to {@link AgentConfig.mcpServersFactory} when the session
@@ -10,7 +10,7 @@ export type McpFactoryContext = {
   sessionKey: string;
 };
 
-export type McpServersFactory = (ctx: McpFactoryContext) => Record<string, McpServerConfig>;
+export type McpServersFactory = (ctx: McpFactoryContext) => Record<string, ProviderMcpServerConfig>;
 
 export type AgentConfig = {
   name: string;
@@ -30,9 +30,9 @@ export type AgentConfig = {
    */
   systemPromptLoader?: () => string;
   /**
-   * Optional factory for per-session in-process MCP servers. Invoked every
-   * time the session manager opens a session so each session can receive its
-   * own bound tools (session key, channel, etc. captured in closures).
+   * Optional factory for per-session MCP servers. Invoked every time the
+   * session manager opens a session so each session can receive its own bound
+   * tools or stdio/http/sse server config.
    */
   mcpServersFactory?: McpServersFactory;
   model?: string;

@@ -176,7 +176,7 @@ ownership in `createProviderConfig()`. Store writes must include the model.
 - `test/session-manager.test.mjs`
 
 **Verification:**
-- [ ] `pnpm test -- test/session-manager.test.mjs`
+- [x] `pnpm test -- test/session-manager.test.mjs`
 
 ---
 
@@ -424,3 +424,4 @@ Manual end-to-end verification:
 
 - 2026-05-04: Added ACP and MCP runtime dependencies; `pnpm typecheck` passed.
 - 2026-05-04: Added provider-qualified model settings and parser; targeted settings/model tests passed.
+- 2026-05-04: Removed Claude SDK types from shared provider/agent config and passed session keys into provider configs.

@@ -49,7 +49,7 @@ function buildOptions(config: ProviderConfig, defaults: ClaudeProviderDefaults):
     systemPrompt: config.systemPrompt,
     maxTurns: config.maxTurns,
     ...(config.resume ? { resume: config.resume } : {}),
-    ...(config.mcpServers ? { mcpServers: config.mcpServers } : {}),
+    ...(config.mcpServers ? { mcpServers: config.mcpServers as Options['mcpServers'] } : {}),
     env: {
       ...process.env,
       CLAUDE_AGENT_SDK_CLIENT_APP: 'sky/0.5.0',

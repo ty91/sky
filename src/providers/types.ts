@@ -1,17 +1,40 @@
-import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+export type AcpStdioMcpServerConfig = {
+  type?: 'stdio';
+  name: string;
+  command: string;
+  args: string[];
+  env?: { name: string; value: string }[];
+};
+
+export type AcpHttpMcpServerConfig = {
+  type: 'http';
+  name: string;
+  url: string;
+  headers?: { name: string; value: string }[];
+};
+
+export type AcpSseMcpServerConfig = {
+  type: 'sse';
+  name: string;
+  url: string;
+  headers?: { name: string; value: string }[];
+};
+
+export type ProviderMcpServerConfig =
+  | AcpStdioMcpServerConfig
+  | AcpHttpMcpServerConfig
+  | AcpSseMcpServerConfig
+  | Record<string, unknown>;
 
 export type ProviderConfig = {
+  sessionKey: string;
   systemPrompt: string;
-  model?: string;
+  model: string;
   tools?: string[];
   maxTurns?: number;
   cwd?: string;
   resume?: string;
-  /**
-   * In-process MCP servers to expose to the underlying Claude Agent SDK
-   * `query()` call. Values are typically produced by `createSdkMcpServer()`.
-   */
-  mcpServers?: Record<string, McpServerConfig>;
+  mcpServers?: Record<string, ProviderMcpServerConfig>;
 };
 
 export type ProviderResult = {

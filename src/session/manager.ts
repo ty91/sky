@@ -10,6 +10,8 @@ import type {
 
 export { type SendResult, type SessionManager, type SessionManagerOptions } from './types.js';
 
+const DEFAULT_AGENT_MODEL = 'anthropic/claude-opus-4-7';
+
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -43,8 +45,9 @@ function createProviderConfig(
 ) {
   const mcpServers = agent.mcpServersFactory?.({ sessionKey });
   return {
+    sessionKey,
     systemPrompt,
-    model: agent.model,
+    model: agent.model ?? DEFAULT_AGENT_MODEL,
     tools: agent.tools,
     maxTurns: agent.maxTurns,
     cwd: agent.cwd ?? options.defaultCwd,
