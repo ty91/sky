@@ -68,7 +68,7 @@ test('legacy sessions.json is ignored after ACP migration', () => {
     legacy,
     JSON.stringify({
       'slack:C1:111.22': 'legacy-session-a',
-      'telegram:123': 'legacy-session-b',
+      'legacy:C2:333.44': 'legacy-session-b',
     }),
   );
 
@@ -87,7 +87,7 @@ import { openSessionStore } from './dist/session/store.js';
 const store = openSessionStore(${JSON.stringify(dbPath)});
 
 assert.equal(store.get('slack:C1:111.22'), undefined);
-assert.equal(store.get('telegram:123'), undefined);
+assert.equal(store.get('legacy:C2:333.44'), undefined);
 
 store.close();
 console.log('legacy-ignored-ok');

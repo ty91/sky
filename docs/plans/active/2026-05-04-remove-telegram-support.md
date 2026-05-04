@@ -156,7 +156,7 @@ Delete tests that only cover Telegram internals.
 - `test/retry.test.mjs` — replace Telegram-only timeout descriptions with generic descriptions if the wording no longer matches current runtime concepts.
 
 **Verification:**
-- [ ] `pnpm test`
+- [x] `pnpm test`
 
 ---
 
@@ -230,3 +230,4 @@ unchanged because they document past repo state.
 - 2026-05-04: Deleted Telegram runtime/source modules and removed live source references.
 - 2026-05-04: Verified Slack-required settings and startup compile successfully.
 - 2026-05-04: Verified status output reports Slack configuration, model, workspace, and daemon state.
+- 2026-05-04: Removed remaining transport-specific test fixtures and verified the test suite.

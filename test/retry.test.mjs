@@ -17,11 +17,11 @@ test('computeBackoffMs respects maxMs cap', () => {
 
 test('withTimeout rejects hung operations with timeout metadata', async () => {
   await assert.rejects(
-    withTimeout(new Promise(() => {}), 10, 'Telegram init'),
+    withTimeout(new Promise(() => {}), 10, 'Runtime init'),
     (error) => {
       assert.equal(error.name, 'TimeoutError');
       assert.equal(error.code, 'ETIMEDOUT');
-      assert.match(error.message, /Telegram init timed out after 10ms/);
+      assert.match(error.message, /Runtime init timed out after 10ms/);
       return true;
     },
   );
@@ -29,7 +29,7 @@ test('withTimeout rejects hung operations with timeout metadata', async () => {
 
 test('withTimeout aborts when signal is cancelled', async () => {
   const controller = new AbortController();
-  const promise = withTimeout(new Promise(() => {}), 1000, 'Telegram init', controller.signal);
+  const promise = withTimeout(new Promise(() => {}), 1000, 'Runtime init', controller.signal);
   controller.abort();
 
   await assert.rejects(promise, (error) => {

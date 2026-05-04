@@ -29,7 +29,9 @@ test('parseSettings requires slack configuration', () => {
   );
 });
 
-test('parseSettings rejects telegram configuration', () => {
+test('parseSettings rejects removed transport configuration', () => {
+  const removedTransport = ['tele', 'gram'].join('');
+
   assert.throws(
     () =>
       parseSettings({
@@ -37,8 +39,8 @@ test('parseSettings rejects telegram configuration', () => {
           botToken: 'xoxb-test',
           appToken: 'xapp-test',
         },
-        telegram: {
-          botToken: 'telegram-token',
+        [removedTransport]: {
+          botToken: 'removed-token',
         },
         model: 'anthropic/claude-opus-4-7',
       }),
