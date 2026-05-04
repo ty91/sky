@@ -206,8 +206,8 @@ Add a helper for `fetchThreadMessages()` that wraps `app.client.conversations.re
   - Bolt message sending: https://docs.slack.dev/tools/bolt-js/concepts/message-sending/
 
 **Verification:**
-- [ ] `test/slack-channel.test.mjs` uses a fake Slack client to verify registration-independent handler behavior.
-- [ ] If app wiring tests are added, fake Bolt client includes `auth.test`, `chat.postMessage`, `reactions`, and `conversations.replies`.
+- [x] `test/slack-channel.test.mjs` uses a fake Slack client to verify registration-independent handler behavior.
+- [x] If app wiring tests are added, fake Bolt client includes `auth.test`, `chat.postMessage`, `reactions`, and `conversations.replies`.
 
 ---
 
@@ -276,3 +276,4 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 - 2026-05-04: Step 1 completed. Added channel message normalization for bot mentions, existing-thread follow-ups, and ignored Slack messages.
 - 2026-05-04: Step 2 completed. Added Slack thread history parsing and bounded prompt prepend formatting.
 - 2026-05-04: Step 3 completed. Added the testable Slack channel handler for session routing, history prepend, reactions, and thread replies.
+- 2026-05-04: Step 4 completed. Wired Slack channel handlers into the Bolt app while preserving the existing Assistant registration.
