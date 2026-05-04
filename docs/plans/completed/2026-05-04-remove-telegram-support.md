@@ -1,7 +1,7 @@
 ---
 title: Remove Telegram Support
 type: refactor
-status: active
+status: completed
 created_at: 2026-05-04T07:22:38Z
 ---
 
@@ -232,3 +232,4 @@ unchanged because they document past repo state.
 - 2026-05-04: Verified status output reports Slack configuration, model, workspace, and daemon state.
 - 2026-05-04: Removed remaining transport-specific test fixtures and verified the test suite.
 - 2026-05-04: Updated README to describe Slack-only setup, operation, and usage.
+- 2026-05-04: Implementation completed.
