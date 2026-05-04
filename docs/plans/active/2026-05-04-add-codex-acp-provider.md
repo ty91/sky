@@ -72,7 +72,7 @@ pnpm add @zed-industries/codex-acp
 - `pnpm-lock.yaml` — package manager update, including platform optional dependencies.
 
 **Verification:**
-- [ ] `pnpm install --frozen-lockfile`
+- [x] `pnpm install --frozen-lockfile`
 
 ---
 
@@ -288,3 +288,7 @@ For an end-to-end smoke test after unit verification, configure a local `~/.sky/
 ```
 
 Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expected result: Sky starts a Codex ACP session, streams text back to Slack, persists the session id, and resumes the same thread after restart.
+
+## Progress Log
+
+- 2026-05-04: Added `@zed-industries/codex-acp` dependency and verified the lockfile with `pnpm install --frozen-lockfile`.
