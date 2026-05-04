@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
@@ -14,7 +15,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from '@agentclientprotocol/sdk';
-import { parseProviderModel } from './model.js';
+import { parseProviderModel, type ParsedModel } from './model.js';
 import type {
   CollectOptions,
   ProviderConfig,
@@ -26,7 +27,13 @@ import type {
 
 type AcpProviderDefaults = {
   cwd: string;
-  createAgentConnection?: (client: Client) => AcpAgentConnection;
+  createAgentConnection?: (client: Client, runtime: AcpAgentRuntime) => AcpAgentConnection;
+};
+
+type AcpAgentRuntime = {
+  command: string;
+  args: string[];
+  env?: NodeJS.ProcessEnv;
 };
 
 type AcpAgentConnection = {
@@ -50,6 +57,43 @@ type AcpSessionState = {
   closed: boolean;
 };
 
+const CODEX_PLATFORM_PACKAGES: Record<string, string> = {
+  'darwin/arm64': '@zed-industries/codex-acp-darwin-arm64',
+  'darwin/x64': '@zed-industries/codex-acp-darwin-x64',
+  'linux/arm64': '@zed-industries/codex-acp-linux-arm64',
+  'linux/x64': '@zed-industries/codex-acp-linux-x64',
+  'win32/arm64': '@zed-industries/codex-acp-win32-arm64',
+  'win32/x64': '@zed-industries/codex-acp-win32-x64',
+};
+
+const CODEX_ENV_KEYS = [
+  'CODEX_API_KEY',
+  'OPENAI_API_KEY',
+  'HOME',
+  'USERPROFILE',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'PATH',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'https_proxy',
+  'http_proxy',
+  'all_proxy',
+  'no_proxy',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'RUST_LOG',
+] as const;
+
 async function flushStreamText(state: AcpSessionState): Promise<void> {
   const text = state.streamText;
   if (!text) {
@@ -70,15 +114,21 @@ function extractToolName(params: RequestPermissionRequest): string | undefined {
   return params.toolCall.title ?? undefined;
 }
 
+function isAllowedTool(config: ProviderConfig, toolName: string | undefined): boolean {
+  if (!config.tools) {
+    return true;
+  }
+  if (!toolName) {
+    return false;
+  }
+  return config.tools.includes(toolName) || config.tools.some((name) => toolName.startsWith(`${name}(`));
+}
+
 function createClient(config: ProviderConfig, state: AcpSessionState): Client {
   return {
     async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
       const toolName = extractToolName(params);
-      const allowed =
-        !config.tools ||
-        !toolName ||
-        config.tools.includes(toolName) ||
-        config.tools.some((name) => toolName.startsWith(`${name}(`));
+      const allowed = isAllowedTool(config, toolName);
 
       const option = params.options.find((item) =>
         allowed ? item.kind.startsWith('allow') : item.kind.startsWith('reject'),
@@ -132,8 +182,11 @@ function toAcpMcpServers(config: ProviderConfig): McpServer[] {
   return servers.filter(isAcpMcpServer);
 }
 
-function buildSessionParams(config: ProviderConfig, defaults: AcpProviderDefaults): NewSessionRequest {
-  const parsed = parseProviderModel(config.model);
+function buildClaudeSessionParams(
+  parsed: ParsedModel,
+  config: ProviderConfig,
+  defaults: AcpProviderDefaults,
+): NewSessionRequest {
   return {
     cwd: config.cwd ?? defaults.cwd,
     mcpServers: toAcpMcpServers(config),
@@ -158,12 +211,88 @@ function buildSessionParams(config: ProviderConfig, defaults: AcpProviderDefault
   };
 }
 
+function buildCodexSessionParams(config: ProviderConfig, defaults: AcpProviderDefaults): NewSessionRequest {
+  return {
+    cwd: config.cwd ?? defaults.cwd,
+    mcpServers: toAcpMcpServers(config),
+  };
+}
+
+function buildSessionParams(
+  parsed: ParsedModel,
+  config: ProviderConfig,
+  defaults: AcpProviderDefaults,
+): NewSessionRequest {
+  switch (parsed.provider) {
+    case 'anthropic':
+      return buildClaudeSessionParams(parsed, config, defaults);
+    case 'openai':
+      return buildCodexSessionParams(config, defaults);
+  }
+}
+
 function resolveClaudeAgentAcpPath(): string {
   return fileURLToPath(import.meta.resolve('@agentclientprotocol/claude-agent-acp/dist/index.js'));
 }
 
-function createProcessConnection(client: Client): AcpAgentConnection {
-  const child = spawn(process.execPath, [resolveClaudeAgentAcpPath()], {
+function resolveCodexAgentAcpPath(): string {
+  const packageName = CODEX_PLATFORM_PACKAGES[`${process.platform}/${process.arch}`];
+  if (!packageName) {
+    throw new Error(`Unsupported Codex ACP platform: ${process.platform}/${process.arch}`);
+  }
+
+  const binaryName = process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp';
+  const codexAcpWrapperPath = fileURLToPath(
+    import.meta.resolve('@zed-industries/codex-acp/bin/codex-acp.js'),
+  );
+  const requireFromCodexAcp = createRequire(codexAcpWrapperPath);
+  return requireFromCodexAcp.resolve(`${packageName}/bin/${binaryName}`);
+}
+
+function formatTomlValue(value: string): string {
+  return JSON.stringify(value);
+}
+
+function buildCodexAgentArgs(config: ProviderConfig, modelId: string): string[] {
+  return [
+    '-c',
+    `model=${formatTomlValue(modelId)}`,
+    '-c',
+    `developer_instructions=${formatTomlValue(config.systemPrompt)}`,
+    '-c',
+    'project_doc_max_bytes=0',
+  ];
+}
+
+function buildCodexAgentEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of CODEX_ENV_KEYS) {
+    if (process.env[key] !== undefined) {
+      env[key] = process.env[key];
+    }
+  }
+  return env;
+}
+
+function resolveAcpAgentRuntime(parsed: ParsedModel, config: ProviderConfig): AcpAgentRuntime {
+  switch (parsed.provider) {
+    case 'anthropic':
+      return {
+        command: process.execPath,
+        args: [resolveClaudeAgentAcpPath()],
+      };
+    case 'openai':
+      return {
+        command: resolveCodexAgentAcpPath(),
+        args: buildCodexAgentArgs(config, parsed.modelId),
+        env: buildCodexAgentEnv(),
+      };
+  }
+}
+
+function createProcessConnection(client: Client, runtime: AcpAgentRuntime): AcpAgentConnection {
+  const child = spawn(runtime.command, runtime.args, {
+    env: runtime.env,
     stdio: ['pipe', 'pipe', 'inherit'],
   });
 
@@ -220,9 +349,10 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
     closed: false,
   };
   const client = createClient(config, state);
+  const runtime = resolveAcpAgentRuntime(parsed, config);
   const agent = defaults.createAgentConnection
-    ? defaults.createAgentConnection(client)
-    : createProcessConnection(client);
+    ? defaults.createAgentConnection(client, runtime)
+    : createProcessConnection(client, runtime);
 
   async function ensureInitialized(): Promise<InitializeResponse> {
     if (!state.initialized) {
@@ -234,7 +364,7 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
   async function ensureSession(): Promise<string> {
     await ensureInitialized();
 
-    const sessionParams = buildSessionParams(config, defaults);
+    const sessionParams = buildSessionParams(parsed, config, defaults);
     if (state.sessionId) {
       const params = { ...sessionParams, sessionId: state.sessionId };
       const resumed = await ignoreFailure(() => agent.resumeSession(params));

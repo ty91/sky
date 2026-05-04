@@ -10,8 +10,17 @@ test('parseProviderModel accepts anthropic model strings', () => {
   });
 });
 
+test('parseProviderModel accepts openai model strings', () => {
+  assert.deepEqual(parseProviderModel('openai/gpt-5.5'), {
+    provider: 'openai',
+    modelId: 'gpt-5.5',
+    raw: 'openai/gpt-5.5',
+  });
+});
+
 test('parseProviderModel keeps slashes inside the model id', () => {
   assert.equal(parseProviderModel('anthropic/custom/model').modelId, 'custom/model');
+  assert.equal(parseProviderModel('openai/custom/model').modelId, 'custom/model');
 });
 
 test('parseProviderModel rejects malformed model strings', () => {
@@ -21,5 +30,5 @@ test('parseProviderModel rejects malformed model strings', () => {
 });
 
 test('parseProviderModel rejects unsupported providers', () => {
-  assert.throws(() => parseProviderModel('openai/gpt-5-5'), /Unsupported model provider: openai/);
+  assert.throws(() => parseProviderModel('google/gemini-pro'), /Unsupported model provider: google/);
 });

@@ -1,5 +1,5 @@
 export type ParsedModel = {
-  provider: 'anthropic';
+  provider: 'anthropic' | 'openai';
   modelId: string;
   raw: string;
 };
@@ -13,7 +13,7 @@ export function parseProviderModel(value: string): ParsedModel {
   const provider = value.slice(0, separatorIndex);
   const modelId = value.slice(separatorIndex + 1);
 
-  if (provider !== 'anthropic') {
+  if (provider !== 'anthropic' && provider !== 'openai') {
     throw new Error(`Unsupported model provider: ${provider}`);
   }
 
