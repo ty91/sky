@@ -50,12 +50,14 @@ type AcpSessionState = {
   closed: boolean;
 };
 
-function isTextChunk(params: SessionNotification): string | undefined {
-  const update = params.update;
-  if (update.sessionUpdate !== 'agent_message_chunk') {
-    return undefined;
+async function flushStreamText(state: AcpSessionState): Promise<void> {
+  const text = state.streamText;
+  if (!text) {
+    return;
   }
-  return update.content.type === 'text' ? update.content.text : undefined;
+
+  state.streamText = '';
+  await state.streamOnMessage?.(text);
 }
 
 function extractToolName(params: RequestPermissionRequest): string | undefined {
@@ -95,12 +97,18 @@ function createClient(config: ProviderConfig, state: AcpSessionState): Client {
     },
 
     async sessionUpdate(params: SessionNotification): Promise<void> {
-      const text = isTextChunk(params);
-      if (!text) {
+      const update = params.update;
+      if (update.sessionUpdate !== 'agent_message_chunk') {
+        await flushStreamText(state);
+        return;
+      }
+      if (update.content.type !== 'text') {
         return;
       }
 
+      const text = update.content.text;
       state.finalText += text;
+      state.streamText += text;
     },
   };
 }
@@ -263,29 +271,34 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
 
       state.pendingText = undefined;
       state.finalText = '';
+      state.streamText = '';
+      state.streamOnMessage = options?.onMessage;
 
-      const sessionId = await ensureSession();
-      const response = await agent.prompt({
-        sessionId,
-        prompt: [{ type: 'text', text }],
-      });
+      try {
+        const sessionId = await ensureSession();
+        const response = await agent.prompt({
+          sessionId,
+          prompt: [{ type: 'text', text }],
+        });
 
-      if (response.stopReason === 'cancelled') {
-        throw new Error('ACP prompt was cancelled');
+        if (response.stopReason === 'cancelled') {
+          throw new Error('ACP prompt was cancelled');
+        }
+        if (response.stopReason !== 'end_turn') {
+          throw new Error(`ACP prompt stopped: ${response.stopReason}`);
+        }
+
+        await flushStreamText(state);
+        const finalText = state.finalText || '(No text response)';
+
+        return {
+          text: finalText,
+          sessionId,
+        };
+      } finally {
+        state.streamOnMessage = undefined;
+        state.streamText = '';
       }
-      if (response.stopReason !== 'end_turn') {
-        throw new Error(`ACP prompt stopped: ${response.stopReason}`);
-      }
-
-      const finalText = state.finalText || '(No text response)';
-      if (options?.onMessage) {
-        await options.onMessage(finalText);
-      }
-
-      return {
-        text: finalText,
-        sessionId,
-      };
     },
 
     async interrupt(): Promise<void> {

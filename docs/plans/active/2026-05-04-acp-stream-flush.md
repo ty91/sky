@@ -108,7 +108,7 @@ that would duplicate chunks already flushed during the turn.
   with `SlackSender.sendReply`.
 
 **Verification:**
-- [ ] `pnpm build`
+- [x] `pnpm build`
 
 ---
 
@@ -162,3 +162,4 @@ provider test. Run the full `pnpm test` gate before handoff.
 ## Progress Log
 
 - 2026-05-04: Added ACP provider stream state and verified `pnpm build`.
+- 2026-05-04: Implemented ACP stream flushing on non-agent updates and prompt completion.
