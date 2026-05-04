@@ -45,7 +45,6 @@ type AcpSessionState = {
   sessionId?: string;
   pendingText?: string;
   finalText: string;
-  onMessage?: (text: string) => Promise<void>;
   closed: boolean;
 };
 
@@ -99,10 +98,7 @@ function createClient(config: ProviderConfig, state: AcpSessionState): Client {
         return;
       }
 
-      state.finalText = text;
-      if (state.onMessage) {
-        await state.onMessage(text);
-      }
+      state.finalText += text;
     },
   };
 }
@@ -263,18 +259,12 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
 
       state.pendingText = undefined;
       state.finalText = '';
-      state.onMessage = options?.onMessage;
 
       const sessionId = await ensureSession();
-      let response: { stopReason: string };
-      try {
-        response = await agent.prompt({
-          sessionId,
-          prompt: [{ type: 'text', text }],
-        });
-      } finally {
-        state.onMessage = undefined;
-      }
+      const response = await agent.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text }],
+      });
 
       if (response.stopReason === 'cancelled') {
         throw new Error('ACP prompt was cancelled');
@@ -283,8 +273,13 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
         throw new Error(`ACP prompt stopped: ${response.stopReason}`);
       }
 
+      const finalText = state.finalText || '(No text response)';
+      if (options?.onMessage) {
+        await options.onMessage(finalText);
+      }
+
       return {
-        text: state.finalText || '(No text response)',
+        text: finalText,
         sessionId,
       };
     },
