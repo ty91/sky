@@ -122,8 +122,8 @@ Make Slack the only configured transport.
 - Change the CLI description to Slack-only wording.
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] `pnpm test -- test/settings.test.mjs`
+- [x] `pnpm build`
+- [x] `pnpm test -- test/settings.test.mjs`
 
 ---
 
@@ -228,3 +228,4 @@ unchanged because they document past repo state.
 
 - 2026-05-04: Removed Telegram package dependencies and updated package metadata.
 - 2026-05-04: Deleted Telegram runtime/source modules and removed live source references.
+- 2026-05-04: Verified Slack-required settings and startup compile successfully.
