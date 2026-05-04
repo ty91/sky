@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
 import { runMemoryAgent } from '../agents/memory/agent.js';
-import { createClaudeProviderFactory } from '../providers/claude.js';
+import { createAcpProviderFactory } from '../providers/acp.js';
 import { createSessionManager } from '../session/manager.js';
 
 // L2 Working Memory Agent runs every 5 minutes via cron.
@@ -15,7 +15,7 @@ export const memoryCommand = new Command('memory')
     const settings = loadSettings({ silent: true });
     console.log('[memory] starting L2 working memory agent...');
     const sessionManager = createSessionManager({
-      providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
+      providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
       defaultCwd: settings.workspace,
     });
 

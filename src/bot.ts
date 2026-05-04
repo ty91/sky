@@ -6,7 +6,7 @@ import type { AgentConfig } from './agents/types.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { BotRuntime } from './runtime/bot-runtime.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
-import { createClaudeProviderFactory } from './providers/claude.js';
+import { createAcpProviderFactory } from './providers/acp.js';
 import { createSessionManager, type SessionManager } from './session/manager.js';
 import { openSessionStore } from './session/store.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
@@ -183,7 +183,7 @@ export async function startBot(): Promise<void> {
   const settings = loadSettings();
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
-  console.log(`[startup] model: ${settings.claude.model}`);
+  console.log(`[startup] model: ${settings.model}`);
   console.log(`[startup] workspace: ${settings.workspace}`);
 
   const scheduleRestart = makeRestartScheduler();
@@ -194,14 +194,14 @@ export async function startBot(): Promise<void> {
   const mainAgent = createMainAgentConfig({
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,
-    model: settings.claude.model,
+    model: settings.model,
     onRestartRequested: () => scheduleRestart(),
   });
 
   const sessionStore = openSessionStore();
 
   const sessionManager = createSessionManager({
-    providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
+    providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
     defaultCwd: settings.workspace,
     store: sessionStore,
   });

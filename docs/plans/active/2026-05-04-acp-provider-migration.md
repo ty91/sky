@@ -132,8 +132,8 @@ Rules:
 `src/agents/dream/agent.ts`
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] `pnpm test -- test/settings.test.mjs`
+- [x] `pnpm build`
+- [x] `pnpm test -- test/settings.test.mjs`
 
 ---
 
@@ -423,3 +423,4 @@ Manual end-to-end verification:
 ## Progress Log
 
 - 2026-05-04: Added ACP and MCP runtime dependencies; `pnpm typecheck` passed.
+- 2026-05-04: Added provider-qualified model settings and parser; targeted settings/model tests passed.

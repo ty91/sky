@@ -53,7 +53,7 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
     name: 'main',
     systemPrompt: options.systemPrompt,
     systemPromptLoader: options.systemPromptLoader,
-    model: options.model ?? 'claude-opus-4-7',
+    model: options.model ?? 'anthropic/claude-opus-4-7',
     tools: [...MAIN_AGENT_TOOLS],
     mcpServersFactory: ({ sessionKey }) => {
       const { channelId, threadTs } = parseSessionKey(sessionKey);

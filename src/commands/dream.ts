@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
 import { runDreamAgent, dreamDailyFilePath, type DreamStep } from '../agents/dream/agent.js';
-import { createClaudeProviderFactory } from '../providers/claude.js';
+import { createAcpProviderFactory } from '../providers/acp.js';
 import { createSessionManager } from '../session/manager.js';
 
 // L3 Dream Agent runs every day at 02:00 KST via cron.
@@ -31,7 +31,7 @@ export const dreamCommand = new Command('dream')
     console.log('[dream] starting L3 dream agent…');
 
     const sessionManager = createSessionManager({
-      providerFactory: createClaudeProviderFactory({ cwd: settings.workspace }),
+      providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
       defaultCwd: settings.workspace,
     });
 
