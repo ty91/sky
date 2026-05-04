@@ -228,9 +228,9 @@ during the transition. The final runtime path should not call Claude SDK
 `src/session/manager.ts`; ACP SDK `ClientSideConnection` and `ndJsonStream`.
 
 **Verification:**
-- [ ] Unit test fake ACP prompt flow.
-- [ ] Unit test cancel maps to ACP cancel.
-- [ ] Unit test process/JSON-RPC errors return provider errors.
+- [x] Unit test fake ACP prompt flow.
+- [x] Unit test cancel maps to ACP cancel.
+- [x] Unit test process/JSON-RPC errors return provider errors.
 
 ---
 
@@ -425,3 +425,4 @@ Manual end-to-end verification:
 - 2026-05-04: Added ACP and MCP runtime dependencies; `pnpm typecheck` passed.
 - 2026-05-04: Added provider-qualified model settings and parser; targeted settings/model tests passed.
 - 2026-05-04: Removed Claude SDK types from shared provider/agent config and passed session keys into provider configs.
+- 2026-05-04: Replaced the direct Claude provider with an ACP provider and covered prompt, cancel, resume fallback, and error paths.
