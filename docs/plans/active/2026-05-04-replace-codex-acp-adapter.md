@@ -74,7 +74,7 @@ pnpm add @agentclientprotocol/codex-acp
 - `pnpm-lock.yaml` — update lockfile entries for `@agentclientprotocol/codex-acp` and its dependencies, including `@openai/codex`.
 
 **Verification:**
-- [ ] `pnpm install --frozen-lockfile`
+- [x] `pnpm install --frozen-lockfile`
 
 ---
 
@@ -234,3 +234,7 @@ pnpm test
 ```
 
 For end-to-end smoke verification after unit tests pass, configure `~/.sky/settings.json` with `model: "openai/gpt-5.5"`, ensure Codex auth is available through login or environment, run `pnpm dev` or `sky run`, and send a Slack Assistant DM thread prompt. Confirm that the response streams back and that the same Slack thread resumes the same ACP session.
+
+## Progress Log
+
+- 2026-05-04: Replaced the Codex ACP dependency with `@agentclientprotocol/codex-acp` and verified the lockfile with `pnpm install --frozen-lockfile`.
