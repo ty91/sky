@@ -135,9 +135,9 @@ completion.
   expectations only where needed.
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] `pnpm test -- test/acp-provider.test.mjs`
-- [ ] `pnpm test`
+- [x] `pnpm build`
+- [x] `pnpm test -- test/acp-provider.test.mjs`
+- [x] `pnpm test`
 
 ---
 
@@ -163,3 +163,4 @@ provider test. Run the full `pnpm test` gate before handoff.
 
 - 2026-05-04: Added ACP provider stream state and verified `pnpm build`.
 - 2026-05-04: Implemented ACP stream flushing on non-agent updates and prompt completion.
+- 2026-05-04: Added ACP provider regression coverage and verified build, focused test command, and full test suite.

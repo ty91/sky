@@ -25,6 +25,12 @@ function createFakeConnection(overrides = {}) {
 
   const connection = {
     calls,
+    sessionUpdate: async (params) => {
+      if (!client) {
+        throw new Error('ACP test client was not initialized');
+      }
+      await client.sessionUpdate(params);
+    },
     createAgentConnection: (nextClient) => {
       client = nextClient;
       return {
@@ -110,6 +116,59 @@ test('ACP provider creates a session and collects buffered text chunks', async (
   assert.equal(fake.calls.newSession[0]._meta.claudeCode.options.model, 'claude-opus-4-7');
   assert.deepEqual(fake.calls.newSession[0]._meta.claudeCode.options.settingSources, []);
   assert.deepEqual(fake.calls.prompt[0].prompt, [{ type: 'text', text: 'hi' }]);
+});
+
+test('ACP provider flushes buffered text when a non-agent update arrives', async () => {
+  const fake = createFakeConnection({
+    prompt: async (params) => {
+      fake.calls.prompt.push(params);
+      await fake.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: 'Before tool. ',
+          },
+        },
+      });
+      await fake.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool-1',
+          title: 'Read',
+          status: 'pending',
+        },
+      });
+      await fake.sessionUpdate({
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: 'After tool.',
+          },
+        },
+      });
+      return { stopReason: 'end_turn' };
+    },
+  });
+  const provider = createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create(BASE_CONFIG);
+  const streamed = [];
+
+  await provider.send('hi');
+  const result = await provider.collect({
+    onMessage: async (text) => {
+      streamed.push(text);
+    },
+  });
+
+  assert.deepEqual(result, { text: 'Before tool. After tool.', sessionId: 'session-new' });
+  assert.deepEqual(streamed, ['Before tool. ', 'After tool.']);
 });
 
 test('ACP provider maps interrupt to session cancel', async () => {
