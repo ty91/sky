@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
@@ -55,15 +54,6 @@ type AcpSessionState = {
   streamText: string;
   streamOnMessage?: CollectOptions['onMessage'];
   closed: boolean;
-};
-
-const CODEX_PLATFORM_PACKAGES: Record<string, string> = {
-  'darwin/arm64': '@zed-industries/codex-acp-darwin-arm64',
-  'darwin/x64': '@zed-industries/codex-acp-darwin-x64',
-  'linux/arm64': '@zed-industries/codex-acp-linux-arm64',
-  'linux/x64': '@zed-industries/codex-acp-linux-x64',
-  'win32/arm64': '@zed-industries/codex-acp-win32-arm64',
-  'win32/x64': '@zed-industries/codex-acp-win32-x64',
 };
 
 const CODEX_ENV_KEYS = [
@@ -236,32 +226,7 @@ function resolveClaudeAgentAcpPath(): string {
 }
 
 function resolveCodexAgentAcpPath(): string {
-  const packageName = CODEX_PLATFORM_PACKAGES[`${process.platform}/${process.arch}`];
-  if (!packageName) {
-    throw new Error(`Unsupported Codex ACP platform: ${process.platform}/${process.arch}`);
-  }
-
-  const binaryName = process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp';
-  const codexAcpWrapperPath = fileURLToPath(
-    import.meta.resolve('@zed-industries/codex-acp/bin/codex-acp.js'),
-  );
-  const requireFromCodexAcp = createRequire(codexAcpWrapperPath);
-  return requireFromCodexAcp.resolve(`${packageName}/bin/${binaryName}`);
-}
-
-function formatTomlValue(value: string): string {
-  return JSON.stringify(value);
-}
-
-function buildCodexAgentArgs(config: ProviderConfig, modelId: string): string[] {
-  return [
-    '-c',
-    `model=${formatTomlValue(modelId)}`,
-    '-c',
-    `developer_instructions=${formatTomlValue(config.systemPrompt)}`,
-    '-c',
-    'project_doc_max_bytes=0',
-  ];
+  return fileURLToPath(import.meta.resolve('@agentclientprotocol/codex-acp/dist/index.js'));
 }
 
 function buildCodexAgentEnv(): NodeJS.ProcessEnv {
@@ -283,8 +248,8 @@ function resolveAcpAgentRuntime(parsed: ParsedModel, config: ProviderConfig): Ac
       };
     case 'openai':
       return {
-        command: resolveCodexAgentAcpPath(),
-        args: buildCodexAgentArgs(config, parsed.modelId),
+        command: process.execPath,
+        args: [resolveCodexAgentAcpPath()],
         env: buildCodexAgentEnv(),
       };
   }

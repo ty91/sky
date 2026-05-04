@@ -110,8 +110,8 @@ Remove `formatTomlValue()` and `buildCodexAgentArgs()`, because the new adapter 
 - `/Users/taeyoung/Developer/oss/codex-acp-agentclientprotocol/src/CodexJsonRpcConnection.ts` — upstream launches Codex with `app-server`.
 
 **Verification:**
-- [ ] Unit test asserts `openai/*` runtime uses `process.execPath`.
-- [ ] Unit test asserts the runtime arg points at `@agentclientprotocol/codex-acp/dist/index.js`.
+- [x] Unit test asserts `openai/*` runtime uses `process.execPath`.
+- [x] Unit test asserts the runtime arg points at `@agentclientprotocol/codex-acp/dist/index.js`.
 
 ---
 
@@ -238,3 +238,4 @@ For end-to-end smoke verification after unit tests pass, configure `~/.sky/setti
 ## Progress Log
 
 - 2026-05-04: Replaced the Codex ACP dependency with `@agentclientprotocol/codex-acp` and verified the lockfile with `pnpm install --frozen-lockfile`.
+- 2026-05-04: Updated the OpenAI runtime resolver to launch `@agentclientprotocol/codex-acp/dist/index.js` with Node and verified `node --test test/acp-provider.test.mjs`.

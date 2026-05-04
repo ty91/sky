@@ -145,15 +145,11 @@ test('ACP provider selects Codex ACP runtime for openai models', () => {
     }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
 
     const runtime = fake.calls.runtimes[0];
-    assert.equal(path.basename(runtime.command), process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp');
-    assert.deepEqual(runtime.args, [
-      '-c',
-      'model="gpt-5.5"',
-      '-c',
-      `developer_instructions=${JSON.stringify(systemPrompt)}`,
-      '-c',
-      'project_doc_max_bytes=0',
-    ]);
+    assert.equal(runtime.command, process.execPath);
+    assert.equal(runtime.args.length, 1);
+    assert.equal(path.basename(runtime.args[0]), 'index.js');
+    assert.match(runtime.args[0], /@agentclientprotocol[+/]codex-acp/);
+    assert.match(runtime.args[0], /dist[/\\]index\.js$/);
     assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
     assert.equal(runtime.env.SKY_SECRET_FOR_TEST, undefined);
   } finally {
