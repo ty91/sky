@@ -1,7 +1,7 @@
 ---
 title: Codex Base Instructions
 type: feat
-status: active
+status: completed
 created_at: 2026-05-04T15:15:14Z
 ---
 
@@ -257,3 +257,4 @@ pnpm test
 - 2026-05-05: Step 4 completed. `pnpm build`, `pnpm typecheck`, and
   `pnpm test` passed; isolated Codex `debug prompt-input` did not include the
   default `~/.codex/AGENTS.md` content.
+- 2026-05-05: Implementation completed and plan moved to completed.
