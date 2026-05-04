@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
@@ -57,18 +56,10 @@ type AcpSessionState = {
   closed: boolean;
 };
 
-const CODEX_PLATFORM_PACKAGES: Record<string, string> = {
-  'darwin/arm64': '@zed-industries/codex-acp-darwin-arm64',
-  'darwin/x64': '@zed-industries/codex-acp-darwin-x64',
-  'linux/arm64': '@zed-industries/codex-acp-linux-arm64',
-  'linux/x64': '@zed-industries/codex-acp-linux-x64',
-  'win32/arm64': '@zed-industries/codex-acp-win32-arm64',
-  'win32/x64': '@zed-industries/codex-acp-win32-x64',
-};
-
 const CODEX_ENV_KEYS = [
   'CODEX_API_KEY',
   'OPENAI_API_KEY',
+  'CODEX_HOME',
   'HOME',
   'USERPROFILE',
   'APPDATA',
@@ -236,41 +227,21 @@ function resolveClaudeAgentAcpPath(): string {
 }
 
 function resolveCodexAgentAcpPath(): string {
-  const packageName = CODEX_PLATFORM_PACKAGES[`${process.platform}/${process.arch}`];
-  if (!packageName) {
-    throw new Error(`Unsupported Codex ACP platform: ${process.platform}/${process.arch}`);
-  }
-
-  const binaryName = process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp';
-  const codexAcpWrapperPath = fileURLToPath(
-    import.meta.resolve('@zed-industries/codex-acp/bin/codex-acp.js'),
-  );
-  const requireFromCodexAcp = createRequire(codexAcpWrapperPath);
-  return requireFromCodexAcp.resolve(`${packageName}/bin/${binaryName}`);
+  return fileURLToPath(import.meta.resolve('@agentclientprotocol/codex-acp/dist/index.js'));
 }
 
-function formatTomlValue(value: string): string {
-  return JSON.stringify(value);
-}
-
-function buildCodexAgentArgs(config: ProviderConfig, modelId: string): string[] {
-  return [
-    '-c',
-    `model=${formatTomlValue(modelId)}`,
-    '-c',
-    `developer_instructions=${formatTomlValue(config.systemPrompt)}`,
-    '-c',
-    'project_doc_max_bytes=0',
-  ];
-}
-
-function buildCodexAgentEnv(): NodeJS.ProcessEnv {
+function buildCodexAgentEnv(config: ProviderConfig, modelId: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of CODEX_ENV_KEYS) {
     if (process.env[key] !== undefined) {
       env[key] = process.env[key];
     }
   }
+  env.CODEX_CONFIG = JSON.stringify({
+    model: modelId,
+    developer_instructions: config.systemPrompt,
+    project_doc_max_bytes: 0,
+  });
   return env;
 }
 
@@ -283,9 +254,9 @@ function resolveAcpAgentRuntime(parsed: ParsedModel, config: ProviderConfig): Ac
       };
     case 'openai':
       return {
-        command: resolveCodexAgentAcpPath(),
-        args: buildCodexAgentArgs(config, parsed.modelId),
-        env: buildCodexAgentEnv(),
+        command: process.execPath,
+        args: [resolveCodexAgentAcpPath()],
+        env: buildCodexAgentEnv(config, parsed.modelId),
       };
   }
 }
@@ -294,6 +265,10 @@ function createProcessConnection(client: Client, runtime: AcpAgentRuntime): AcpA
   const child = spawn(runtime.command, runtime.args, {
     env: runtime.env,
     stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  let childExited = false;
+  child.once('exit', () => {
+    childExited = true;
   });
 
   if (!child.stdin || !child.stdout) {
@@ -320,7 +295,15 @@ function createProcessConnection(client: Client, runtime: AcpAgentRuntime): AcpA
     cancel: (params) => connection.cancel(params),
     closeSession: (params) => connection.closeSession(params),
     close: async () => {
-      if (!child.killed) {
+      if (!child.stdin.destroyed) {
+        child.stdin.end();
+      }
+      await Promise.race([
+        connection.closed.catch(() => undefined),
+        new Promise<void>((resolve) => child.once('exit', () => resolve())),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]);
+      if (!childExited && !child.killed) {
         child.kill('SIGTERM');
       }
       await Promise.race([

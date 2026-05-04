@@ -7,7 +7,7 @@ Slack에서 ACP 기반 에이전트 봇을 **CLI + 데몬**으로 다루는 프�
 - Slack Assistant thread별로 ACP 세션을 유지합니다.
 - 내부적으로 provider에 따라 ACP subprocess와 stdio 연결을 맺고 `session/prompt`로 사용자 메시지를 전달합니다.
 - 지원되는 모델 provider는 `anthropic/*`, `openai/*`입니다. 예시는 `anthropic/claude-opus-4-7`, `openai/gpt-5.5`입니다.
-- `anthropic/*`는 `@agentclientprotocol/claude-agent-acp`를 사용하고, `openai/*`는 `@zed-industries/codex-acp`를 사용합니다.
+- `anthropic/*`는 `@agentclientprotocol/claude-agent-acp`를 사용하고, `openai/*`는 `@agentclientprotocol/codex-acp`를 통해 Codex `app-server`를 사용합니다.
 - 같은 Slack assistant thread의 메시지를 같은 ACP 세션 컨텍스트로 처리합니다.
 - `~/.sky/settings.json`의 `workspace` 아래 `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`를 조립해 `systemPrompt`로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
@@ -28,7 +28,7 @@ Slack에서 ACP 기반 에이전트 봇을 **CLI + 데몬**으로 다루는 프�
 
 즉, 이 머신에서 `claude` CLI가 이미 로그인되어 있다면 보통 `ANTHROPIC_API_KEY` 없이도 동작할 수 있습니다.
 
-`openai/*` 모델을 사용할 때는 `@zed-industries/codex-acp`가 Codex 인증을 처리합니다. Codex/ChatGPT 로그인이 되어 있거나 `CODEX_API_KEY` 또는 `OPENAI_API_KEY`가 설정되어 있으면 동작할 수 있습니다.
+`openai/*` 모델을 사용할 때는 `@agentclientprotocol/codex-acp`가 Codex 인증을 처리합니다. Codex/ChatGPT 로그인이 되어 있거나 `CODEX_API_KEY` 또는 `OPENAI_API_KEY`가 설정되어 있으면 동작할 수 있습니다.
 
 ## 설정
 
