@@ -1,7 +1,7 @@
 ---
 title: Replace Codex ACP Adapter
 type: refactor
-status: active
+status: completed
 created_at: 2026-05-04T12:22:16Z
 ---
 
@@ -242,3 +242,4 @@ For end-to-end smoke verification after unit tests pass, configure `~/.sky/setti
 - 2026-05-04: Added `CODEX_CONFIG` runtime env construction and expanded the Codex env allowlist, verified with `pnpm build` and `node --test test/acp-provider.test.mjs`.
 - 2026-05-04: Confirmed OpenAI session params remain minimal and omit Claude metadata with `node --test test/acp-provider.test.mjs`.
 - 2026-05-04: Updated README provider documentation for `@agentclientprotocol/codex-acp` and verified with `pnpm build`, `pnpm typecheck`, `node --test test/acp-provider.test.mjs`, and `pnpm test`.
+- 2026-05-04: Implementation completed.
