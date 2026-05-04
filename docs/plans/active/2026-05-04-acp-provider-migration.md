@@ -355,8 +355,8 @@ Update CLI description if it still says "Claude Agent SDK chatbot".
 - Any startup log tests affected by settings text.
 
 **Verification:**
-- [ ] README examples match `settings.ts`.
-- [ ] `pnpm build`
+- [x] README examples match `settings.ts`.
+- [x] `pnpm build`
 
 ---
 
@@ -428,3 +428,4 @@ Manual end-to-end verification:
 - 2026-05-04: Replaced the direct Claude provider with an ACP provider and covered prompt, cancel, resume fallback, and error paths.
 - 2026-05-04: Added model ownership to persisted sessions and ignored legacy or mismatched session records.
 - 2026-05-04: Moved `restart_harness` to a stdio MCP server and removed direct Claude Agent SDK dependency.
+- 2026-05-04: Updated README, CLI metadata, and Telegram copy for ACP sessions.
