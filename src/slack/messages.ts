@@ -48,9 +48,7 @@ export function normalizeSlackMessage({
   }
 
   const mentionPattern = createBotMentionPattern(normalizedBotUserId);
-  const normalizedText = text.replace(mentionPattern, mentionLabel).trim();
-
-  if (normalizedText === text) {
+  if (!mentionPattern.test(text)) {
     if (allowUnmentionedChannelMessage) {
       return { ignored: false, text };
     }
@@ -58,7 +56,7 @@ export function normalizeSlackMessage({
     return { ignored: true, reason: 'missing_channel_mention' };
   }
 
-  return { ignored: false, text: normalizedText };
+  return { ignored: false, text: text.replace(createBotMentionPattern(normalizedBotUserId), mentionLabel).trim() };
 }
 
 function createBotMentionPattern(botUserId: string): RegExp {

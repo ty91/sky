@@ -123,15 +123,11 @@ function readNextCursor(response: { response_metadata?: { next_cursor?: unknown 
   return typeof cursor === 'string' && cursor.trim() ? cursor : undefined;
 }
 
-function isPublicOrPrivateChannelMessage(message: unknown): boolean {
+export function isPublicOrPrivateChannelMessage(message: unknown): boolean {
   if (typeof message !== 'object' || message === null) {
     return false;
   }
 
   const channelType = 'channel_type' in message ? (message as { channel_type?: unknown }).channel_type : undefined;
-  if (channelType === undefined) {
-    return true;
-  }
-
   return channelType === 'channel' || channelType === 'group';
 }

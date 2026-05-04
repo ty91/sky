@@ -1,10 +1,11 @@
 import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { SessionManager } from '../session/manager.js';
-import { toThreadId } from './assistant.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
+import { addReaction, removeReaction } from './reactions.js';
 import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
+import { toThreadId } from './thread-id.js';
 
 export type SlackChannelEvent = SlackChannelMessageEvent & {
   channel?: string;
@@ -57,7 +58,7 @@ export function createSlackChannelHandler({
       }
 
       const threadId = toThreadId(channelId, threadTs);
-      const existingThread = sessionManager.has(threadId);
+      const existingThread = sessionManager.has(threadId, mainAgent);
       const normalized = normalizeSlackMessage({
         allowUnmentionedChannelMessage: existingThread,
         botUserId,
@@ -122,7 +123,7 @@ export function createSlackChannelHandler({
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`[slack] error handling channel message in ${threadId}: ${errorMessage}`);
-        await sender.sendReply(`오류가 났습니다: ${errorMessage}`);
+        await sender.sendReply('오류가 났습니다. 잠시 뒤 다시 시도해 주세요.');
       } finally {
         await removeReaction(slack, channelId, messageTs, 'thought_balloon');
       }
@@ -164,38 +165,6 @@ async function maybePrependThreadHistory({
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[slack] thread history fetch failed channel=${channelId} thread_ts=${threadTs}: ${message}`);
     return currentContent;
-  }
-}
-
-async function addReaction(
-  client: Pick<SlackChannelClient, 'reactions'>,
-  channel: string,
-  timestamp: string,
-  name: string,
-): Promise<void> {
-  try {
-    await client.reactions.add({ channel, name, timestamp });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (!msg.includes('already_reacted')) {
-      console.error(`[slack] reactions.add(${name}) failed: ${msg}`);
-    }
-  }
-}
-
-async function removeReaction(
-  client: Pick<SlackChannelClient, 'reactions'>,
-  channel: string,
-  timestamp: string,
-  name: string,
-): Promise<void> {
-  try {
-    await client.reactions.remove({ channel, name, timestamp });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (!msg.includes('no_reaction')) {
-      console.error(`[slack] reactions.remove(${name}) failed: ${msg}`);
-    }
   }
 }
 

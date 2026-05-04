@@ -322,6 +322,11 @@ test('session manager works without a store (ephemeral mode)', async () => {
 test('session manager has reports open and persisted sessions without opening providers', () => {
   const { store, calls } = createMockStore({
     persisted: { sessionId: 'stored-session', model: 'opus', systemPrompt: 'system' },
+    'old-model': {
+      sessionId: 'old-model-session',
+      model: 'anthropic/claude-sonnet-4-6',
+      systemPrompt: 'old-prompt',
+    },
   });
   let createCalls = 0;
   const manager = createSessionManager({
@@ -336,14 +341,16 @@ test('session manager has reports open and persisted sessions without opening pr
   });
 
   assert.equal(manager.has('missing'), false);
-  assert.equal(manager.has('persisted'), true);
+  assert.equal(manager.has('persisted', AGENT), true);
+  assert.equal(manager.has('old-model', AGENT), false);
+  assert.equal(manager.has('old-model'), true, 'agent-less checks only report store presence');
 
   manager.open('open', AGENT);
   const getCallsAfterOpen = calls.get.length;
 
   assert.equal(manager.has('open'), true);
   assert.equal(createCalls, 1);
-  assert.deepEqual(calls.get, ['missing', 'persisted', 'open']);
+  assert.deepEqual(calls.get, ['missing', 'persisted', 'old-model', 'old-model', 'open']);
   assert.equal(calls.get.length, getCallsAfterOpen, 'open in-memory sessions do not re-read store');
 });
 
