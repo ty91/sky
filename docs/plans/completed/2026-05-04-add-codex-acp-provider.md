@@ -1,7 +1,7 @@
 ---
 title: Add Codex ACP Provider
 type: feat
-status: active
+status: completed
 created_at: 2026-05-04T10:27:48Z
 ---
 
@@ -297,3 +297,5 @@ Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expe
 - 2026-05-04: Added Codex CLI config overrides and OpenAI session params without Claude metadata, verified with ACP provider tests.
 - 2026-05-04: Added permission selection regression tests for Claude metadata, title fallback, and unknown tool names.
 - 2026-05-04: Updated README provider, settings, and authentication examples for `openai/gpt-5.5`.
+- 2026-05-04: Full quality gate passed with `pnpm test`, `pnpm typecheck`, and `pnpm build`.
+- 2026-05-04: Implementation completed.
