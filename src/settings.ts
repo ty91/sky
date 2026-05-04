@@ -19,13 +19,10 @@ const settingsSchema = z
   .object({
     telegram: telegramSettingsSchema.optional(),
     slack: slackSettingsSchema.optional(),
-    claude: z
-      .object({
-        model: z.string().default('claude-opus-4-7'),
-      })
-      .default({ model: 'claude-opus-4-7' }),
+    model: z.string().min(1),
     workspace: z.string().default(path.join(os.homedir(), '.sky', 'workspace')),
   })
+  .strict()
   .refine((value) => value.telegram || value.slack, {
     message: 'At least one transport must be configured: telegram or slack',
   });
@@ -48,7 +45,7 @@ export function loadSettings(options: { silent?: boolean } = {}): Settings {
       throw new Error(
         `Settings file not found: ${SETTINGS_FILE}\n` +
           'Create it with at least one transport, for example: ' +
-          '{ "slack": { "botToken": "...", "appToken": "..." } }',
+          '{ "slack": { "botToken": "...", "appToken": "..." }, "model": "anthropic/claude-opus-4-7" }',
       );
     }
     throw error;

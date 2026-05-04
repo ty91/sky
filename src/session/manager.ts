@@ -10,6 +10,8 @@ import type {
 
 export { type SendResult, type SessionManager, type SessionManagerOptions } from './types.js';
 
+const DEFAULT_AGENT_MODEL = 'anthropic/claude-opus-4-7';
+
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -43,14 +45,19 @@ function createProviderConfig(
 ) {
   const mcpServers = agent.mcpServersFactory?.({ sessionKey });
   return {
+    sessionKey,
     systemPrompt,
-    model: agent.model,
+    model: agent.model ?? DEFAULT_AGENT_MODEL,
     tools: agent.tools,
     maxTurns: agent.maxTurns,
     cwd: agent.cwd ?? options.defaultCwd,
     ...(resume ? { resume } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };
+}
+
+function resolveAgentModel(agent: AgentConfig): string {
+  return agent.model ?? DEFAULT_AGENT_MODEL;
 }
 
 function createDeferred<T>(): Deferred<T> {
@@ -97,6 +104,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
             if (sessions.get(key) === entry) {
               options.store?.put(key, {
                 sessionId: result.sessionId,
+                model: entry.agent.model ?? DEFAULT_AGENT_MODEL,
                 systemPrompt: entry.resolvedSystemPrompt,
               });
             }
@@ -125,9 +133,11 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         return;
       }
 
+      const currentModel = resolveAgentModel(agent);
       const persisted = options.store?.get(key);
-      const resume = persisted?.sessionId;
-      const systemPrompt = resolveSystemPrompt(agent, persisted?.systemPrompt);
+      const resumable = persisted?.model === currentModel ? persisted : undefined;
+      const resume = resumable?.sessionId;
+      const systemPrompt = resolveSystemPrompt(agent, resumable?.systemPrompt);
 
       sessions.set(key, {
         provider: options.providerFactory.create(
@@ -145,8 +155,8 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       // Legacy self-healing: a resumed record that predates prompt persistence
       // has systemPrompt === ''. Backfill it with the resolved snapshot so the
       // very next resume replays a matching prompt and hits Anthropic's cache.
-      if (resume && persisted?.systemPrompt === '' && systemPrompt) {
-        options.store?.put(key, { sessionId: resume, systemPrompt });
+      if (resume && resumable?.systemPrompt === '' && systemPrompt) {
+        options.store?.put(key, { sessionId: resume, model: currentModel, systemPrompt });
       }
     },
 

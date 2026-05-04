@@ -1,5 +1,3 @@
-import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
-import { z } from 'zod';
 import { requestRestart, type PendingRestart } from '../../runtime/pending-restart.js';
 
 /**
@@ -10,11 +8,6 @@ export const RESTART_HARNESS_SERVER_NAME = 'sky';
 export const RESTART_HARNESS_TOOL_NAME = 'restart_harness';
 export const RESTART_HARNESS_FQ_TOOL_NAME = `mcp__${RESTART_HARNESS_SERVER_NAME}__${RESTART_HARNESS_TOOL_NAME}`;
 
-/**
- * Everything the tool needs captured in closure when the factory runs. The
- * bot wires a fresh server per session so each tool call is scoped to the
- * session that invoked it — no need for runtime context resolution.
- */
 export type RestartHarnessContext = {
   /** Session key used by the session manager (e.g. `"C123:1234.5678"`). */
   sessionKey: string;
@@ -22,16 +15,20 @@ export type RestartHarnessContext = {
   channelId: string;
   /** Slack thread ts for post-restart delivery. */
   threadTs: string;
-  /**
-   * Called by the tool handler **after** a successful `requestRestart()`.
-   * The bot schedules the self-restart (spawn replacement + SIGTERM) on a
-   * short delay so the in-flight assistant turn can flush its final message
-   * to Slack first.
-   */
-  scheduleRestart: () => void;
+  /** Parent bot process to signal after a restart request is accepted. */
+  parentPid?: number;
 };
 
-const TOOL_DESCRIPTION = [
+export type RestartHarnessInput = {
+  reason?: string;
+};
+
+export type RestartHarnessToolResult = {
+  content: { type: 'text'; text: string }[];
+  isError?: boolean;
+};
+
+export const RESTART_HARNESS_DESCRIPTION = [
   'Restart the sky harness (this very process).',
   '',
   'Use ONLY when the user explicitly tells you the harness code has been',
@@ -44,59 +41,42 @@ const TOOL_DESCRIPTION = [
   'the restart — then stop.',
 ].join('\n');
 
-const InputSchema = {
-  reason: z
-    .string()
-    .optional()
-    .describe(
-      'Short human-readable reason for the restart, surfaced back to you in the post-restart notice.',
-    ),
-};
-
-/**
- * Create an in-process MCP server exposing the `restart_harness` tool bound
- * to a specific session. Call this once per session open.
- */
-export function createRestartHarnessServer(
+export function runRestartHarnessTool(
   ctx: RestartHarnessContext,
-): McpSdkServerConfigWithInstance {
-  return createSdkMcpServer({
-    name: RESTART_HARNESS_SERVER_NAME,
-    version: '1.0.0',
-    tools: [
-      tool(RESTART_HARNESS_TOOL_NAME, TOOL_DESCRIPTION, InputSchema, async ({ reason }) => {
-        const info: PendingRestart = {
-          sessionKey: ctx.sessionKey,
-          channelId: ctx.channelId,
-          threadTs: ctx.threadTs,
-          reason,
-          requestedAt: Date.now(),
-        };
+  input: RestartHarnessInput,
+  signalParent: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+): RestartHarnessToolResult {
+  const info: PendingRestart = {
+    sessionKey: ctx.sessionKey,
+    channelId: ctx.channelId,
+    threadTs: ctx.threadTs,
+    reason: input.reason,
+    requestedAt: Date.now(),
+  };
 
-        const result = requestRestart(info);
-        if (!result.ok) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Restart refused: ${result.reason} (retry in ${Math.ceil(result.remainingMs / 1000)}s).`,
-              },
-            ],
-            isError: true,
-          };
-        }
+  const result = requestRestart(info);
+  if (!result.ok) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Restart refused: ${result.reason} (retry in ${Math.ceil(result.remainingMs / 1000)}s).`,
+        },
+      ],
+      isError: true,
+    };
+  }
 
-        ctx.scheduleRestart();
+  if (ctx.parentPid !== undefined) {
+    signalParent(ctx.parentPid, 'SIGUSR2');
+  }
 
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Restart scheduled. Inform 태영님 briefly that the harness is restarting, then stop — the post-restart trigger will arrive shortly.',
-            },
-          ],
-        };
-      }),
+  return {
+    content: [
+      {
+        type: 'text',
+        text: 'Restart scheduled. Inform 태영님 briefly that the harness is restarting, then stop — the post-restart trigger will arrive shortly.',
+      },
     ],
-  });
+  };
 }

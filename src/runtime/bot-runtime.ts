@@ -213,8 +213,8 @@ export class BotRuntime {
     return {
       onStartCommand: async (event) => {
         await event.reply(
-          '안녕하세요. 이 봇은 채팅방별로 long-lived query 세션을 유지합니다.\n\n' +
-            '- 같은 채팅방 메시지는 같은 query에 계속 들어갑니다\n' +
+          '안녕하세요. 이 봇은 채팅방별로 ACP 세션을 유지합니다.\n\n' +
+            '- 같은 채팅방 메시지는 같은 ACP 세션에 계속 들어갑니다\n' +
             '- /new 로 세션을 초기화할 수 있습니다\n' +
             '- system prompt는 AGENTS.md, SOUL.md, USER.md, MEMORY.md를 조립해서 사용합니다',
         );
@@ -222,7 +222,7 @@ export class BotRuntime {
       onNewCommand: async (event) => {
         const chatId = String(event.chatId);
         await this.sessionManager.purge(chatId);
-        await event.reply('새 세션으로 초기화했습니다. 이제 새 query로 다시 시작합니다.');
+        await event.reply('새 세션으로 초기화했습니다. 이제 새 ACP 세션으로 다시 시작합니다.');
       },
       onTextMessage: async (event) => {
         if (!event.text) {

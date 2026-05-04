@@ -22,12 +22,28 @@ const store = openSessionStore(':memory:');
 assert.equal(store.get('missing'), undefined);
 
 // put -> get
-store.put('thread-1', { sessionId: 'sess-a', systemPrompt: 'prompt-a' });
-assert.deepEqual(store.get('thread-1'), { sessionId: 'sess-a', systemPrompt: 'prompt-a' });
+store.put('thread-1', {
+  sessionId: 'sess-a',
+  model: 'anthropic/claude-opus-4-7',
+  systemPrompt: 'prompt-a',
+});
+assert.deepEqual(store.get('thread-1'), {
+  sessionId: 'sess-a',
+  model: 'anthropic/claude-opus-4-7',
+  systemPrompt: 'prompt-a',
+});
 
 // upsert overwrites
-store.put('thread-1', { sessionId: 'sess-b', systemPrompt: 'prompt-b' });
-assert.deepEqual(store.get('thread-1'), { sessionId: 'sess-b', systemPrompt: 'prompt-b' });
+store.put('thread-1', {
+  sessionId: 'sess-b',
+  model: 'anthropic/claude-sonnet-4-6',
+  systemPrompt: 'prompt-b',
+});
+assert.deepEqual(store.get('thread-1'), {
+  sessionId: 'sess-b',
+  model: 'anthropic/claude-sonnet-4-6',
+  systemPrompt: 'prompt-b',
+});
 
 // remove
 store.remove('thread-1');
@@ -43,7 +59,7 @@ console.log('session-store-basic-ok');
   assert.match(output, /session-store-basic-ok/);
 });
 
-test('legacy sessions.json is migrated into the store and renamed to .bak', () => {
+test('legacy sessions.json is ignored after ACP migration', () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-store-'));
   const skyDir = path.join(homeDir, '.sky');
   fs.mkdirSync(skyDir, { recursive: true });
@@ -70,14 +86,11 @@ import { openSessionStore } from './dist/session/store.js';
 
 const store = openSessionStore(${JSON.stringify(dbPath)});
 
-const a = store.get('slack:C1:111.22');
-assert.deepEqual(a, { sessionId: 'legacy-session-a', systemPrompt: '' });
-
-const b = store.get('telegram:123');
-assert.deepEqual(b, { sessionId: 'legacy-session-b', systemPrompt: '' });
+assert.equal(store.get('slack:C1:111.22'), undefined);
+assert.equal(store.get('telegram:123'), undefined);
 
 store.close();
-console.log('legacy-migration-ok');
+console.log('legacy-ignored-ok');
         `,
       ],
       {
@@ -87,9 +100,9 @@ console.log('legacy-migration-ok');
       },
     );
 
-    assert.match(output, /legacy-migration-ok/);
-    assert.equal(fs.existsSync(legacy), false, 'legacy file should be removed');
-    assert.equal(fs.existsSync(`${legacy}.bak`), true, 'legacy file should be renamed to .bak');
+    assert.match(output, /legacy-ignored-ok/);
+    assert.equal(fs.existsSync(legacy), true, 'legacy file should be left untouched');
+    assert.equal(fs.existsSync(`${legacy}.bak`), false, 'legacy file should not be renamed');
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
@@ -112,7 +125,7 @@ test('store opens idempotently without legacy file', () => {
         `
 import { openSessionStore } from './dist/session/store.js';
 const store = openSessionStore(${JSON.stringify(dbPath)});
-store.put('k1', { sessionId: 's1', systemPrompt: 'p1' });
+store.put('k1', { sessionId: 's1', model: 'anthropic/claude-opus-4-7', systemPrompt: 'p1' });
 store.close();
 console.log('first-open-ok');
         `,
@@ -132,7 +145,11 @@ console.log('first-open-ok');
 import assert from 'node:assert/strict';
 import { openSessionStore } from './dist/session/store.js';
 const store = openSessionStore(${JSON.stringify(dbPath)});
-assert.deepEqual(store.get('k1'), { sessionId: 's1', systemPrompt: 'p1' });
+assert.deepEqual(store.get('k1'), {
+  sessionId: 's1',
+  model: 'anthropic/claude-opus-4-7',
+  systemPrompt: 'p1',
+});
 store.close();
 console.log('reopen-ok');
         `,
