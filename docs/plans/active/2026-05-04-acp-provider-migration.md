@@ -327,9 +327,9 @@ Reuse `parseSessionKey()` to populate the env values. Keep
 `src/agents/main.ts`
 
 **Verification:**
-- [ ] Tool handler records pending restart.
-- [ ] Parent signal schedules restart once.
-- [ ] Existing restart rate limit still applies.
+- [x] Tool handler records pending restart.
+- [x] Parent signal schedules restart once.
+- [x] Existing restart rate limit still applies.
 
 ---
 
@@ -427,3 +427,4 @@ Manual end-to-end verification:
 - 2026-05-04: Removed Claude SDK types from shared provider/agent config and passed session keys into provider configs.
 - 2026-05-04: Replaced the direct Claude provider with an ACP provider and covered prompt, cancel, resume fallback, and error paths.
 - 2026-05-04: Added model ownership to persisted sessions and ignored legacy or mismatched session records.
+- 2026-05-04: Moved `restart_harness` to a stdio MCP server and removed direct Claude Agent SDK dependency.

@@ -86,7 +86,7 @@ function waitForShutdownSignal(): Promise<void> {
  * ourselves SIGTERM, which drops into the existing shutdown path
  * (`waitForShutdownSignal` resolves → `finally` block runs → process exits).
  */
-function makeRestartScheduler(): () => void {
+export function makeRestartScheduler(): () => void {
   let scheduled = false;
   return () => {
     if (scheduled) return;
@@ -102,6 +102,17 @@ function makeRestartScheduler(): () => void {
       console.log('[restart] sending SIGTERM to self');
       process.kill(process.pid, 'SIGTERM');
     }, RESTART_DELAY_MS).unref();
+  };
+}
+
+export function registerRestartSignalHandler(scheduleRestart: () => void): () => void {
+  const handler = () => {
+    console.log('[restart] received restart signal from MCP tool');
+    scheduleRestart();
+  };
+  process.on('SIGUSR2', handler);
+  return () => {
+    process.removeListener('SIGUSR2', handler);
   };
 }
 
@@ -187,6 +198,7 @@ export async function startBot(): Promise<void> {
   console.log(`[startup] workspace: ${settings.workspace}`);
 
   const scheduleRestart = makeRestartScheduler();
+  const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
 
   // `initialPrompt` is a fallback for legacy resumed sessions that have no
   // stored snapshot. `loadPrompt` runs again on every new session so edits to
@@ -195,7 +207,6 @@ export async function startBot(): Promise<void> {
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,
     model: settings.model,
-    onRestartRequested: () => scheduleRestart(),
   });
 
   const sessionStore = openSessionStore();
@@ -244,6 +255,7 @@ export async function startBot(): Promise<void> {
     console.log('[startup] no telegram config, running slack-only mode');
     await waitForShutdownSignal();
   } finally {
+    unregisterRestartSignalHandler();
     await sessionManager.closeAll();
     if (slackApp) {
       await stopSlackApp(slackApp);
