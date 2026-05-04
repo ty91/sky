@@ -174,7 +174,7 @@ Keep:
 - Settings, build, test, CLI, and operational notes that remain accurate.
 
 **Verification:**
-- [ ] `rg -n "telegram|Telegram|grammy|polling" README.md package.json src test` has no live-product references.
+- [x] `rg -n "telegram|Telegram|grammy|polling" README.md package.json src test` has no live-product references.
 
 ---
 
@@ -231,3 +231,4 @@ unchanged because they document past repo state.
 - 2026-05-04: Verified Slack-required settings and startup compile successfully.
 - 2026-05-04: Verified status output reports Slack configuration, model, workspace, and daemon state.
 - 2026-05-04: Removed remaining transport-specific test fixtures and verified the test suite.
+- 2026-05-04: Updated README to describe Slack-only setup, operation, and usage.
