@@ -65,7 +65,7 @@ export const statusCommand = new Command('status')
     const settings = tryLoadSettings();
     const pid = readPid();
     if (isRunning(pid)) {
-      console.log(`joy is running (pid: ${pid})`);
+      console.log(`sky is running (pid: ${pid})`);
       console.log(`log: ${LOG_FILE}`);
       if (settings?.slack) {
         console.log('slack app: configured');
@@ -82,7 +82,7 @@ export const statusCommand = new Command('status')
       removePidFile();
     }
 
-    console.log('joy is stopped');
+    console.log('sky is stopped');
     console.log(`log: ${LOG_FILE}`);
     if (settings?.slack) {
       console.log('slack app: configured');

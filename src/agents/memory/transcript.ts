@@ -1,8 +1,8 @@
 import { mkdirSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
-import { JOY_DIR } from '../../settings.js';
+import { SKY_DIR } from '../../settings.js';
 
-const TRANSCRIPTS_DIR = path.join(JOY_DIR, 'transcripts');
+const TRANSCRIPTS_DIR = path.join(SKY_DIR, 'transcripts');
 
 type BufferedEntry = { role: 'user' | 'assistant'; text: string; timestamp: string };
 

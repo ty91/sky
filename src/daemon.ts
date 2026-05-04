@@ -2,13 +2,13 @@ import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { JOY_DIR } from './settings.js';
+import { SKY_DIR } from './settings.js';
 
-const PID_FILE = path.join(JOY_DIR, 'joy.pid');
-export const LOG_FILE = path.join(JOY_DIR, 'joy.log');
+const PID_FILE = path.join(SKY_DIR, 'sky.pid');
+export const LOG_FILE = path.join(SKY_DIR, 'sky.log');
 
 function ensureDir() {
-  mkdirSync(JOY_DIR, { recursive: true });
+  mkdirSync(SKY_DIR, { recursive: true });
 }
 
 export function readPid(): number | null {
@@ -68,7 +68,7 @@ export function startDaemon() {
 
   const pid = readPid();
   if (isRunning(pid)) {
-    console.log(`joy is already running (pid: ${pid})`);
+    console.log(`sky is already running (pid: ${pid})`);
     console.log(`log: ${LOG_FILE}`);
     return;
   }
@@ -78,7 +78,7 @@ export function startDaemon() {
   }
 
   const newPid = spawnBotProcess();
-  console.log(`joy started (pid: ${newPid})`);
+  console.log(`sky started (pid: ${newPid})`);
   console.log(`log: ${LOG_FILE}`);
 }
 
@@ -111,7 +111,7 @@ export async function stopDaemon() {
   const pid = readPid();
   if (!isRunning(pid)) {
     if (pid) removePidFile();
-    console.log('joy is already stopped');
+    console.log('sky is already stopped');
     return;
   }
 
@@ -121,7 +121,7 @@ export async function stopDaemon() {
   while (Date.now() < deadline) {
     if (!isRunning(pid)) {
       removePidFile();
-      console.log('joy stopped');
+      console.log('sky stopped');
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -129,5 +129,5 @@ export async function stopDaemon() {
 
   process.kill(pid, 'SIGKILL');
   removePidFile();
-  console.log('joy force-stopped');
+  console.log('sky force-stopped');
 }

@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { JOY_DIR } from '../../settings.js';
+import { SKY_DIR } from '../../settings.js';
 
-const CURSORS_FILE = path.join(JOY_DIR, 'memory-cursors.json');
-const TRANSCRIPTS_DIR = path.join(JOY_DIR, 'transcripts');
+const CURSORS_FILE = path.join(SKY_DIR, 'memory-cursors.json');
+const TRANSCRIPTS_DIR = path.join(SKY_DIR, 'transcripts');
 
 /** Byte offset per transcript file (relative path from transcripts dir). */
 type CursorMap = Record<string, number>;

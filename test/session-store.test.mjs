@@ -44,10 +44,10 @@ console.log('session-store-basic-ok');
 });
 
 test('legacy sessions.json is migrated into the store and renamed to .bak', () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'joy-store-'));
-  const joyDir = path.join(homeDir, '.joy');
-  fs.mkdirSync(joyDir, { recursive: true });
-  const legacy = path.join(joyDir, 'sessions.json');
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-store-'));
+  const skyDir = path.join(homeDir, '.sky');
+  fs.mkdirSync(skyDir, { recursive: true });
+  const legacy = path.join(skyDir, 'sessions.json');
   fs.writeFileSync(
     legacy,
     JSON.stringify({
@@ -57,7 +57,7 @@ test('legacy sessions.json is migrated into the store and renamed to .bak', () =
   );
 
   try {
-    const dbPath = path.join(joyDir, 'joy.db');
+    const dbPath = path.join(skyDir, 'sky.db');
     const output = execFileSync(
       process.execPath,
       [
@@ -96,10 +96,10 @@ console.log('legacy-migration-ok');
 });
 
 test('store opens idempotently without legacy file', () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'joy-store-'));
-  const joyDir = path.join(homeDir, '.joy');
-  fs.mkdirSync(joyDir, { recursive: true });
-  const dbPath = path.join(joyDir, 'joy.db');
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-store-'));
+  const skyDir = path.join(homeDir, '.sky');
+  fs.mkdirSync(skyDir, { recursive: true });
+  const dbPath = path.join(skyDir, 'sky.db');
 
   try {
     // First open + write

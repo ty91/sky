@@ -52,7 +52,7 @@ function buildOptions(config: ProviderConfig, defaults: ClaudeProviderDefaults):
     ...(config.mcpServers ? { mcpServers: config.mcpServers } : {}),
     env: {
       ...process.env,
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'joy/0.5.0',
+      CLAUDE_AGENT_SDK_CLIENT_APP: 'sky/0.5.0',
     },
     tools: config.tools,
     permissionMode: 'bypassPermissions' as PermissionMode,

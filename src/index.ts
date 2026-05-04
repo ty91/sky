@@ -10,7 +10,7 @@ import { memoryCommand } from './commands/memory.js';
 import { dreamCommand } from './commands/dream.js';
 
 const program = new Command()
-  .name('joy')
+  .name('sky')
   .description('Claude Agent SDK chatbot for Slack and Telegram')
   .version('0.1.0');
 

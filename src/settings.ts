@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 
-export const JOY_DIR = path.join(os.homedir(), '.joy');
-const SETTINGS_FILE = path.join(JOY_DIR, 'settings.json');
+export const SKY_DIR = path.join(os.homedir(), '.sky');
+const SETTINGS_FILE = path.join(SKY_DIR, 'settings.json');
 
 const telegramSettingsSchema = z.object({
   botToken: z.string(),
@@ -24,7 +24,7 @@ const settingsSchema = z
         model: z.string().default('claude-opus-4-7'),
       })
       .default({ model: 'claude-opus-4-7' }),
-    workspace: z.string().default(path.join(os.homedir(), '.joy', 'workspace')),
+    workspace: z.string().default(path.join(os.homedir(), '.sky', 'workspace')),
   })
   .refine((value) => value.telegram || value.slack, {
     message: 'At least one transport must be configured: telegram or slack',

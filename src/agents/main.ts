@@ -27,7 +27,7 @@ export type MainAgentConfigOptions = {
   /** Called on new sessions so AGENTS.md/MEMORY.md edits take effect without a bot restart. */
   systemPromptLoader?: () => string;
   /**
-   * Called when Joy invokes `restart_harness` and the request is accepted.
+   * Called when Sky invokes `restart_harness` and the request is accepted.
    * The bot uses this to schedule the actual process swap (detached spawn +
    * SIGTERM) on a short delay so the current assistant turn can flush first.
    */

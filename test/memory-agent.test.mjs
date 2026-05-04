@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 test('memory agent processes unread transcripts and advances cursors', () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'joy-memory-'));
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-memory-'));
 
   try {
     const output = execFileSync(
@@ -21,8 +21,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { runMemoryAgent } from './dist/agents/memory/agent.js';
 
-const joyDir = path.join(os.homedir(), '.joy');
-const transcriptDir = path.join(joyDir, 'transcripts', 'chat-1');
+const skyDir = path.join(os.homedir(), '.sky');
+const transcriptDir = path.join(skyDir, 'transcripts', 'chat-1');
 fs.mkdirSync(transcriptDir, { recursive: true });
 
 const transcriptBody = '### user\\\\n\\\\nhello\\\\n\\\\n';
@@ -48,7 +48,7 @@ assert.deepEqual(first, {
 });
 assert.deepEqual(calls, { open: 1, send: 1, close: 1 });
 
-const cursors = JSON.parse(fs.readFileSync(path.join(joyDir, 'memory-cursors.json'), 'utf8'));
+const cursors = JSON.parse(fs.readFileSync(path.join(skyDir, 'memory-cursors.json'), 'utf8'));
 assert.equal(cursors['chat-1/session-1.md'], Buffer.byteLength(transcriptBody));
 
 const second = await runMemoryAgent({ sessionManager, workspace: '/tmp/workspace' });

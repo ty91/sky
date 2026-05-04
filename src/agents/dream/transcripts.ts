@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { JOY_DIR } from '../../settings.js';
+import { SKY_DIR } from '../../settings.js';
 
-const TRANSCRIPTS_DIR = path.join(JOY_DIR, 'transcripts');
+const TRANSCRIPTS_DIR = path.join(SKY_DIR, 'transcripts');
 
 export type TranscriptEntry = {
   chatId: string;
@@ -54,7 +54,7 @@ export function parseTranscriptFile(
 }
 
 /**
- * Scan all transcript files under `~/.joy/transcripts/` and return
+ * Scan all transcript files under `~/.sky/transcripts/` and return
  * entries whose timestamps fall in `[startUtc, endUtc)`, sorted chronologically.
  *
  * `transcriptsDir` is overrideable for tests.
