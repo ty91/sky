@@ -22,8 +22,8 @@ function safeRead(filePath: string): string {
   }
 }
 
-function loadSystemPrompt(workspace: string): string {
-  const promptFiles = ['AGENTS.md', 'SOUL.md', 'USER.md', 'MEMORY.md'] as const;
+export function loadSystemPrompt(workspace: string): string {
+  const promptFiles = ['SOUL.md', 'AGENTS.md', 'USER.md', 'MEMORY.md'] as const;
   const loaded: string[] = [];
   const missing: string[] = [];
   const promptParts: string[] = [];
@@ -201,7 +201,7 @@ export async function startBot(): Promise<void> {
 
   // `initialPrompt` is a fallback for legacy resumed sessions that have no
   // stored snapshot. `loadPrompt` runs again on every new session so edits to
-  // AGENTS.md / MEMORY.md / SOUL.md / USER.md take effect without a restart.
+  // SOUL.md / AGENTS.md / USER.md / MEMORY.md take effect without a restart.
   const mainAgent = createMainAgentConfig({
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,

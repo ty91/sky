@@ -100,7 +100,7 @@ preserving the current startup logging behavior.
   unchanged.
 
 **Verification:**
-- [ ] Add a prompt loader regression test that verifies loaded file order.
+- [x] Add a prompt loader regression test that verifies loaded file order.
 
 ---
 
@@ -239,3 +239,9 @@ pnpm build
 pnpm typecheck
 pnpm test
 ```
+
+## Progress Log
+
+- 2026-05-05: Step 0 completed. Prompt loading now uses
+  `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md` order and has regression tests
+  for ordering and missing files.
