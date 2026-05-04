@@ -11,6 +11,14 @@ const BASE_CONFIG = {
   cwd: '/tmp/workspace',
 };
 
+function restoreEnv(key, value) {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
 function createFakeConnection(overrides = {}) {
   const calls = {
     initialize: 0,
@@ -132,16 +140,20 @@ test('ACP provider creates a session and collects buffered text chunks', async (
 test('ACP provider selects Codex ACP runtime for openai models', () => {
   const fake = createFakeConnection();
   const systemPrompt = 'system "quoted"\nnext';
+  const originalAppServerLogs = process.env.APP_SERVER_LOGS;
   const originalCodexApiKey = process.env.CODEX_API_KEY;
   const originalCodexHome = process.env.CODEX_HOME;
   const originalCodexPath = process.env.CODEX_PATH;
+  const originalModelProvider = process.env.MODEL_PROVIDER;
   const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
   const originalSecret = process.env.SKY_SECRET_FOR_TEST;
 
   try {
+    process.env.APP_SERVER_LOGS = '/tmp/test-codex-logs';
     process.env.CODEX_API_KEY = 'test-codex-key';
     process.env.CODEX_HOME = '/tmp/test-codex-home';
     process.env.CODEX_PATH = '/tmp/test-codex';
+    process.env.MODEL_PROVIDER = 'test-provider';
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.SKY_SECRET_FOR_TEST = 'hidden';
 
@@ -161,37 +173,21 @@ test('ACP provider selects Codex ACP runtime for openai models', () => {
       developer_instructions: systemPrompt,
       project_doc_max_bytes: 0,
     });
+    assert.equal(runtime.env.APP_SERVER_LOGS, undefined);
     assert.equal(runtime.env.CODEX_API_KEY, 'test-codex-key');
     assert.equal(runtime.env.CODEX_HOME, '/tmp/test-codex-home');
-    assert.equal(runtime.env.CODEX_PATH, '/tmp/test-codex');
+    assert.equal(runtime.env.CODEX_PATH, undefined);
+    assert.equal(runtime.env.MODEL_PROVIDER, undefined);
     assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
     assert.equal(runtime.env.SKY_SECRET_FOR_TEST, undefined);
   } finally {
-    if (originalCodexApiKey === undefined) {
-      delete process.env.CODEX_API_KEY;
-    } else {
-      process.env.CODEX_API_KEY = originalCodexApiKey;
-    }
-    if (originalCodexHome === undefined) {
-      delete process.env.CODEX_HOME;
-    } else {
-      process.env.CODEX_HOME = originalCodexHome;
-    }
-    if (originalCodexPath === undefined) {
-      delete process.env.CODEX_PATH;
-    } else {
-      process.env.CODEX_PATH = originalCodexPath;
-    }
-    if (originalOpenAiApiKey === undefined) {
-      delete process.env.OPENAI_API_KEY;
-    } else {
-      process.env.OPENAI_API_KEY = originalOpenAiApiKey;
-    }
-    if (originalSecret === undefined) {
-      delete process.env.SKY_SECRET_FOR_TEST;
-    } else {
-      process.env.SKY_SECRET_FOR_TEST = originalSecret;
-    }
+    restoreEnv('APP_SERVER_LOGS', originalAppServerLogs);
+    restoreEnv('CODEX_API_KEY', originalCodexApiKey);
+    restoreEnv('CODEX_HOME', originalCodexHome);
+    restoreEnv('CODEX_PATH', originalCodexPath);
+    restoreEnv('MODEL_PROVIDER', originalModelProvider);
+    restoreEnv('OPENAI_API_KEY', originalOpenAiApiKey);
+    restoreEnv('SKY_SECRET_FOR_TEST', originalSecret);
   }
 });
 

@@ -9,7 +9,7 @@ created_at: 2026-05-04T12:22:16Z
 
 ## Context
 
-`sky` currently supports `openai/*` models through `@zed-industries/codex-acp`. That adapter is launched as a platform-specific `codex-acp` binary and receives Codex settings through CLI `-c` overrides. The replacement target, `@agentclientprotocol/codex-acp`, exposes a Node bin at `dist/index.js`, starts an ACP stdio server, and internally launches Codex CLI in `app-server` mode.
+Before this change, `sky` supported `openai/*` models through `@zed-industries/codex-acp`. That adapter was launched as a platform-specific `codex-acp` binary and received Codex settings through CLI `-c` overrides. The replacement target, `@agentclientprotocol/codex-acp`, exposes a Node bin at `dist/index.js`, starts an ACP stdio server, and internally launches Codex CLI in `app-server` mode.
 
 This plan replaces the Codex ACP adapter while preserving Sky's existing provider boundary, Slack session flow, ACP lifecycle, and persisted session behavior.
 
@@ -54,7 +54,7 @@ Shared ACP client/runtime
 
 The shared ACP path in `src/providers/acp.ts` remains responsible for initialize, session creation/resume/load, prompt streaming, cancellation, and close. Provider-specific code stays limited to runtime resolution, environment construction, and `NewSessionRequest` construction.
 
-The new `@agentclientprotocol/codex-acp` adapter reads `CODEX_CONFIG`, optionally honors `CODEX_PATH`, and invokes Codex as `codex app-server` internally. Sky should let the adapter resolve its bundled `@openai/codex/bin/codex.js` unless the user already set `CODEX_PATH`.
+The new `@agentclientprotocol/codex-acp` adapter reads `CODEX_CONFIG` and invokes Codex as `codex app-server` internally. Sky lets the adapter resolve its bundled `@openai/codex/bin/codex.js` and does not inherit `CODEX_PATH` by default.
 
 ---
 
@@ -106,7 +106,7 @@ Remove `formatTomlValue()` and `buildCodexAgentArgs()`, because the new adapter 
 
 **참조:**
 - `src/providers/acp.ts` — current `resolveCodexAgentAcpPath()`, `buildCodexAgentArgs()`, and `resolveAcpAgentRuntime()`.
-- `/Users/taeyoung/Developer/oss/codex-acp-agentclientprotocol/src/index.ts` — upstream reads `CODEX_CONFIG` and `CODEX_PATH`.
+- `/Users/taeyoung/Developer/oss/codex-acp-agentclientprotocol/src/index.ts` — upstream reads `CODEX_CONFIG` and can read `CODEX_PATH`.
 - `/Users/taeyoung/Developer/oss/codex-acp-agentclientprotocol/src/CodexJsonRpcConnection.ts` — upstream launches Codex with `app-server`.
 
 **Verification:**
@@ -126,9 +126,6 @@ const CODEX_ENV_KEYS = [
   'CODEX_API_KEY',
   'OPENAI_API_KEY',
   'CODEX_HOME',
-  'CODEX_PATH',
-  'APP_SERVER_LOGS',
-  'MODEL_PROVIDER',
   // existing home, XDG, PATH, temp, proxy, cert, and RUST_LOG keys
 ] as const;
 ```
@@ -152,7 +149,7 @@ Do not set `DEFAULT_AUTH_REQUEST` for API key injection. Existing Codex auth cha
 
 **Verification:**
 - [x] Unit test parses `runtime.env.CODEX_CONFIG` and asserts `model`, `developer_instructions`, and `project_doc_max_bytes`.
-- [x] Unit test confirms allowlisted auth/path env keys are copied when present.
+- [x] Unit test confirms allowlisted auth/home env keys are copied when present.
 - [x] Unit test confirms unrelated env secrets are not copied.
 
 ---
@@ -187,7 +184,7 @@ Update `ACP provider selects Codex ACP runtime for openai models`:
 - Assert `runtime.command === process.execPath`.
 - Assert `runtime.args` contains only the resolved `dist/index.js` adapter path.
 - Parse and assert `runtime.env.CODEX_CONFIG`.
-- Add env fixture coverage for `CODEX_API_KEY`, `CODEX_HOME`, and `CODEX_PATH` alongside `OPENAI_API_KEY`.
+- Add env fixture coverage for `CODEX_API_KEY` and `CODEX_HOME` alongside `OPENAI_API_KEY`.
 - Keep the assertion that `SKY_SECRET_FOR_TEST` is not copied.
 
 **`README.md`** (~105 LOC after changes)
@@ -243,3 +240,4 @@ For end-to-end smoke verification after unit tests pass, configure `~/.sky/setti
 - 2026-05-04: Confirmed OpenAI session params remain minimal and omit Claude metadata with `node --test test/acp-provider.test.mjs`.
 - 2026-05-04: Updated README provider documentation for `@agentclientprotocol/codex-acp` and verified with `pnpm build`, `pnpm typecheck`, `node --test test/acp-provider.test.mjs`, and `pnpm test`.
 - 2026-05-04: Implementation completed.
+- 2026-05-04: Code review removed implicit `CODEX_PATH`, `APP_SERVER_LOGS`, and `MODEL_PROVIDER` inheritance from Codex subprocess env.

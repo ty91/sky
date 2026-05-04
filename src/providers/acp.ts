@@ -60,9 +60,6 @@ const CODEX_ENV_KEYS = [
   'CODEX_API_KEY',
   'OPENAI_API_KEY',
   'CODEX_HOME',
-  'CODEX_PATH',
-  'APP_SERVER_LOGS',
-  'MODEL_PROVIDER',
   'HOME',
   'USERPROFILE',
   'APPDATA',
@@ -269,6 +266,10 @@ function createProcessConnection(client: Client, runtime: AcpAgentRuntime): AcpA
     env: runtime.env,
     stdio: ['pipe', 'pipe', 'inherit'],
   });
+  let childExited = false;
+  child.once('exit', () => {
+    childExited = true;
+  });
 
   if (!child.stdin || !child.stdout) {
     throw new Error('Failed to open ACP agent stdio pipes');
@@ -294,7 +295,15 @@ function createProcessConnection(client: Client, runtime: AcpAgentRuntime): AcpA
     cancel: (params) => connection.cancel(params),
     closeSession: (params) => connection.closeSession(params),
     close: async () => {
-      if (!child.killed) {
+      if (!child.stdin.destroyed) {
+        child.stdin.end();
+      }
+      await Promise.race([
+        connection.closed.catch(() => undefined),
+        new Promise<void>((resolve) => child.once('exit', () => resolve())),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]);
+      if (!childExited && !child.killed) {
         child.kill('SIGTERM');
       }
       await Promise.race([
