@@ -113,7 +113,7 @@ TypeScript or tests require it.
   misleading or unused.
 
 **Verification:**
-- [ ] `pnpm typecheck`
+- [x] `pnpm typecheck`
 
 ---
 
@@ -173,3 +173,4 @@ or `생각 중`.
 - 2026-05-04: Started implementation on branch `remove-slack-assistant-status`.
 - 2026-05-04: Removed Slack Assistant status usage from `src/slack/assistant.ts`.
 - 2026-05-04: Simplified `SlackSender` to reply sending and retry only.
+- 2026-05-04: Removed stale status typing from `src/slack/transport.ts`.
