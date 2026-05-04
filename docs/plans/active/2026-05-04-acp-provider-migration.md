@@ -88,8 +88,8 @@ Add ACP and MCP runtime dependencies with `pnpm`.
 - Remove direct `@anthropic-ai/claude-agent-sdk` usage after source imports are gone.
 
 **Verification:**
-- [ ] `pnpm install`
-- [ ] `pnpm typecheck`
+- [x] `pnpm install`
+- [x] `pnpm typecheck`
 
 ---
 
@@ -419,3 +419,7 @@ Manual end-to-end verification:
   and post-restart trigger delivery.
 - Configure `model: "openai/gpt-5-5"` and confirm startup fails with a clear
   unsupported provider message.
+
+## Progress Log
+
+- 2026-05-04: Added ACP and MCP runtime dependencies; `pnpm typecheck` passed.
