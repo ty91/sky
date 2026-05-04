@@ -189,6 +189,10 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       return deferred.promise;
     },
 
+    has(key: string): boolean {
+      return sessions.has(key) || Boolean(options.store?.get(key));
+    },
+
     getSessionId(key: string): string | undefined {
       return sessions.get(key)?.sessionId;
     },

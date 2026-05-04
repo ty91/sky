@@ -319,6 +319,34 @@ test('session manager works without a store (ephemeral mode)', async () => {
   assert.equal(result.kind, 'ok');
 });
 
+test('session manager has reports open and persisted sessions without opening providers', () => {
+  const { store, calls } = createMockStore({
+    persisted: { sessionId: 'stored-session', model: 'opus', systemPrompt: 'system' },
+  });
+  let createCalls = 0;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: () => {
+        createCalls += 1;
+        return createMockProvider();
+      },
+    },
+  });
+
+  assert.equal(manager.has('missing'), false);
+  assert.equal(manager.has('persisted'), true);
+
+  manager.open('open', AGENT);
+  const getCallsAfterOpen = calls.get.length;
+
+  assert.equal(manager.has('open'), true);
+  assert.equal(createCalls, 1);
+  assert.deepEqual(calls.get, ['missing', 'persisted', 'open']);
+  assert.equal(calls.get.length, getCallsAfterOpen, 'open in-memory sessions do not re-read store');
+});
+
 test('purge removes persisted record and closes session', async () => {
   const { store, calls } = createMockStore({
     'thread-1': { sessionId: 'old', model: 'opus', systemPrompt: '' },

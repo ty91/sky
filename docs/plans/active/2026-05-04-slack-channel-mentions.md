@@ -76,7 +76,7 @@ Implement `has(key)` by checking `sessions.has(key)` first and then `options.sto
 - `src/session/manager.ts` — existing `open()` resume logic.
 
 **Verification:**
-- [ ] `test/session-manager.test.mjs` covers in-memory sessions, persisted sessions, and missing sessions for `has()`.
+- [x] `test/session-manager.test.mjs` covers in-memory sessions, persisted sessions, and missing sessions for `has()`.
 
 ---
 
@@ -269,3 +269,7 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 3. Mention Sky midway through an existing Slack thread; the first ACP input includes previous thread history.
 4. Send an unmentioned message in a different channel thread; Sky ignores it.
 5. Restart the daemon; a thread with a persisted session continues without mention, while a thread without a persisted session requires another mention.
+
+## Progress Log
+
+- 2026-05-04: Step 0 completed. Added `SessionManager.has()` for in-memory and persisted session checks without opening provider sessions.
