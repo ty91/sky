@@ -143,16 +143,15 @@ test('userMessage opens a session and silently ignores interrupted result', asyn
   assert.deepEqual(replies, []);  // interrupted일 때는 아무 응답도 보내지 않음
 });
 
-test('userMessage sends each assistant message individually via onMessage callback', async () => {
+test('userMessage sends the completed assistant message once via onMessage callback', async () => {
   const replies = [];
   const statuses = [];
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     sessionManager: createSessionManagerMock({
       send: async (_threadId, _text, options) => {
-        await options.onMessage('파일을 확인해볼게요');
-        await options.onMessage('수정 완료했습니다');
-        return { kind: 'ok', text: '수정 완료했습니다' };
+        await options.onMessage('파일을 확인해볼게요\n\n수정 완료했습니다');
+        return { kind: 'ok', text: '파일을 확인해볼게요\n\n수정 완료했습니다' };
       },
     }),
   });
@@ -168,8 +167,8 @@ test('userMessage sends each assistant message individually via onMessage callba
     client: {},
   });
 
-  assert.deepEqual(replies, ['파일을 확인해볼게요', '수정 완료했습니다']);
-  assert.deepEqual(statuses, ['생각 중...', '생각 중...', '생각 중...', '']);
+  assert.deepEqual(replies, ['파일을 확인해볼게요\n\n수정 완료했습니다']);
+  assert.deepEqual(statuses, ['생각 중...', '생각 중...', '']);
 });
 
 test('userMessage resets status after each assistant message and clears it after completion', async () => {

@@ -55,16 +55,18 @@ function createFakeConnection(overrides = {}) {
         },
         prompt: async (params) => {
           calls.prompt.push(params);
-          await client.sessionUpdate({
-            sessionId: params.sessionId,
-            update: {
-              sessionUpdate: 'agent_message_chunk',
-              content: {
-                type: 'text',
-                text: 'hello from acp',
+          for (const text of ['hello ', 'from ', 'acp']) {
+            await client.sessionUpdate({
+              sessionId: params.sessionId,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: {
+                  type: 'text',
+                  text,
+                },
               },
-            },
-          });
+            });
+          }
           return { stopReason: 'end_turn' };
         },
         cancel: async (params) => {
@@ -85,7 +87,7 @@ function createFakeConnection(overrides = {}) {
   return connection;
 }
 
-test('ACP provider creates a session and collects streamed text chunks', async () => {
+test('ACP provider creates a session and collects buffered text chunks', async () => {
   const fake = createFakeConnection();
   const provider = createAcpProviderFactory({
     cwd: '/tmp/workspace',
