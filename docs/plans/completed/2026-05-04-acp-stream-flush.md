@@ -1,7 +1,7 @@
 ---
 title: ACP Stream Flush
 type: fix
-status: active
+status: completed
 created_at: 2026-05-04T07:42:20Z
 ---
 
@@ -164,3 +164,4 @@ provider test. Run the full `pnpm test` gate before handoff.
 - 2026-05-04: Added ACP provider stream state and verified `pnpm build`.
 - 2026-05-04: Implemented ACP stream flushing on non-agent updates and prompt completion.
 - 2026-05-04: Added ACP provider regression coverage and verified build, focused test command, and full test suite.
+- 2026-05-04: Implementation completed.
