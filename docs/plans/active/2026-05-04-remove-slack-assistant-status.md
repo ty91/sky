@@ -80,7 +80,7 @@ reply, transcript, interruption, error, and reaction behavior.
 - `src/session/manager.ts` — keep existing `onMessage` and result-kind flow.
 
 **Verification:**
-- [ ] `rg "setStatus|생각 중" src/slack`
+- [x] `rg "setStatus|생각 중" src/slack/assistant.ts`
 
 ---
 
@@ -168,3 +168,7 @@ focused Slack tests first, then the full test suite. Finish with a source search
 to confirm active Slack code no longer contains `setStatus`, `assistant.threads.setStatus`,
 or `생각 중`.
 
+## Progress Log
+
+- 2026-05-04: Started implementation on branch `remove-slack-assistant-status`.
+- 2026-05-04: Removed Slack Assistant status usage from `src/slack/assistant.ts`.

@@ -77,7 +77,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       await saveThreadContext();
     },
 
-    userMessage: async ({ message, say, setStatus, client }) => {
+    userMessage: async ({ message, say, client }) => {
       const rawText = 'text' in message && typeof message.text === 'string' ? message.text.trim() : '';
       const channelId = message.channel;
       const threadTs = 'thread_ts' in message && typeof message.thread_ts === 'string'
@@ -108,14 +108,10 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
 
       const messageTs = message.ts;
 
-      const sender = new SlackSender({
-        say,
-        setStatus: (status) => setStatus(status),
-      });
+      const sender = new SlackSender({ say });
       const transcript = new TranscriptWriter(threadId);
 
       await addReaction(client, channelId, messageTs, 'thought_balloon');
-      await sender.setStatus('생각 중...');
 
       try {
         sessionManager.open(threadId, mainAgent);
@@ -135,7 +131,6 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
             }
             transcript.appendAssistant(msg);
             await sender.sendReply(msg);
-            await sender.setStatus('생각 중...');
           },
         });
 
@@ -152,7 +147,6 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         await sender.sendReply(`오류가 났습니다: ${errorMessage}`);
       } finally {
         await removeReaction(client, channelId, messageTs, 'thought_balloon');
-        await sender.setStatus('');
       }
     },
   };
