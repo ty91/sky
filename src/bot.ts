@@ -4,7 +4,6 @@ import type { App } from '@slack/bolt';
 import { createMainAgentConfig } from './agents/main.js';
 import type { AgentConfig } from './agents/types.js';
 import { spawnDetachedRestart } from './daemon.js';
-import { BotRuntime } from './runtime/bot-runtime.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { createAcpProviderFactory } from './providers/acp.js';
 import { createSessionManager, type SessionManager } from './session/manager.js';
@@ -220,39 +219,18 @@ export async function startBot(): Promise<void> {
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
 
   try {
-    if (settings.slack) {
-      console.log('[startup] slack config found, starting slack app...');
-      slackApp = await startSlackApp({
-        botToken: settings.slack.botToken,
-        appToken: settings.slack.appToken,
-        sessionManager,
-        mainAgent,
-      });
-    } else {
-      console.log('[startup] no slack config, skipping slack app');
-    }
+    console.log('[startup] starting slack app...');
+    slackApp = await startSlackApp({
+      botToken: settings.slack.botToken,
+      appToken: settings.slack.appToken,
+      sessionManager,
+      mainAgent,
+    });
 
     // Fire the post-restart trigger *after* transports are up but *before* we
-    // start waiting for shutdown. Non-blocking on Telegram-only deployments
-    // since the trigger short-circuits without a Slack app.
+    // start waiting for shutdown.
     await triggerPostRestartIfPending(slackApp, sessionManager, mainAgent);
 
-    if (settings.telegram) {
-      console.log('[startup] telegram config found, starting telegram runtime...');
-      const telegramRuntime = new BotRuntime({
-        settings: {
-          ...settings,
-          telegram: settings.telegram,
-        },
-        sessionManager,
-        mainAgent,
-      });
-
-      await telegramRuntime.start();
-      return;
-    }
-
-    console.log('[startup] no telegram config, running slack-only mode');
     await waitForShutdownSignal();
   } finally {
     unregisterRestartSignalHandler();

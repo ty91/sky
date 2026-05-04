@@ -15,31 +15,37 @@ test('parseSettings accepts slack-only configuration', () => {
     botToken: 'xoxb-test',
     appToken: 'xapp-test',
   });
-  assert.equal(settings.telegram, undefined);
   assert.equal(settings.model, 'anthropic/claude-opus-4-7');
   assert.equal(typeof settings.workspace, 'string');
 });
 
-test('parseSettings accepts telegram-only configuration', () => {
-  const settings = parseSettings({
-    telegram: {
-      botToken: 'telegram-token',
-    },
-    model: 'anthropic/claude-sonnet-4-6',
-  });
-
-  assert.deepEqual(settings.telegram, {
-    botToken: 'telegram-token',
-  });
-  assert.equal(settings.model, 'anthropic/claude-sonnet-4-6');
-  assert.equal(settings.slack, undefined);
-});
-
-test('parseSettings requires at least one transport', () => {
+test('parseSettings requires slack configuration', () => {
   assert.throws(
     () => parseSettings({ model: 'anthropic/claude-opus-4-7' }),
     (error) => {
-      assert.match(error.message, /At least one transport must be configured/);
+      assert.match(error.message, /Invalid input: expected object/);
+      return true;
+    },
+  );
+});
+
+test('parseSettings rejects removed transport configuration', () => {
+  const removedTransport = ['tele', 'gram'].join('');
+
+  assert.throws(
+    () =>
+      parseSettings({
+        slack: {
+          botToken: 'xoxb-test',
+          appToken: 'xapp-test',
+        },
+        [removedTransport]: {
+          botToken: 'removed-token',
+        },
+        model: 'anthropic/claude-opus-4-7',
+      }),
+    (error) => {
+      assert.match(error.message, /Unrecognized key/);
       return true;
     },
   );

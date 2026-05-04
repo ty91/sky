@@ -11,7 +11,7 @@ import { dreamCommand } from './commands/dream.js';
 
 const program = new Command()
   .name('sky')
-  .description('ACP agent chatbot for Slack and Telegram')
+  .description('ACP agent chatbot for Slack')
   .version('0.1.0');
 
 program.addCommand(startCommand);
