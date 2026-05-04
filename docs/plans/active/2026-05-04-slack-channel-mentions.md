@@ -105,7 +105,7 @@ Behavior:
 - `/Users/taeyoung/Developer/workspace/reco/apps/slack-bot/src/slack/messages.ts` — same mention-normalization pattern.
 
 **Verification:**
-- [ ] `test/slack-channel.test.mjs` or a focused message test covers mention replacement, allowed follow-up, missing mention ignore, bot ignore, subtype ignore, and empty ignore.
+- [x] `test/slack-channel.test.mjs` or a focused message test covers mention replacement, allowed follow-up, missing mention ignore, bot ignore, subtype ignore, and empty ignore.
 
 ---
 
@@ -273,3 +273,4 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 ## Progress Log
 
 - 2026-05-04: Step 0 completed. Added `SessionManager.has()` for in-memory and persisted session checks without opening provider sessions.
+- 2026-05-04: Step 1 completed. Added channel message normalization for bot mentions, existing-thread follow-ups, and ignored Slack messages.
