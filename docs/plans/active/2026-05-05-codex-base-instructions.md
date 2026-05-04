@@ -169,10 +169,10 @@ Update `buildCodexAgentEnv()` so the `openai/*` runtime env:
   `CODEX_CONFIG` through to Codex app-server config.
 
 **Verification:**
-- [ ] Unit test asserts `CODEX_CONFIG.developer_instructions` is absent.
-- [ ] Unit test asserts `CODEX_CONFIG.model_instructions_file` points to the
+- [x] Unit test asserts `CODEX_CONFIG.developer_instructions` is absent.
+- [x] Unit test asserts `CODEX_CONFIG.model_instructions_file` points to the
   Sky prompt file.
-- [ ] Unit test asserts `runtime.env.CODEX_HOME` is the Sky-owned Codex home,
+- [x] Unit test asserts `runtime.env.CODEX_HOME` is the Sky-owned Codex home,
   even when `process.env.CODEX_HOME` was set.
 
 ---
@@ -248,3 +248,6 @@ pnpm test
 - 2026-05-05: Step 1 completed. Codex runtime preparation now creates a
   Sky-owned Codex home, writes the prompt snapshot file, and links auth from the
   configured Codex auth source when present.
+- 2026-05-05: Step 2 completed. OpenAI ACP sessions now force Sky-owned
+  `CODEX_HOME` and pass Sky's prompt through `model_instructions_file` without
+  `developer_instructions`.

@@ -281,16 +281,17 @@ function resolveCodexAgentAcpPath(): string {
   return fileURLToPath(import.meta.resolve('@agentclientprotocol/codex-acp/dist/index.js'));
 }
 
-function buildCodexAgentEnv(config: ProviderConfig, modelId: string): NodeJS.ProcessEnv {
+function buildCodexAgentEnv(modelId: string, runtime: PreparedCodexRuntime): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of CODEX_ENV_KEYS) {
     if (process.env[key] !== undefined) {
       env[key] = process.env[key];
     }
   }
+  env.CODEX_HOME = runtime.codexHome;
   env.CODEX_CONFIG = JSON.stringify({
     model: modelId,
-    developer_instructions: config.systemPrompt,
+    model_instructions_file: runtime.promptPath,
     project_doc_max_bytes: 0,
   });
   return env;
@@ -308,11 +309,11 @@ function resolveAcpAgentRuntime(
         args: [resolveClaudeAgentAcpPath()],
       };
     case 'openai':
-      prepareCodexRuntime(config, defaults);
+      const codexRuntime = prepareCodexRuntime(config, defaults);
       return {
         command: process.execPath,
         args: [resolveCodexAgentAcpPath()],
-        env: buildCodexAgentEnv(config, parsed.modelId),
+        env: buildCodexAgentEnv(parsed.modelId, codexRuntime),
       };
   }
 }

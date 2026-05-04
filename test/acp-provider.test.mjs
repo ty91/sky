@@ -176,19 +176,22 @@ test('ACP provider selects Codex ACP runtime for openai models', async () => {
       }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5', systemPrompt });
 
       const runtime = fake.calls.runtimes[0];
+      const codexHome = path.join(tmp, 'codex-home');
+      const codexConfig = JSON.parse(runtime.env.CODEX_CONFIG);
       assert.equal(runtime.command, process.execPath);
       assert.equal(runtime.args.length, 1);
       assert.equal(path.basename(runtime.args[0]), 'index.js');
       assert.match(runtime.args[0], /@agentclientprotocol[+/]codex-acp/);
       assert.match(runtime.args[0], /dist[/\\]index\.js$/);
-      assert.deepEqual(JSON.parse(runtime.env.CODEX_CONFIG), {
+      assert.deepEqual(codexConfig, {
         model: 'gpt-5.5',
-        developer_instructions: systemPrompt,
+        model_instructions_file: path.join(codexHome, 'sky-system-prompt.md'),
         project_doc_max_bytes: 0,
       });
+      assert.equal('developer_instructions' in codexConfig, false);
       assert.equal(runtime.env.APP_SERVER_LOGS, undefined);
       assert.equal(runtime.env.CODEX_API_KEY, 'test-codex-key');
-      assert.equal(runtime.env.CODEX_HOME, '/tmp/test-codex-home');
+      assert.equal(runtime.env.CODEX_HOME, codexHome);
       assert.equal(runtime.env.CODEX_PATH, undefined);
       assert.equal(runtime.env.MODEL_PROVIDER, undefined);
       assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
