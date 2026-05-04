@@ -97,7 +97,7 @@ remaining transport path and should be reused unchanged unless type fallout
 requires a narrow adjustment.
 
 **Verification:**
-- [ ] `rg -n "telegram|Telegram|grammy|polling" src` has no current-runtime matches. Incidental non-Telegram wording such as memory cadence can remain if accurate.
+- [x] `rg -n "telegram|Telegram|grammy|polling" src` has no current-runtime matches. Incidental non-Telegram wording such as memory cadence can remain if accurate.
 
 ---
 
@@ -227,3 +227,4 @@ unchanged because they document past repo state.
 ## Progress Log
 
 - 2026-05-04: Removed Telegram package dependencies and updated package metadata.
+- 2026-05-04: Deleted Telegram runtime/source modules and removed live source references.
