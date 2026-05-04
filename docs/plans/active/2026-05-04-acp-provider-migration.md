@@ -269,9 +269,9 @@ Manager behavior:
 - `test/session-manager.test.mjs`
 
 **Verification:**
-- [ ] Store round-trip includes `model`.
-- [ ] Existing rows with empty model do not resume.
-- [ ] Model mismatch creates a fresh provider session.
+- [x] Store round-trip includes `model`.
+- [x] Existing rows with empty model do not resume.
+- [x] Model mismatch creates a fresh provider session.
 
 ---
 
@@ -426,3 +426,4 @@ Manual end-to-end verification:
 - 2026-05-04: Added provider-qualified model settings and parser; targeted settings/model tests passed.
 - 2026-05-04: Removed Claude SDK types from shared provider/agent config and passed session keys into provider configs.
 - 2026-05-04: Replaced the direct Claude provider with an ACP provider and covered prompt, cancel, resume fallback, and error paths.
+- 2026-05-04: Added model ownership to persisted sessions and ignored legacy or mismatched session records.

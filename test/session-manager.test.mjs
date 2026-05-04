@@ -73,7 +73,10 @@ test('session manager creates sessions and persists new session ids via store', 
   assert.equal(sendCalls[0].config.cwd, '/tmp/workspace');
   // system_prompt snapshot is persisted alongside the session id
   assert.deepEqual(calls.put, [
-    { key: 'thread-1', session: { sessionId: 'session-1', systemPrompt: 'system' } },
+    {
+      key: 'thread-1',
+      session: { sessionId: 'session-1', model: 'opus', systemPrompt: 'system' },
+    },
   ]);
   assert.equal(manager.getSessionId('thread-1'), 'session-1');
 
@@ -85,7 +88,7 @@ test('session manager creates sessions and persists new session ids via store', 
 
 test('session manager auto-resumes from store on open', async () => {
   const { store, calls } = createMockStore({
-    'thread-1': { sessionId: 'resumed-session', systemPrompt: 'frozen-S0' },
+    'thread-1': { sessionId: 'resumed-session', model: 'opus', systemPrompt: 'frozen-S0' },
   });
   let createdWith;
   const manager = createSessionManager({
@@ -141,13 +144,16 @@ test('new sessions call systemPromptLoader; loader output is passed to provider 
   await manager.send('thread-new', 'hi');
   // The freshly-loaded prompt is frozen into the store for future resumes.
   assert.deepEqual(calls.put, [
-    { key: 'thread-new', session: { sessionId: 'new-session', systemPrompt: 'fresh-prompt-v1' } },
+    {
+      key: 'thread-new',
+      session: { sessionId: 'new-session', model: 'opus', systemPrompt: 'fresh-prompt-v1' },
+    },
   ]);
 });
 
 test('resumed sessions skip systemPromptLoader and replay the stored snapshot', async () => {
   const { store } = createMockStore({
-    'thread-1': { sessionId: 'resumed', systemPrompt: 'frozen-S0' },
+    'thread-1': { sessionId: 'resumed', model: 'opus', systemPrompt: 'frozen-S0' },
   });
   let loaderCallCount = 0;
   const loaderAgent = {
@@ -181,9 +187,9 @@ test('resumed sessions skip systemPromptLoader and replay the stored snapshot', 
   );
 });
 
-test('legacy records (empty stored prompt) fall back to agent.systemPrompt and self-heal', async () => {
+test('matching model records with empty stored prompt fall back to agent.systemPrompt and self-heal', async () => {
   const { store, calls } = createMockStore({
-    'thread-1': { sessionId: 'legacy', systemPrompt: '' },
+    'thread-1': { sessionId: 'legacy', model: 'opus', systemPrompt: '' },
   });
   let loaderCallCount = 0;
   const loaderAgent = {
@@ -213,8 +219,85 @@ test('legacy records (empty stored prompt) fall back to agent.systemPrompt and s
   // open() should backfill the store synchronously so the next resume gets a
   // matching snapshot and hits Anthropic's prompt cache.
   assert.deepEqual(calls.put, [
-    { key: 'thread-1', session: { sessionId: 'legacy', systemPrompt: 'baseline' } },
+    { key: 'thread-1', session: { sessionId: 'legacy', model: 'opus', systemPrompt: 'baseline' } },
   ]);
+});
+
+test('stored sessions with a different model are ignored', async () => {
+  const { store, calls } = createMockStore({
+    'thread-1': {
+      sessionId: 'old-model-session',
+      model: 'anthropic/claude-sonnet-4-6',
+      systemPrompt: 'old-prompt',
+    },
+  });
+  let loaderCallCount = 0;
+  const loaderAgent = {
+    ...AGENT,
+    model: 'opus',
+    systemPrompt: 'baseline',
+    systemPromptLoader: () => {
+      loaderCallCount++;
+      return 'fresh-current-model';
+    },
+  };
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider({
+          collect: async () => ({ text: 'reply', sessionId: 'new-model-session' }),
+        });
+      },
+    },
+  });
+
+  manager.open('thread-1', loaderAgent);
+  assert.equal(loaderCallCount, 1);
+  assert.equal(createdWith.resume, undefined);
+  assert.equal(createdWith.systemPrompt, 'fresh-current-model');
+
+  await manager.send('thread-1', 'hi');
+
+  assert.deepEqual(calls.put, [
+    {
+      key: 'thread-1',
+      session: {
+        sessionId: 'new-model-session',
+        model: 'opus',
+        systemPrompt: 'fresh-current-model',
+      },
+    },
+  ]);
+});
+
+test('stored sessions without model ownership are ignored', () => {
+  const { store } = createMockStore({
+    'thread-1': {
+      sessionId: 'legacy-sdk-session',
+      model: '',
+      systemPrompt: 'legacy-prompt',
+    },
+  });
+  let createdWith;
+  const manager = createSessionManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    providerFactory: {
+      create: (config) => {
+        createdWith = config;
+        return createMockProvider();
+      },
+    },
+  });
+
+  manager.open('thread-1', AGENT);
+
+  assert.equal(createdWith.resume, undefined);
+  assert.equal(createdWith.systemPrompt, 'system');
 });
 
 test('session manager works without a store (ephemeral mode)', async () => {
@@ -238,7 +321,7 @@ test('session manager works without a store (ephemeral mode)', async () => {
 
 test('purge removes persisted record and closes session', async () => {
   const { store, calls } = createMockStore({
-    'thread-1': { sessionId: 'old', systemPrompt: '' },
+    'thread-1': { sessionId: 'old', model: 'opus', systemPrompt: '' },
   });
   const manager = createSessionManager({
     defaultCwd: '/tmp/workspace',
