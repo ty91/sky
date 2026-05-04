@@ -1,7 +1,7 @@
 ---
 title: Slack Channel Mentions
 type: feat
-status: active
+status: completed
 created_at: 2026-05-04T13:46:16Z
 ---
 
@@ -278,3 +278,4 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 - 2026-05-04: Step 3 completed. Added the testable Slack channel handler for session routing, history prepend, reactions, and thread replies.
 - 2026-05-04: Step 4 completed. Wired Slack channel handlers into the Bolt app while preserving the existing Assistant registration.
 - 2026-05-04: Step 5 completed. Documented Slack channel mention behavior and required app events/scopes.
+- 2026-05-04: Implementation completed.
