@@ -205,10 +205,10 @@ and prompt ordering.
   `USER.md`, `MEMORY.md` ordering and missing-file behavior.
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] `pnpm typecheck`
-- [ ] `pnpm test`
-- [ ] Manual check, if useful: run Codex `debug prompt-input` with an isolated
+- [x] `pnpm build`
+- [x] `pnpm typecheck`
+- [x] `pnpm test`
+- [x] Manual check, if useful: run Codex `debug prompt-input` with an isolated
   `CODEX_HOME` to confirm default `~/.codex/AGENTS.md` is not injected.
 
 ---
@@ -254,3 +254,6 @@ pnpm test
 - 2026-05-05: Step 3 completed. README now documents the `SOUL.md`,
   `AGENTS.md`, `USER.md`, `MEMORY.md` order and the isolated Codex home,
   auth symlink, and `model_instructions_file` behavior.
+- 2026-05-05: Step 4 completed. `pnpm build`, `pnpm typecheck`, and
+  `pnpm test` passed; isolated Codex `debug prompt-input` did not include the
+  default `~/.codex/AGENTS.md` content.
