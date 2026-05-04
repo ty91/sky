@@ -59,6 +59,10 @@ type AcpSessionState = {
 const CODEX_ENV_KEYS = [
   'CODEX_API_KEY',
   'OPENAI_API_KEY',
+  'CODEX_HOME',
+  'CODEX_PATH',
+  'APP_SERVER_LOGS',
+  'MODEL_PROVIDER',
   'HOME',
   'USERPROFILE',
   'APPDATA',
@@ -229,13 +233,18 @@ function resolveCodexAgentAcpPath(): string {
   return fileURLToPath(import.meta.resolve('@agentclientprotocol/codex-acp/dist/index.js'));
 }
 
-function buildCodexAgentEnv(): NodeJS.ProcessEnv {
+function buildCodexAgentEnv(config: ProviderConfig, modelId: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of CODEX_ENV_KEYS) {
     if (process.env[key] !== undefined) {
       env[key] = process.env[key];
     }
   }
+  env.CODEX_CONFIG = JSON.stringify({
+    model: modelId,
+    developer_instructions: config.systemPrompt,
+    project_doc_max_bytes: 0,
+  });
   return env;
 }
 
@@ -250,7 +259,7 @@ function resolveAcpAgentRuntime(parsed: ParsedModel, config: ProviderConfig): Ac
       return {
         command: process.execPath,
         args: [resolveCodexAgentAcpPath()],
-        env: buildCodexAgentEnv(),
+        env: buildCodexAgentEnv(config, parsed.modelId),
       };
   }
 }

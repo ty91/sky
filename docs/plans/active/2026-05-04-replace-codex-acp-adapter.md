@@ -151,9 +151,9 @@ Do not set `DEFAULT_AUTH_REQUEST` for API key injection. Existing Codex auth cha
 - `/Users/taeyoung/Developer/oss/codex-acp-agentclientprotocol/src/CodexAcpClient.ts` — upstream merges `CODEX_CONFIG` into Codex session config.
 
 **Verification:**
-- [ ] Unit test parses `runtime.env.CODEX_CONFIG` and asserts `model`, `developer_instructions`, and `project_doc_max_bytes`.
-- [ ] Unit test confirms allowlisted auth/path env keys are copied when present.
-- [ ] Unit test confirms unrelated env secrets are not copied.
+- [x] Unit test parses `runtime.env.CODEX_CONFIG` and asserts `model`, `developer_instructions`, and `project_doc_max_bytes`.
+- [x] Unit test confirms allowlisted auth/path env keys are copied when present.
+- [x] Unit test confirms unrelated env secrets are not copied.
 
 ---
 
@@ -239,3 +239,4 @@ For end-to-end smoke verification after unit tests pass, configure `~/.sky/setti
 
 - 2026-05-04: Replaced the Codex ACP dependency with `@agentclientprotocol/codex-acp` and verified the lockfile with `pnpm install --frozen-lockfile`.
 - 2026-05-04: Updated the OpenAI runtime resolver to launch `@agentclientprotocol/codex-acp/dist/index.js` with Node and verified `node --test test/acp-provider.test.mjs`.
+- 2026-05-04: Added `CODEX_CONFIG` runtime env construction and expanded the Codex env allowlist, verified with `pnpm build` and `node --test test/acp-provider.test.mjs`.

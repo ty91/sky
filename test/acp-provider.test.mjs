@@ -132,10 +132,16 @@ test('ACP provider creates a session and collects buffered text chunks', async (
 test('ACP provider selects Codex ACP runtime for openai models', () => {
   const fake = createFakeConnection();
   const systemPrompt = 'system "quoted"\nnext';
+  const originalCodexApiKey = process.env.CODEX_API_KEY;
+  const originalCodexHome = process.env.CODEX_HOME;
+  const originalCodexPath = process.env.CODEX_PATH;
   const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
   const originalSecret = process.env.SKY_SECRET_FOR_TEST;
 
   try {
+    process.env.CODEX_API_KEY = 'test-codex-key';
+    process.env.CODEX_HOME = '/tmp/test-codex-home';
+    process.env.CODEX_PATH = '/tmp/test-codex';
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.SKY_SECRET_FOR_TEST = 'hidden';
 
@@ -150,9 +156,32 @@ test('ACP provider selects Codex ACP runtime for openai models', () => {
     assert.equal(path.basename(runtime.args[0]), 'index.js');
     assert.match(runtime.args[0], /@agentclientprotocol[+/]codex-acp/);
     assert.match(runtime.args[0], /dist[/\\]index\.js$/);
+    assert.deepEqual(JSON.parse(runtime.env.CODEX_CONFIG), {
+      model: 'gpt-5.5',
+      developer_instructions: systemPrompt,
+      project_doc_max_bytes: 0,
+    });
+    assert.equal(runtime.env.CODEX_API_KEY, 'test-codex-key');
+    assert.equal(runtime.env.CODEX_HOME, '/tmp/test-codex-home');
+    assert.equal(runtime.env.CODEX_PATH, '/tmp/test-codex');
     assert.equal(runtime.env.OPENAI_API_KEY, 'test-openai-key');
     assert.equal(runtime.env.SKY_SECRET_FOR_TEST, undefined);
   } finally {
+    if (originalCodexApiKey === undefined) {
+      delete process.env.CODEX_API_KEY;
+    } else {
+      process.env.CODEX_API_KEY = originalCodexApiKey;
+    }
+    if (originalCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = originalCodexHome;
+    }
+    if (originalCodexPath === undefined) {
+      delete process.env.CODEX_PATH;
+    } else {
+      process.env.CODEX_PATH = originalCodexPath;
+    }
     if (originalOpenAiApiKey === undefined) {
       delete process.env.OPENAI_API_KEY;
     } else {
