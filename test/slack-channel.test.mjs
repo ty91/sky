@@ -1,10 +1,98 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createSlackChannelHandler } from '../dist/slack/channel.js';
 import { normalizeSlackMessage } from '../dist/slack/messages.js';
 import {
   prependSlackThreadHistoryToPrompt,
   readSlackThreadMessages,
 } from '../dist/slack/thread-history.js';
+
+const MAIN_AGENT = {
+  name: 'main',
+  systemPrompt: 'system',
+  model: 'opus',
+  tools: ['Read'],
+};
+
+function createSlackClient({ history = [], historyError } = {}) {
+  const calls = {
+    fetches: [],
+    posts: [],
+    reactions: [],
+  };
+
+  return {
+    calls,
+    client: {
+      chat: {
+        postMessage: async (params) => {
+          calls.posts.push(params);
+          return { ok: true };
+        },
+      },
+      fetchThreadMessages: async (params) => {
+        calls.fetches.push(params);
+        if (historyError) {
+          throw historyError;
+        }
+        return history;
+      },
+      reactions: {
+        add: async (params) => {
+          calls.reactions.push({ method: 'add', ...params });
+          return { ok: true };
+        },
+        remove: async (params) => {
+          calls.reactions.push({ method: 'remove', ...params });
+          return { ok: true };
+        },
+      },
+    },
+  };
+}
+
+function createSessionManagerMock({ has = false, sendResult, reply = '응답' } = {}) {
+  const calls = {
+    open: [],
+    send: [],
+  };
+  let sessionId;
+
+  return {
+    calls,
+    manager: {
+      open: (key, agent) => {
+        calls.open.push({ agent, key });
+      },
+      send: async (key, text, options) => {
+        calls.send.push({ key, text });
+        sessionId = sessionId ?? 'session-1';
+        if (reply && options?.onMessage) {
+          await options.onMessage(reply);
+        }
+        return sendResult ?? { kind: 'ok', text: reply };
+      },
+      has: () => has,
+      getSessionId: () => sessionId,
+      close: async () => {},
+      purge: async () => {},
+      closeAll: async () => {},
+    },
+  };
+}
+
+function createHandler({ has, history, historyError, sendResult, reply } = {}) {
+  const slack = createSlackClient({ history, historyError });
+  const sessions = createSessionManagerMock({ has, reply, sendResult });
+  const handler = createSlackChannelHandler({
+    botUserId: 'U999',
+    mainAgent: MAIN_AGENT,
+    sessionManager: sessions.manager,
+    slack: slack.client,
+  });
+
+  return { handler, sessions, slack };
+}
 
 test('normalizeSlackMessage replaces bot mentions with a readable label', () => {
   const result = normalizeSlackMessage({
@@ -150,4 +238,162 @@ test('readSlackThreadMessages parses valid Slack message records only', () => {
     { bot_id: 'B123', text: 'bot', ts: '1777901100.000000', user: undefined },
   ]);
   assert.deepEqual(readSlackThreadMessages({ messages: [] }), []);
+});
+
+test('channel handler opens root mentions and replies in the root message thread', async () => {
+  const { handler, sessions, slack } = createHandler();
+
+  await handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> 작업 상태 알려줘',
+      ts: '1777901000.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.deepEqual(sessions.calls.open.map((call) => call.key), ['C123:1777901000.000000']);
+  assert.deepEqual(sessions.calls.send.map((call) => call.text), ['@sky 작업 상태 알려줘']);
+  assert.deepEqual(slack.calls.posts, [
+    { channel: 'C123', text: '응답', thread_ts: '1777901000.000000' },
+  ]);
+  assert.deepEqual(slack.calls.fetches, [
+    { channel: 'C123', latest: '1777901000.000000', threadTs: '1777901000.000000' },
+  ]);
+  assert.deepEqual(slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'add:white_check_mark',
+    'remove:thought_balloon',
+  ]);
+});
+
+test('channel handler uses thread_ts for thread mentions', async () => {
+  const { handler, sessions, slack } = createHandler();
+
+  await handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> 이 스레드 기준으로 봐줘',
+      thread_ts: '1777900000.000000',
+      ts: '1777901000.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.deepEqual(sessions.calls.open.map((call) => call.key), ['C123:1777900000.000000']);
+  assert.deepEqual(slack.calls.posts, [
+    { channel: 'C123', text: '응답', thread_ts: '1777900000.000000' },
+  ]);
+});
+
+test('channel handler accepts unmentioned follow-ups only for existing sessions', async () => {
+  const existing = createHandler({ has: true });
+  const missing = createHandler({ has: false });
+
+  await existing.handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '이어서 설명해줘',
+      thread_ts: '1777900000.000000',
+      ts: '1777901100.000000',
+      user: 'U123',
+    },
+  });
+  await missing.handler.handleMessage({
+    event: {
+      channel: 'C999',
+      text: '이건 무시해야 함',
+      thread_ts: '1777900000.000000',
+      ts: '1777901100.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.deepEqual(existing.sessions.calls.send.map((call) => call.text), ['이어서 설명해줘']);
+  assert.deepEqual(existing.slack.calls.fetches, []);
+  assert.deepEqual(missing.sessions.calls.open, []);
+  assert.deepEqual(missing.slack.calls.posts, []);
+  assert.deepEqual(missing.slack.calls.reactions, []);
+});
+
+test('channel handler prepends history only for new sessions and falls back on history errors', async () => {
+  const history = [
+    { text: '이전에 논의한 내용', ts: '1777900000.000000', user: 'U123' },
+  ];
+  const fresh = createHandler({ history });
+  const existing = createHandler({ has: true, history });
+  const failedHistory = createHandler({ historyError: new Error('missing_scope') });
+
+  await fresh.handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> 정리해줘',
+      thread_ts: '1777900000.000000',
+      ts: '1777901100.000000',
+      user: 'U123',
+    },
+  });
+  await existing.handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '후속 질문',
+      thread_ts: '1777900000.000000',
+      ts: '1777901200.000000',
+      user: 'U123',
+    },
+  });
+  await failedHistory.handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> 실패해도 보내줘',
+      thread_ts: '1777900000.000000',
+      ts: '1777901300.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.match(fresh.sessions.calls.send[0].text, /\[Slack thread history\]/);
+  assert.match(fresh.sessions.calls.send[0].text, /이전에 논의한 내용/);
+  assert.match(fresh.sessions.calls.send[0].text, /\[User request\]\n@sky 정리해줘/);
+  assert.deepEqual(existing.slack.calls.fetches, []);
+  assert.deepEqual(existing.sessions.calls.send.map((call) => call.text), ['후속 질문']);
+  assert.deepEqual(failedHistory.sessions.calls.send.map((call) => call.text), ['@sky 실패해도 보내줘']);
+});
+
+test('channel handler marks interrupted and error results with matching Slack feedback', async () => {
+  const interrupted = createHandler({ reply: '', sendResult: { kind: 'interrupted' } });
+  const failed = createHandler({
+    reply: '',
+    sendResult: { kind: 'error', error: new Error('boom') },
+  });
+
+  await interrupted.handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> 오래 걸리는 일',
+      ts: '1777901000.000000',
+      user: 'U123',
+    },
+  });
+  await failed.handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> 실패하는 일',
+      ts: '1777902000.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.deepEqual(interrupted.slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'add:hand',
+    'remove:thought_balloon',
+  ]);
+  assert.deepEqual(failed.slack.calls.posts, [
+    { channel: 'C123', text: '오류가 났습니다: boom', thread_ts: '1777902000.000000' },
+  ]);
+  assert.deepEqual(failed.slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'remove:thought_balloon',
+  ]);
 });

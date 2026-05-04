@@ -175,13 +175,13 @@ History fetch failures should log and fall back to the current request. Do not f
 - `src/agents/memory/transcript.ts` — transcript writer can be reused with the same thread id.
 
 **Verification:**
-- [ ] Root channel mention opens `C123:messageTs` and replies with `thread_ts: messageTs`.
-- [ ] Thread mention opens/reuses `C123:threadTs`.
-- [ ] Existing session thread accepts unmentioned follow-up.
-- [ ] Different unmentioned thread is ignored.
-- [ ] First new session prepends history; existing session does not fetch history again.
-- [ ] History fetch failure still sends only the current request.
-- [ ] Reaction lifecycle matches success/interrupted/error paths.
+- [x] Root channel mention opens `C123:messageTs` and replies with `thread_ts: messageTs`.
+- [x] Thread mention opens/reuses `C123:threadTs`.
+- [x] Existing session thread accepts unmentioned follow-up.
+- [x] Different unmentioned thread is ignored.
+- [x] First new session prepends history; existing session does not fetch history again.
+- [x] History fetch failure still sends only the current request.
+- [x] Reaction lifecycle matches success/interrupted/error paths.
 
 ---
 
@@ -275,3 +275,4 @@ Manual verification requires a Slack app with Socket Mode, channel message event
 - 2026-05-04: Step 0 completed. Added `SessionManager.has()` for in-memory and persisted session checks without opening provider sessions.
 - 2026-05-04: Step 1 completed. Added channel message normalization for bot mentions, existing-thread follow-ups, and ignored Slack messages.
 - 2026-05-04: Step 2 completed. Added Slack thread history parsing and bounded prompt prepend formatting.
+- 2026-05-04: Step 3 completed. Added the testable Slack channel handler for session routing, history prepend, reactions, and thread replies.
