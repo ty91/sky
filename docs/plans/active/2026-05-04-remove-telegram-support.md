@@ -138,8 +138,8 @@ Remove Telegram health reporting from `sky status`.
 - Do not print `telegram runtime: disabled`; Telegram is not a supported runtime.
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] Run `node dist/index.js status` after build with a valid settings file, or document why local settings are unavailable.
+- [x] `pnpm build`
+- [x] Run `node dist/index.js status` after build with a valid settings file, or document why local settings are unavailable.
 
 ---
 
@@ -229,3 +229,4 @@ unchanged because they document past repo state.
 - 2026-05-04: Removed Telegram package dependencies and updated package metadata.
 - 2026-05-04: Deleted Telegram runtime/source modules and removed live source references.
 - 2026-05-04: Verified Slack-required settings and startup compile successfully.
+- 2026-05-04: Verified status output reports Slack configuration, model, workspace, and daemon state.
