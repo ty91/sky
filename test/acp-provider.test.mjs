@@ -33,6 +33,12 @@ function createFakeConnection(overrides = {}) {
       }
       await client.sessionUpdate(params);
     },
+    requestPermission: async (params) => {
+      if (!client) {
+        throw new Error('ACP test client was not initialized');
+      }
+      return client.requestPermission(params);
+    },
     createAgentConnection: (nextClient, runtime) => {
       client = nextClient;
       calls.runtimes.push(runtime);
@@ -224,6 +230,87 @@ test('ACP provider maps interrupt to session cancel', async () => {
   await provider.interrupt();
 
   assert.deepEqual(fake.calls.cancel, [{ sessionId: 'session-existing' }]);
+});
+
+test('ACP provider permission selection uses Claude tool metadata when present', async () => {
+  const fake = createFakeConnection();
+  createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create({ ...BASE_CONFIG, tools: ['Read'] });
+
+  const response = await fake.requestPermission({
+    toolCall: {
+      title: 'Write',
+      _meta: {
+        claudeCode: {
+          toolName: 'Read',
+        },
+      },
+    },
+    options: [
+      { optionId: 'allow-read', kind: 'allow_once' },
+      { optionId: 'reject-read', kind: 'reject_once' },
+    ],
+  });
+
+  assert.deepEqual(response, {
+    outcome: {
+      outcome: 'selected',
+      optionId: 'allow-read',
+    },
+  });
+});
+
+test('ACP provider permission selection falls back to tool title', async () => {
+  const fake = createFakeConnection();
+  createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create({ ...BASE_CONFIG, tools: ['Read'] });
+
+  const response = await fake.requestPermission({
+    toolCall: {
+      title: 'Write',
+      _meta: {},
+    },
+    options: [
+      { optionId: 'allow-write', kind: 'allow_once' },
+      { optionId: 'reject-write', kind: 'reject_once' },
+    ],
+  });
+
+  assert.deepEqual(response, {
+    outcome: {
+      outcome: 'selected',
+      optionId: 'reject-write',
+    },
+  });
+});
+
+test('ACP provider permission selection allows unknown tool names', async () => {
+  const fake = createFakeConnection();
+  createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create({ ...BASE_CONFIG, tools: ['Read'] });
+
+  const response = await fake.requestPermission({
+    toolCall: {
+      _meta: {},
+    },
+    options: [
+      { optionId: 'allow-unknown', kind: 'allow_once' },
+      { optionId: 'reject-unknown', kind: 'reject_once' },
+    ],
+  });
+
+  assert.deepEqual(response, {
+    outcome: {
+      outcome: 'selected',
+      optionId: 'allow-unknown',
+    },
+  });
 });
 
 test('ACP provider falls back to new session when resume and load fail', async () => {

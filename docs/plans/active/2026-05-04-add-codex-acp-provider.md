@@ -225,8 +225,8 @@ Permission handling should stay provider-neutral:
 - `test/acp-provider.test.mjs` — current streaming, resume fallback, interrupt, and error tests.
 
 **Verification:**
-- [ ] Existing ACP provider tests still pass.
-- [ ] Add permission tests for Claude metadata and title fallback if coverage is not already present.
+- [x] Existing ACP provider tests still pass.
+- [x] Add permission tests for Claude metadata and title fallback if coverage is not already present.
 
 ---
 
@@ -295,3 +295,4 @@ Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expe
 - 2026-05-04: Extended provider model parsing to accept `openai/*` and verified with `pnpm build` and `pnpm test`.
 - 2026-05-04: Added provider-specific ACP runtime selection and verified Codex runtime selection plus `pnpm typecheck`.
 - 2026-05-04: Added Codex CLI config overrides and OpenAI session params without Claude metadata, verified with ACP provider tests.
+- 2026-05-04: Added permission selection regression tests for Claude metadata, title fallback, and unknown tool names.
