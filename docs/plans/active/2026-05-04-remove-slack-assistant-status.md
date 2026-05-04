@@ -138,9 +138,9 @@ Replace status assertions with reaction and reply assertions.
   should remain covered.
 
 **Verification:**
-- [ ] `pnpm build`
-- [ ] `node --test test/slack-assistant.test.mjs test/slack-sender.test.mjs`
-- [ ] `pnpm test`
+- [x] `pnpm build`
+- [x] `node --test test/slack-assistant.test.mjs test/slack-sender.test.mjs`
+- [x] `pnpm test`
 
 ---
 
@@ -174,3 +174,4 @@ or `생각 중`.
 - 2026-05-04: Removed Slack Assistant status usage from `src/slack/assistant.ts`.
 - 2026-05-04: Simplified `SlackSender` to reply sending and retry only.
 - 2026-05-04: Removed stale status typing from `src/slack/transport.ts`.
+- 2026-05-04: Updated Slack tests to verify replies and reaction lifecycle without status calls.

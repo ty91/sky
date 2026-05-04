@@ -35,6 +35,25 @@ function createSessionManagerMock(overrides = {}) {
   };
 }
 
+function createReactionsClient() {
+  const calls = [];
+  return {
+    calls,
+    client: {
+      reactions: {
+        add: async (params) => {
+          calls.push({ method: 'add', ...params });
+          return { ok: true };
+        },
+        remove: async (params) => {
+          calls.push({ method: 'remove', ...params });
+          return { ok: true };
+        },
+      },
+    },
+  };
+}
+
 test('threadStarted sends greeting, prompts, and saves thread context', async () => {
   const calls = {
     say: [],
@@ -88,6 +107,7 @@ test('threadContextChanged saves thread context', async () => {
 test('userMessage rejects empty text', async () => {
   let sendCalls = 0;
   const replies = [];
+  const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     sessionManager: createSessionManagerMock({
@@ -103,17 +123,17 @@ test('userMessage rejects empty text', async () => {
     say: async (text) => {
       replies.push(text);
     },
-    setStatus: async () => {},
-    client: {},
+    client: reactions.client,
   });
 
   assert.equal(sendCalls, 0);
   assert.deepEqual(replies, ['빈 메시지는 처리할 수 없습니다.']);
+  assert.deepEqual(reactions.calls, []);
 });
 
 test('userMessage opens a session and silently ignores interrupted result', async () => {
-  const statuses = [];
   const openCalls = [];
+  const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     sessionManager: createSessionManagerMock({
@@ -130,22 +150,23 @@ test('userMessage opens a session and silently ignores interrupted result', asyn
     say: async (text) => {
       replies.push(text);
     },
-    setStatus: async (status) => {
-      statuses.push(status);
-    },
-    client: {},
+    client: reactions.client,
   });
 
   assert.equal(openCalls.length, 1);
   assert.equal(openCalls[0].key, 'C999:1888.55');
   assert.equal(openCalls[0].agent.name, 'main');
-  assert.deepEqual(statuses, ['생각 중...', '']);
   assert.deepEqual(replies, []);  // interrupted일 때는 아무 응답도 보내지 않음
+  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'add:hand',
+    'remove:thought_balloon',
+  ]);
 });
 
 test('userMessage sends the completed assistant message once via onMessage callback', async () => {
   const replies = [];
-  const statuses = [];
+  const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     sessionManager: createSessionManagerMock({
@@ -161,18 +182,19 @@ test('userMessage sends the completed assistant message once via onMessage callb
     say: async (text) => {
       replies.push(text);
     },
-    setStatus: async (status) => {
-      statuses.push(status);
-    },
-    client: {},
+    client: reactions.client,
   });
 
   assert.deepEqual(replies, ['파일을 확인해볼게요\n\n수정 완료했습니다']);
-  assert.deepEqual(statuses, ['생각 중...', '생각 중...', '']);
+  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'add:white_check_mark',
+    'remove:thought_balloon',
+  ]);
 });
 
-test('userMessage resets status after each assistant message and clears it after completion', async () => {
-  const statuses = [];
+test('userMessage keeps reaction lifecycle when assistant message is delivered', async () => {
+  const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     sessionManager: createSessionManagerMock({
@@ -186,18 +208,19 @@ test('userMessage resets status after each assistant message and clears it after
   await config.userMessage({
     message: createMessage(),
     say: async () => {},
-    setStatus: async (status) => {
-      statuses.push(status);
-    },
-    client: {},
+    client: reactions.client,
   });
 
-  assert.deepEqual(statuses, ['생각 중...', '생각 중...', '']);
+  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'add:white_check_mark',
+    'remove:thought_balloon',
+  ]);
 });
 
 test('userMessage sends errors as reply text', async () => {
   const replies = [];
-  const statuses = [];
+  const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     sessionManager: createSessionManagerMock({
@@ -210,12 +233,12 @@ test('userMessage sends errors as reply text', async () => {
     say: async (text) => {
       replies.push(text);
     },
-    setStatus: async (status) => {
-      statuses.push(status);
-    },
-    client: {},
+    client: reactions.client,
   });
 
   assert.deepEqual(replies, ['오류가 났습니다: boom']);
-  assert.deepEqual(statuses, ['생각 중...', '']);
+  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'remove:thought_balloon',
+  ]);
 });

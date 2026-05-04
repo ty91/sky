@@ -8,7 +8,6 @@ test('SlackSender chunks long replies', async () => {
     say: async (text) => {
       messages.push(text);
     },
-    setStatus: async () => {},
   });
 
   await sender.sendReply('a'.repeat(3501));
@@ -28,7 +27,6 @@ test('SlackSender retries failed sends before succeeding', async () => {
         throw new Error('temporary failure');
       }
     },
-    setStatus: async () => {},
     computeDelayMs: (attempt) => attempt * 10,
     sleep: async (delayMs) => {
       delays.push(delayMs);
@@ -48,7 +46,6 @@ test('SlackSender rethrows after max retries', async () => {
       attempts += 1;
       throw new Error('permanent failure');
     },
-    setStatus: async () => {},
     computeDelayMs: () => 1,
     sleep: async () => {},
   });
@@ -56,15 +53,3 @@ test('SlackSender rethrows after max retries', async () => {
   await assert.rejects(sender.sendReply('ok'), /permanent failure/);
   assert.equal(attempts, 4);
 });
-
-test('SlackSender ignores setStatus failures', async () => {
-  const sender = new SlackSender({
-    say: async () => {},
-    setStatus: async () => {
-      throw new Error('status failure');
-    },
-  });
-
-  await assert.doesNotReject(sender.setStatus('thinking'));
-});
-
