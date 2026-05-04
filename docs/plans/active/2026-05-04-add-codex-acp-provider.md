@@ -145,8 +145,8 @@ Keep `defaults.createAgentConnection` for tests. Add a test-only seam only if ne
 - `/Users/taeyoung/Developer/oss/codex-acp/npm/bin/codex-acp.js` — upstream platform package mapping.
 
 **Verification:**
-- [ ] Unit tests verify runtime selection without spawning the real Codex binary.
-- [ ] `pnpm typecheck`
+- [x] Unit tests verify runtime selection without spawning the real Codex binary.
+- [x] `pnpm typecheck`
 
 ---
 
@@ -293,3 +293,4 @@ Then run `pnpm dev` or `sky run` and send a Slack Assistant thread message. Expe
 
 - 2026-05-04: Added `@zed-industries/codex-acp` dependency and verified the lockfile with `pnpm install --frozen-lockfile`.
 - 2026-05-04: Extended provider model parsing to accept `openai/*` and verified with `pnpm build` and `pnpm test`.
+- 2026-05-04: Added provider-specific ACP runtime selection and verified Codex runtime selection plus `pnpm typecheck`.

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { createAcpProviderFactory } from '../dist/providers/acp.js';
 
 const BASE_CONFIG = {
@@ -20,6 +21,7 @@ function createFakeConnection(overrides = {}) {
     cancel: [],
     closeSession: [],
     close: 0,
+    runtimes: [],
   };
   let client;
 
@@ -31,8 +33,9 @@ function createFakeConnection(overrides = {}) {
       }
       await client.sessionUpdate(params);
     },
-    createAgentConnection: (nextClient) => {
+    createAgentConnection: (nextClient, runtime) => {
       client = nextClient;
+      calls.runtimes.push(runtime);
       return {
         initialize: async () => {
           calls.initialize++;
@@ -112,10 +115,25 @@ test('ACP provider creates a session and collects buffered text chunks', async (
   assert.deepEqual(streamed, ['hello from acp']);
   assert.equal(fake.calls.initialize, 1);
   assert.equal(fake.calls.newSession.length, 1);
+  assert.equal(fake.calls.runtimes[0].command, process.execPath);
+  assert.match(fake.calls.runtimes[0].args[0], /claude-agent-acp/);
   assert.equal(fake.calls.newSession[0]._meta.systemPrompt, 'system');
   assert.equal(fake.calls.newSession[0]._meta.claudeCode.options.model, 'claude-opus-4-7');
   assert.deepEqual(fake.calls.newSession[0]._meta.claudeCode.options.settingSources, []);
   assert.deepEqual(fake.calls.prompt[0].prompt, [{ type: 'text', text: 'hi' }]);
+});
+
+test('ACP provider selects Codex ACP runtime for openai models', () => {
+  const fake = createFakeConnection();
+
+  createAcpProviderFactory({
+    cwd: '/tmp/workspace',
+    createAgentConnection: fake.createAgentConnection,
+  }).create({ ...BASE_CONFIG, model: 'openai/gpt-5.5' });
+
+  const runtime = fake.calls.runtimes[0];
+  assert.equal(path.basename(runtime.command), process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp');
+  assert.deepEqual(runtime.args, []);
 });
 
 test('ACP provider flushes buffered text when a non-agent update arrives', async () => {

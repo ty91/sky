@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
@@ -26,7 +27,12 @@ import type {
 
 type AcpProviderDefaults = {
   cwd: string;
-  createAgentConnection?: (client: Client) => AcpAgentConnection;
+  createAgentConnection?: (client: Client, runtime: AcpAgentRuntime) => AcpAgentConnection;
+};
+
+type AcpAgentRuntime = {
+  command: string;
+  args: string[];
 };
 
 type AcpAgentConnection = {
@@ -162,8 +168,51 @@ function resolveClaudeAgentAcpPath(): string {
   return fileURLToPath(import.meta.resolve('@agentclientprotocol/claude-agent-acp/dist/index.js'));
 }
 
-function createProcessConnection(client: Client): AcpAgentConnection {
-  const child = spawn(process.execPath, [resolveClaudeAgentAcpPath()], {
+function resolveCodexAgentAcpPath(): string {
+  const platformPackages: Partial<Record<NodeJS.Platform, Partial<Record<NodeJS.Architecture, string>>>> = {
+    darwin: {
+      arm64: '@zed-industries/codex-acp-darwin-arm64',
+      x64: '@zed-industries/codex-acp-darwin-x64',
+    },
+    linux: {
+      arm64: '@zed-industries/codex-acp-linux-arm64',
+      x64: '@zed-industries/codex-acp-linux-x64',
+    },
+    win32: {
+      arm64: '@zed-industries/codex-acp-win32-arm64',
+      x64: '@zed-industries/codex-acp-win32-x64',
+    },
+  };
+  const packageName = platformPackages[process.platform]?.[process.arch];
+  if (!packageName) {
+    throw new Error(`Unsupported Codex ACP platform: ${process.platform}/${process.arch}`);
+  }
+
+  const binaryName = process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp';
+  const codexAcpWrapperPath = fileURLToPath(
+    import.meta.resolve('@zed-industries/codex-acp/bin/codex-acp.js'),
+  );
+  const requireFromCodexAcp = createRequire(codexAcpWrapperPath);
+  return requireFromCodexAcp.resolve(`${packageName}/bin/${binaryName}`);
+}
+
+function resolveAcpAgentRuntime(config: ProviderConfig): AcpAgentRuntime {
+  const parsed = parseProviderModel(config.model);
+  if (parsed.provider === 'anthropic') {
+    return {
+      command: process.execPath,
+      args: [resolveClaudeAgentAcpPath()],
+    };
+  }
+
+  return {
+    command: resolveCodexAgentAcpPath(),
+    args: [],
+  };
+}
+
+function createProcessConnection(client: Client, runtime: AcpAgentRuntime): AcpAgentConnection {
+  const child = spawn(runtime.command, runtime.args, {
     stdio: ['pipe', 'pipe', 'inherit'],
   });
 
@@ -212,7 +261,7 @@ async function ignoreFailure(fn: () => Promise<unknown>): Promise<boolean> {
 }
 
 function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults): ProviderSession {
-  const parsed = parseProviderModel(config.model);
+  parseProviderModel(config.model);
   const state: AcpSessionState = {
     sessionId: config.resume,
     finalText: '',
@@ -220,9 +269,10 @@ function createAcpSession(config: ProviderConfig, defaults: AcpProviderDefaults)
     closed: false,
   };
   const client = createClient(config, state);
+  const runtime = resolveAcpAgentRuntime(config);
   const agent = defaults.createAgentConnection
-    ? defaults.createAgentConnection(client)
-    : createProcessConnection(client);
+    ? defaults.createAgentConnection(client, runtime)
+    : createProcessConnection(client, runtime);
 
   async function ensureInitialized(): Promise<InitializeResponse> {
     if (!state.initialized) {
