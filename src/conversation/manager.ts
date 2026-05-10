@@ -169,7 +169,7 @@ function toPiToolNames(tools: string[] | undefined): string[] | undefined {
   return [...new Set(names)];
 }
 
-export const createDefaultPiSession: ConversationSessionFactory = async ({ agent, cwd, sessionFile }) => {
+export const createDefaultPiSession: ConversationSessionFactory = async ({ key, agent, cwd, sessionFile }) => {
   const agentDir = getAgentDir();
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
@@ -180,6 +180,7 @@ export const createDefaultPiSession: ConversationSessionFactory = async ({ agent
     systemPrompt: resolveSystemPrompt(agent),
   });
   await resourceLoader.reload();
+  const customTools = agent.customToolsFactory?.({ sessionKey: key });
   const { session } = await createAgentSession({
     cwd,
     agentDir,
@@ -187,6 +188,7 @@ export const createDefaultPiSession: ConversationSessionFactory = async ({ agent
     modelRegistry,
     ...(model ? { model } : {}),
     ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),
+    ...(customTools ? { customTools } : {}),
     resourceLoader,
     sessionManager: sessionFile
       ? PiSessionManager.open(sessionFile, undefined, cwd)

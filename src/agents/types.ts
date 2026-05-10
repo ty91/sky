@@ -1,16 +1,16 @@
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { ProviderMcpServerConfig } from '../providers/types.js';
 
 /**
- * Context handed to {@link AgentConfig.mcpServersFactory} when the session
- * manager opens a new session. Lets the factory close over the session key so
- * in-process MCP tools (e.g. `restart_harness`) know which thread they're
- * acting on.
+ * Context handed to per-session tool factories when a session opens. Lets
+ * bound tools (e.g. `restart_harness`) know which thread they're acting on.
  */
 export type McpFactoryContext = {
   sessionKey: string;
 };
 
 export type McpServersFactory = (ctx: McpFactoryContext) => Record<string, ProviderMcpServerConfig>;
+export type PiCustomToolsFactory = (ctx: McpFactoryContext) => ToolDefinition<any, any, any>[];
 
 export type AgentConfig = {
   name: string;
@@ -35,6 +35,8 @@ export type AgentConfig = {
    * tools or stdio/http/sse server config.
    */
   mcpServersFactory?: McpServersFactory;
+  /** Optional factory for per-session Pi custom tools. */
+  customToolsFactory?: PiCustomToolsFactory;
   model?: string;
   tools?: string[];
   maxTurns?: number;
