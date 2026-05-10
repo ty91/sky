@@ -3,6 +3,8 @@ import path from 'node:path';
 import type { App } from '@slack/bolt';
 import { createMainAgentConfig } from './agents/main.js';
 import type { AgentConfig } from './agents/types.js';
+import { createConversationManager, type ConversationManager } from './conversation/manager.js';
+import { openConversationStore } from './conversation/store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { createAcpProviderFactory } from './providers/acp.js';
@@ -209,11 +211,17 @@ export async function startBot(): Promise<void> {
   });
 
   const sessionStore = openSessionStore();
+  const conversationStore = openConversationStore();
 
   const sessionManager = createSessionManager({
     providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
     defaultCwd: settings.workspace,
     store: sessionStore,
+  });
+
+  const conversationManager: ConversationManager = createConversationManager({
+    defaultCwd: settings.workspace,
+    store: conversationStore,
   });
 
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
@@ -223,6 +231,7 @@ export async function startBot(): Promise<void> {
     slackApp = await startSlackApp({
       botToken: settings.slack.botToken,
       appToken: settings.slack.appToken,
+      conversationManager,
       sessionManager,
       mainAgent,
     });
@@ -234,10 +243,12 @@ export async function startBot(): Promise<void> {
     await waitForShutdownSignal();
   } finally {
     unregisterRestartSignalHandler();
+    await conversationManager.closeAll();
     await sessionManager.closeAll();
     if (slackApp) {
       await stopSlackApp(slackApp);
     }
+    conversationStore.close();
     sessionStore.close();
   }
 }

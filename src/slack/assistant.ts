@@ -1,14 +1,14 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
 import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
-import type { SessionManager } from '../session/manager.js';
+import type { ConversationManager } from '../conversation/manager.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { addReaction, removeReaction } from './reactions.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
 
 export type SlackAssistantOptions = {
-  sessionManager: SessionManager;
+  conversationManager: ConversationManager;
   mainAgent: AgentConfig;
 };
 
@@ -19,7 +19,7 @@ export const DEFAULT_SUGGESTED_PROMPTS = [
 ] as const;
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
-  const { sessionManager, mainAgent } = options;
+  const { conversationManager, mainAgent } = options;
 
   return {
     threadStarted: async ({ say, setSuggestedPrompts, saveThreadContext, event }) => {
@@ -77,23 +77,12 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       await addReaction(client, channelId, messageTs, 'thought_balloon');
 
       try {
-        sessionManager.open(threadId, mainAgent);
-
-        const resumedId = sessionManager.getSessionId(threadId);
-        if (resumedId) {
-          transcript.setSessionId(resumedId);
-        }
-
         transcript.appendUser(text);
+        let streamedText = '';
 
-        const result = await sessionManager.send(threadId, text, {
-          onMessage: async (msg) => {
-            const sessionId = sessionManager.getSessionId(threadId);
-            if (sessionId) {
-              transcript.setSessionId(sessionId);
-            }
-            transcript.appendAssistant(msg);
-            await sender.sendReply(msg);
+        const result = await conversationManager.runTurn(threadId, mainAgent, text, {
+          onTextDelta: (delta) => {
+            streamedText += delta;
           },
         });
 
@@ -102,6 +91,10 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         } else if (result.kind === 'error') {
           throw result.error;
         } else {
+          const assistantText = result.text || streamedText;
+          transcript.setSessionId(result.handle.sessionId);
+          transcript.appendAssistant(assistantText);
+          await sender.sendReply(assistantText);
           await addReaction(client, channelId, messageTs, 'white_check_mark');
         }
       } catch (error) {
