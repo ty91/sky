@@ -44,6 +44,30 @@ function createFakePiSession({
   };
 }
 
+function createMockConversationStore(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  const calls = { get: [], put: [], remove: [] };
+  return {
+    store: {
+      get: (key) => {
+        calls.get.push(key);
+        return data.get(key);
+      },
+      put: (key, conversation) => {
+        calls.put.push({ key, conversation });
+        data.set(key, conversation);
+      },
+      remove: (key) => {
+        calls.remove.push(key);
+        data.delete(key);
+      },
+      close: () => {},
+    },
+    calls,
+    data,
+  };
+}
+
 test('conversation manager creates a Pi session for a new key and returns final text with handle', async () => {
   const created = [];
   const manager = createConversationManager({
@@ -70,6 +94,111 @@ test('conversation manager creates a Pi session for a new key and returns final 
     agent: AGENT,
     cwd: '/tmp/workspace',
   });
+});
+
+test('conversation manager persists successful Pi conversation handles', async () => {
+  const { store, calls } = createMockConversationStore();
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: async () =>
+      createFakePiSession({
+        sessionId: 'pi-session-persisted',
+        sessionFile: '/tmp/pi-session-persisted.jsonl',
+      }),
+  });
+
+  const result = await manager.runTurn('thread-1', AGENT, 'hello');
+
+  assert.equal(result.kind, 'ok');
+  assert.deepEqual(calls.put, [
+    {
+      key: 'thread-1',
+      conversation: {
+        sessionId: 'pi-session-persisted',
+        sessionFile: '/tmp/pi-session-persisted.jsonl',
+        model: 'anthropic/claude-opus-4-7',
+        agentName: 'main',
+      },
+    },
+  ]);
+});
+
+test('conversation manager resumes a persisted Pi session file after restart', async () => {
+  const { store } = createMockConversationStore({
+    'thread-1': {
+      sessionId: 'pi-session-existing',
+      sessionFile: '/tmp/pi-session-existing.jsonl',
+      model: 'anthropic/claude-opus-4-7',
+      agentName: 'main',
+    },
+  });
+  const created = [];
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: async (config) => {
+      created.push(config);
+      return createFakePiSession({
+        sessionId: 'pi-session-existing',
+        sessionFile: '/tmp/pi-session-existing.jsonl',
+      });
+    },
+  });
+
+  const result = await manager.runTurn('thread-1', AGENT, 'hello again');
+
+  assert.equal(result.kind, 'ok');
+  assert.equal(created.length, 1);
+  assert.equal(created[0].sessionFile, '/tmp/pi-session-existing.jsonl');
+});
+
+test('conversation manager has/getHandle/purge cover in-memory and persisted conversations', async () => {
+  const { store, data, calls } = createMockConversationStore({
+    persisted: {
+      sessionId: 'pi-session-persisted',
+      sessionFile: '/tmp/pi-session-persisted.jsonl',
+      model: 'anthropic/claude-opus-4-7',
+      agentName: 'main',
+    },
+    otherAgent: {
+      sessionId: 'pi-session-other',
+      sessionFile: '/tmp/pi-session-other.jsonl',
+      model: 'anthropic/claude-opus-4-7',
+      agentName: 'memory',
+    },
+  });
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: async () => createFakePiSession({ sessionId: 'pi-session-open' }),
+  });
+
+  assert.equal(manager.has('missing', AGENT), false);
+  assert.equal(manager.has('persisted', AGENT), true);
+  assert.equal(manager.has('otherAgent', AGENT), false);
+  assert.deepEqual(manager.getHandle('persisted', AGENT), {
+    sessionId: 'pi-session-persisted',
+    sessionFile: '/tmp/pi-session-persisted.jsonl',
+  });
+
+  const result = await manager.runTurn('open', AGENT, 'hello');
+  assert.equal(result.kind, 'ok');
+  assert.equal(manager.has('open', AGENT), true);
+  assert.equal(manager.has('open', { ...AGENT, name: 'memory' }), false);
+  assert.deepEqual(manager.getHandle('open', AGENT), {
+    sessionId: 'pi-session-open',
+    sessionFile: '/tmp/pi-session-1.jsonl',
+  });
+
+  await manager.purge('open');
+  await manager.purge('persisted');
+
+  assert.equal(manager.has('open', AGENT), false);
+  assert.equal(manager.has('persisted', AGENT), false);
+  assert.equal(data.has('open'), false);
+  assert.equal(data.has('persisted'), false);
+  assert.deepEqual(calls.remove, ['open', 'persisted']);
 });
 
 test('conversation manager forwards Pi text deltas to the caller callback', async () => {

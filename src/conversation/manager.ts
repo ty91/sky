@@ -8,11 +8,13 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { AgentConfig } from '../agents/types.js';
 import type {
+  ConversationHandle,
   ConversationManager,
   ConversationManagerOptions,
   ConversationSessionFactory,
   ConversationTurnOptions,
   ConversationTurnResult,
+  PersistedConversation,
   PiAgentSession,
   PiSessionEvent,
 } from './types.js';
@@ -21,8 +23,10 @@ export type {
   ConversationHandle,
   ConversationManager,
   ConversationManagerOptions,
+  ConversationStore,
   ConversationTurnOptions,
   ConversationTurnResult,
+  PersistedConversation,
 } from './types.js';
 
 type Deferred<T> = {
@@ -38,7 +42,10 @@ type PendingTurn = {
 
 type ConversationEntry = {
   key: string;
+  agentName: string;
+  model: string;
   sessionPromise: Promise<PiAgentSession>;
+  handle?: ConversationHandle;
   unsubscribe?: () => void;
   turnCounter: number;
   activeTurnId?: number;
@@ -61,6 +68,27 @@ function createDeferred<T>(): Deferred<T> {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function resolveAgentModel(agent: AgentConfig): string {
+  return agent.model ?? '';
+}
+
+function isConversationOwnedBy(
+  conversation: PersistedConversation,
+  agent: AgentConfig | undefined,
+): boolean {
+  if (!agent) {
+    return true;
+  }
+  return conversation.agentName === agent.name && conversation.model === resolveAgentModel(agent);
+}
+
+function toHandle(session: PiAgentSession): ConversationHandle {
+  return {
+    sessionId: session.sessionId,
+    ...(session.sessionFile ? { sessionFile: session.sessionFile } : {}),
+  };
 }
 
 function extractTextDelta(event: PiSessionEvent): string | undefined {
@@ -141,7 +169,7 @@ function toPiToolNames(tools: string[] | undefined): string[] | undefined {
   return [...new Set(names)];
 }
 
-export const createDefaultPiSession: ConversationSessionFactory = async ({ agent, cwd }) => {
+export const createDefaultPiSession: ConversationSessionFactory = async ({ agent, cwd, sessionFile }) => {
   const agentDir = getAgentDir();
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
@@ -160,7 +188,9 @@ export const createDefaultPiSession: ConversationSessionFactory = async ({ agent
     ...(model ? { model } : {}),
     ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),
     resourceLoader,
-    sessionManager: PiSessionManager.create(cwd),
+    sessionManager: sessionFile
+      ? PiSessionManager.open(sessionFile, undefined, cwd)
+      : PiSessionManager.create(cwd),
   });
   return session;
 };
@@ -168,6 +198,7 @@ export const createDefaultPiSession: ConversationSessionFactory = async ({ agent
 async function runWorker(
   sessions: Map<string, ConversationEntry>,
   entry: ConversationEntry,
+  persistConversation: (entry: ConversationEntry, handle: ConversationHandle) => void,
 ): Promise<void> {
   entry.workerRunning = true;
 
@@ -192,13 +223,13 @@ async function runWorker(
       if (entry.activeTurnInterrupted || entry.activeTurnId !== turnId || entry.closed) {
         req.deferred.resolve({ kind: 'interrupted' });
       } else {
+        const handle = toHandle(session);
+        entry.handle = handle;
+        persistConversation(entry, handle);
         req.deferred.resolve({
           kind: 'ok',
           text: entry.activeText,
-          handle: {
-            sessionId: session.sessionId,
-            ...(session.sessionFile ? { sessionFile: session.sessionFile } : {}),
-          },
+          handle,
         });
       }
     } catch (error) {
@@ -228,6 +259,29 @@ export function createConversationManager(options: ConversationManagerOptions): 
   const createSession = options.createSession ?? createDefaultPiSession;
   const sessions = new Map<string, ConversationEntry>();
 
+  function getPersistedConversation(
+    key: string,
+    agent?: AgentConfig,
+  ): PersistedConversation | undefined {
+    const persisted = options.store?.get(key);
+    if (!persisted || !isConversationOwnedBy(persisted, agent)) {
+      return undefined;
+    }
+    return persisted;
+  }
+
+  function persistConversation(entry: ConversationEntry, handle: ConversationHandle): void {
+    if (!handle.sessionFile || sessions.get(entry.key) !== entry) {
+      return;
+    }
+    options.store?.put(entry.key, {
+      sessionId: handle.sessionId,
+      sessionFile: handle.sessionFile,
+      model: entry.model,
+      agentName: entry.agentName,
+    });
+  }
+
   async function getSession(entry: ConversationEntry): Promise<PiAgentSession> {
     const session = await entry.sessionPromise;
     wireStreaming(entry, session);
@@ -239,9 +293,20 @@ export function createConversationManager(options: ConversationManagerOptions): 
       let entry = sessions.get(key);
       if (!entry) {
         const cwd = agent.cwd ?? options.defaultCwd;
+        const persisted = getPersistedConversation(key, agent);
         entry = {
           key,
-          sessionPromise: createSession({ key, agent, cwd }) as Promise<PiAgentSession>,
+          agentName: agent.name,
+          model: resolveAgentModel(agent),
+          sessionPromise: createSession({
+            key,
+            agent,
+            cwd,
+            ...(persisted ? { sessionFile: persisted.sessionFile } : {}),
+          }) as Promise<PiAgentSession>,
+          ...(persisted
+            ? { handle: { sessionId: persisted.sessionId, sessionFile: persisted.sessionFile } }
+            : {}),
           turnCounter: 0,
           activeTurnInterrupted: false,
           activeText: '',
@@ -271,10 +336,33 @@ export function createConversationManager(options: ConversationManagerOptions): 
       }
 
       if (!entry.workerRunning) {
-        void runWorker(sessions, entry);
+        void runWorker(sessions, entry, persistConversation);
       }
 
       return deferred.promise;
+    },
+
+    has(key, agent) {
+      const entry = sessions.get(key);
+      if (entry) {
+        return !agent || (entry.agentName === agent.name && entry.model === resolveAgentModel(agent));
+      }
+      return getPersistedConversation(key, agent) !== undefined;
+    },
+
+    getHandle(key, agent) {
+      const entry = sessions.get(key);
+      if (entry) {
+        if (agent && (entry.agentName !== agent.name || entry.model !== resolveAgentModel(agent))) {
+          return undefined;
+        }
+        return entry.handle;
+      }
+
+      const persisted = getPersistedConversation(key, agent);
+      return persisted
+        ? { sessionId: persisted.sessionId, sessionFile: persisted.sessionFile }
+        : undefined;
     },
 
     async close(key) {
@@ -303,6 +391,11 @@ export function createConversationManager(options: ConversationManagerOptions): 
       } catch {
         // close is best-effort once the entry has been removed from the map.
       }
+    },
+
+    async purge(key) {
+      await manager.close(key);
+      options.store?.remove(key);
     },
 
     async closeAll() {
