@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
 import { runMemoryAgent } from '../agents/memory/agent.js';
-import { createAcpProviderFactory } from '../providers/acp.js';
-import { createSessionManager } from '../session/manager.js';
+import { createConversationManager } from '../conversation/manager.js';
 
 // L2 Working Memory Agent runs every 5 minutes via cron.
 // Slack notifications are intentionally OFF — see docs/plans/active/2026-04-20-memory-v2.md.
@@ -14,13 +13,12 @@ export const memoryCommand = new Command('memory')
   .action(async () => {
     const settings = loadSettings({ silent: true });
     console.log('[memory] starting L2 working memory agent...');
-    const sessionManager = createSessionManager({
-      providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
+    const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,
     });
 
     const result = await runMemoryAgent({
-      sessionManager,
+      conversationManager,
       workspace: settings.workspace,
     });
 

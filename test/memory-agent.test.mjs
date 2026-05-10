@@ -28,30 +28,33 @@ fs.mkdirSync(transcriptDir, { recursive: true });
 const transcriptBody = '### user\\\\n\\\\nhello\\\\n\\\\n';
 fs.writeFileSync(path.join(transcriptDir, 'session-1.md'), transcriptBody, 'utf8');
 
-const calls = { open: 0, send: 0, close: 0 };
-const sessionManager = {
-  open: () => { calls.open += 1; },
-  send: async () => {
-    calls.send += 1;
-    return { kind: 'ok', text: 'memory summary' };
+const calls = { runTurn: [], close: [] };
+const conversationManager = {
+  runTurn: async (key, agent, text) => {
+    calls.runTurn.push({ key, agent, text });
+    return { kind: 'ok', text: 'memory summary', handle: { sessionId: 'pi-memory' } };
   },
-  getSessionId: () => undefined,
-  close: async () => { calls.close += 1; },
+  close: async (key) => { calls.close.push(key); },
   closeAll: async () => {},
 };
 
-const first = await runMemoryAgent({ sessionManager, workspace: '/tmp/workspace' });
+const first = await runMemoryAgent({ conversationManager, workspace: '/tmp/workspace' });
 assert.deepEqual(first, {
   processed: 1,
   skipped: false,
   summary: 'memory summary',
 });
-assert.deepEqual(calls, { open: 1, send: 1, close: 1 });
+assert.equal(calls.runTurn.length, 1);
+assert.equal(calls.runTurn[0].key, 'memory:run');
+assert.equal(calls.runTurn[0].agent.name, 'memory');
+assert.match(calls.runTurn[0].text, /# L2 Working Memory Update/);
+assert.ok(calls.runTurn[0].text.includes('Transcript: chat-1/session-1.md'));
+assert.deepEqual(calls.close, ['memory:run']);
 
 const cursors = JSON.parse(fs.readFileSync(path.join(skyDir, 'memory-cursors.json'), 'utf8'));
 assert.equal(cursors['chat-1/session-1.md'], Buffer.byteLength(transcriptBody));
 
-const second = await runMemoryAgent({ sessionManager, workspace: '/tmp/workspace' });
+const second = await runMemoryAgent({ conversationManager, workspace: '/tmp/workspace' });
 assert.deepEqual(second, {
   processed: 0,
   skipped: true,
