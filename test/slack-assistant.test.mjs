@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { DEFAULT_SUGGESTED_PROMPTS, createSlackAssistantConfig } from '../dist/slack/assistant.js';
 
 const MAIN_AGENT = {
@@ -24,12 +28,17 @@ function createMessage({
   };
 }
 
-function createSessionManagerMock(overrides = {}) {
+function createConversationManagerMock(overrides = {}) {
   return {
-    open: () => {},
-    send: async () => ({ kind: 'ok', text: 'unused' }),
-    getSessionId: () => undefined,
+    runTurn: async () => ({
+      kind: 'ok',
+      text: 'unused',
+      handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
+    }),
+    has: () => false,
+    getHandle: () => undefined,
     close: async () => {},
+    purge: async () => {},
     closeAll: async () => {},
     ...overrides,
   };
@@ -62,7 +71,7 @@ test('threadStarted sends greeting, prompts, and saves thread context', async ()
   };
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock(),
+    conversationManager: createConversationManagerMock(),
   });
 
   await config.threadStarted({
@@ -91,7 +100,7 @@ test('threadStarted sends greeting, prompts, and saves thread context', async ()
 test('threadContextChanged saves thread context', async () => {
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock(),
+    conversationManager: createConversationManagerMock(),
   });
   let saves = 0;
 
@@ -105,15 +114,19 @@ test('threadContextChanged saves thread context', async () => {
 });
 
 test('userMessage rejects empty text', async () => {
-  let sendCalls = 0;
+  let runTurnCalls = 0;
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock({
-      send: async () => {
-        sendCalls += 1;
-        return { kind: 'ok', text: 'unused' };
+    conversationManager: createConversationManagerMock({
+      runTurn: async () => {
+        runTurnCalls += 1;
+        return {
+          kind: 'ok',
+          text: 'unused',
+          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
+        };
       },
     }),
   });
@@ -126,21 +139,54 @@ test('userMessage rejects empty text', async () => {
     client: reactions.client,
   });
 
-  assert.equal(sendCalls, 0);
+  assert.equal(runTurnCalls, 0);
   assert.deepEqual(replies, ['빈 메시지는 처리할 수 없습니다.']);
   assert.deepEqual(reactions.calls, []);
 });
 
-test('userMessage opens a session and silently ignores interrupted result', async () => {
-  const openCalls = [];
+test('userMessage runs one Pi conversation turn with the Slack thread key', async () => {
+  const runTurnCalls = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock({
-      open: (key, agent, options) => {
-        openCalls.push({ key, agent, options });
+    conversationManager: createConversationManagerMock({
+      runTurn: async (key, agent, text, options) => {
+        runTurnCalls.push({ key, agent, text, hasStreamingCallback: typeof options?.onTextDelta === 'function' });
+        return {
+          kind: 'ok',
+          text: '좋아요',
+          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
+        };
       },
-      send: async () => ({ kind: 'interrupted' }),
+    }),
+  });
+
+  await config.userMessage({
+    message: createMessage({ text: '작업 상태 알려줘', channel: 'C999', threadTs: '1888.55' }),
+    say: async () => {},
+    client: reactions.client,
+  });
+
+  assert.deepEqual(runTurnCalls, [
+    {
+      key: 'C999:1888.55',
+      agent: MAIN_AGENT,
+      text: '작업 상태 알려줘',
+      hasStreamingCallback: true,
+    },
+  ]);
+});
+
+test('userMessage silently ignores interrupted result', async () => {
+  const runTurnCalls = [];
+  const reactions = createReactionsClient();
+  const config = createSlackAssistantConfig({
+    mainAgent: MAIN_AGENT,
+    conversationManager: createConversationManagerMock({
+      runTurn: async (key, agent, text) => {
+        runTurnCalls.push({ key, agent, text });
+        return { kind: 'interrupted' };
+      },
     }),
   });
 
@@ -153,9 +199,9 @@ test('userMessage opens a session and silently ignores interrupted result', asyn
     client: reactions.client,
   });
 
-  assert.equal(openCalls.length, 1);
-  assert.equal(openCalls[0].key, 'C999:1888.55');
-  assert.equal(openCalls[0].agent.name, 'main');
+  assert.equal(runTurnCalls.length, 1);
+  assert.equal(runTurnCalls[0].key, 'C999:1888.55');
+  assert.equal(runTurnCalls[0].agent.name, 'main');
   assert.deepEqual(replies, []);  // interrupted일 때는 아무 응답도 보내지 않음
   assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
     'add:thought_balloon',
@@ -164,15 +210,20 @@ test('userMessage opens a session and silently ignores interrupted result', asyn
   ]);
 });
 
-test('userMessage sends the completed assistant message once via onMessage callback', async () => {
+test('userMessage sends the completed assistant message once from streamed text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock({
-      send: async (_threadId, _text, options) => {
-        await options.onMessage('파일을 확인해볼게요\n\n수정 완료했습니다');
-        return { kind: 'ok', text: '파일을 확인해볼게요\n\n수정 완료했습니다' };
+    conversationManager: createConversationManagerMock({
+      runTurn: async (_threadId, _agent, _text, options) => {
+        await options.onTextDelta('파일을 확인해볼게요\n\n');
+        await options.onTextDelta('수정 완료했습니다');
+        return {
+          kind: 'ok',
+          text: '파일을 확인해볼게요\n\n수정 완료했습니다',
+          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
+        };
       },
     }),
   });
@@ -197,10 +248,14 @@ test('userMessage keeps reaction lifecycle when assistant message is delivered',
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock({
-      send: async (_threadId, _text, options) => {
-        await options.onMessage('응답');
-        return { kind: 'ok', text: '응답' };
+    conversationManager: createConversationManagerMock({
+      runTurn: async (_threadId, _agent, _text, options) => {
+        await options.onTextDelta('응답');
+        return {
+          kind: 'ok',
+          text: '응답',
+          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
+        };
       },
     }),
   });
@@ -223,8 +278,8 @@ test('userMessage sends errors as reply text', async () => {
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
-    sessionManager: createSessionManagerMock({
-      send: async () => ({ kind: 'error', error: new Error('boom') }),
+    conversationManager: createConversationManagerMock({
+      runTurn: async () => ({ kind: 'error', error: new Error('boom') }),
     }),
   });
 
@@ -241,4 +296,75 @@ test('userMessage sends errors as reply text', async () => {
     'add:thought_balloon',
     'remove:thought_balloon',
   ]);
+});
+
+test('userMessage records transcript under the Pi conversation handle session id', () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-assistant-'));
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createSlackAssistantConfig } from './dist/slack/assistant.js';
+
+const config = createSlackAssistantConfig({
+  mainAgent: { name: 'main', systemPrompt: 'system', model: 'opus', tools: ['Read'] },
+  conversationManager: {
+    runTurn: async (_key, _agent, _text, options) => {
+      await options.onTextDelta('처리했습니다');
+      return {
+        kind: 'ok',
+        text: '처리했습니다',
+        handle: { sessionId: 'pi-session-transcript', sessionFile: '/tmp/pi-session-transcript.jsonl' },
+      };
+    },
+    has: () => false,
+    getHandle: () => undefined,
+    close: async () => {},
+    purge: async () => {},
+    closeAll: async () => {},
+  },
+});
+
+await config.userMessage({
+  message: {
+    text: '기록해줘',
+    channel: 'C123',
+    thread_ts: '1711.22',
+    ts: '1711.22',
+    user: 'U123',
+  },
+  say: async () => {},
+  client: { reactions: { add: async () => ({ ok: true }), remove: async () => ({ ok: true }) } },
+});
+
+const transcript = fs.readFileSync(
+  path.join(os.homedir(), '.sky', 'transcripts', 'C123:1711.22', 'pi-session-transcript.md'),
+  'utf8',
+);
+assert.match(transcript, /### user/);
+assert.match(transcript, /기록해줘/);
+assert.match(transcript, /### assistant/);
+assert.match(transcript, /처리했습니다/);
+console.log('assistant-transcript-test-ok');
+        `,
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: homeDir },
+        encoding: 'utf8',
+      },
+    );
+
+    assert.match(output, /assistant-transcript-test-ok/);
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
 });
