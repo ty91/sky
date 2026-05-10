@@ -1,3 +1,4 @@
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { requestRestart, type PendingRestart } from '../../runtime/pending-restart.js';
 
 /**
@@ -26,6 +27,12 @@ export type RestartHarnessInput = {
 export type RestartHarnessToolResult = {
   content: { type: 'text'; text: string }[];
   isError?: boolean;
+};
+
+export type RestartHarnessPiToolDetails = {
+  sessionKey: string;
+  channelId: string;
+  threadTs: string;
 };
 
 export const RESTART_HARNESS_DESCRIPTION = [
@@ -78,5 +85,46 @@ export function runRestartHarnessTool(
         text: 'Restart scheduled. Inform 태영님 briefly that the harness is restarting, then stop — the post-restart trigger will arrive shortly.',
       },
     ],
+  };
+}
+
+const RESTART_HARNESS_PARAMETERS = {
+  type: 'object',
+  properties: {
+    reason: {
+      type: 'string',
+      description:
+        'Short human-readable reason for the restart, surfaced back to you in the post-restart notice.',
+    },
+  },
+  additionalProperties: false,
+} as unknown as ToolDefinition['parameters'];
+
+export function createRestartHarnessPiTool(
+  ctx: RestartHarnessContext,
+  signalParent: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+): ToolDefinition<typeof RESTART_HARNESS_PARAMETERS, RestartHarnessPiToolDetails> {
+  return {
+    name: RESTART_HARNESS_TOOL_NAME,
+    label: 'Restart harness',
+    description: RESTART_HARNESS_DESCRIPTION,
+    parameters: RESTART_HARNESS_PARAMETERS,
+    executionMode: 'sequential',
+    async execute(_toolCallId, params) {
+      const input = params as RestartHarnessInput;
+      const result = runRestartHarnessTool(ctx, input, signalParent);
+      if (result.isError) {
+        throw new Error(result.content.map((item) => item.text).join('\n'));
+      }
+
+      return {
+        content: result.content,
+        details: {
+          sessionKey: ctx.sessionKey,
+          channelId: ctx.channelId,
+          threadTs: ctx.threadTs,
+        },
+      };
+    },
   };
 }

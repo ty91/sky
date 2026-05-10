@@ -7,9 +7,6 @@ import { createConversationManager, type ConversationManager } from './conversat
 import { openConversationStore } from './conversation/store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
-import { createAcpProviderFactory } from './providers/acp.js';
-import { createSessionManager, type SessionManager } from './session/manager.js';
-import { openSessionStore } from './session/store.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import { loadSettings } from './settings.js';
 
@@ -108,7 +105,7 @@ export function makeRestartScheduler(): () => void {
 
 export function registerRestartSignalHandler(scheduleRestart: () => void): () => void {
   const handler = () => {
-    console.log('[restart] received restart signal from MCP tool');
+    console.log('[restart] received restart signal from restart harness tool');
     scheduleRestart();
   };
   process.on('SIGUSR2', handler);
@@ -146,9 +143,9 @@ function buildPostRestartNotice(pending: PendingRestart): string {
  * Best-effort: a missing Slack app, absent channel/thread, or LLM error just
  * logs and returns — the new daemon still boots normally.
  */
-async function triggerPostRestartIfPending(
+export async function triggerPostRestartIfPending(
   slackApp: App | undefined,
-  sessionManager: SessionManager,
+  conversationManager: ConversationManager,
   mainAgent: AgentConfig,
 ): Promise<void> {
   const pending = consumePendingRestart();
@@ -164,11 +161,10 @@ async function triggerPostRestartIfPending(
   }
 
   try {
-    sessionManager.open(pending.sessionKey, mainAgent);
     const notice = buildPostRestartNotice(pending);
 
-    const result = await sessionManager.send(pending.sessionKey, notice, {
-      onMessage: async (msg) => {
+    const result = await conversationManager.runTurn(pending.sessionKey, mainAgent, notice, {
+      onTextDelta: async (msg) => {
         await slackApp.client.chat.postMessage({
           channel: pending.channelId,
           thread_ts: pending.threadTs,
@@ -210,14 +206,7 @@ export async function startBot(): Promise<void> {
     model: settings.model,
   });
 
-  const sessionStore = openSessionStore();
   const conversationStore = openConversationStore();
-
-  const sessionManager = createSessionManager({
-    providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
-    defaultCwd: settings.workspace,
-    store: sessionStore,
-  });
 
   const conversationManager: ConversationManager = createConversationManager({
     defaultCwd: settings.workspace,
@@ -237,18 +226,16 @@ export async function startBot(): Promise<void> {
 
     // Fire the post-restart trigger *after* transports are up but *before* we
     // start waiting for shutdown.
-    await triggerPostRestartIfPending(slackApp, sessionManager, mainAgent);
+    await triggerPostRestartIfPending(slackApp, conversationManager, mainAgent);
 
     await waitForShutdownSignal();
   } finally {
     unregisterRestartSignalHandler();
     await conversationManager.closeAll();
-    await sessionManager.closeAll();
     if (slackApp) {
       await stopSlackApp(slackApp);
     }
     conversationStore.close();
-    sessionStore.close();
   }
 }
 

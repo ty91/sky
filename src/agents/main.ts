@@ -1,7 +1,6 @@
-import { fileURLToPath } from 'node:url';
 import {
-  RESTART_HARNESS_FQ_TOOL_NAME,
-  RESTART_HARNESS_SERVER_NAME,
+  createRestartHarnessPiTool,
+  RESTART_HARNESS_TOOL_NAME,
 } from './tools/restart-harness.js';
 import type { AgentConfig } from './types.js';
 
@@ -18,7 +17,7 @@ const MAIN_AGENT_TOOLS = [
   'TodoWrite',
   'WebFetch',
   'WebSearch',
-  RESTART_HARNESS_FQ_TOOL_NAME,
+  RESTART_HARNESS_TOOL_NAME,
 ] as const;
 
 export type MainAgentConfigOptions = {
@@ -27,11 +26,9 @@ export type MainAgentConfigOptions = {
   /** Called on new sessions so AGENTS.md/MEMORY.md edits take effect without a bot restart. */
   systemPromptLoader?: () => string;
   model?: string;
+  /** Test seam for the in-process restart signal. Production defaults to process.kill. */
+  restartSignalParent?: (pid: number, signal: NodeJS.Signals) => void;
 };
-
-function restartHarnessServerPath(): string {
-  return fileURLToPath(new URL('../mcp/restart-harness-server.js', import.meta.url));
-}
 
 function parseSessionKey(sessionKey: string): { channelId: string; threadTs: string } {
   // Slack session keys are `<channelId>:<threadTs>` per `slack/assistant.ts`.
@@ -53,21 +50,19 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
     systemPromptLoader: options.systemPromptLoader,
     model: options.model ?? 'anthropic/claude-opus-4-7',
     tools: [...MAIN_AGENT_TOOLS],
-    mcpServersFactory: ({ sessionKey }) => {
+    customToolsFactory: ({ sessionKey }) => {
       const { channelId, threadTs } = parseSessionKey(sessionKey);
-      return {
-        [RESTART_HARNESS_SERVER_NAME]: {
-          name: RESTART_HARNESS_SERVER_NAME,
-          command: process.execPath,
-          args: [restartHarnessServerPath()],
-          env: [
-            { name: 'SKY_SESSION_KEY', value: sessionKey },
-            { name: 'SKY_SLACK_CHANNEL_ID', value: channelId },
-            { name: 'SKY_SLACK_THREAD_TS', value: threadTs },
-            { name: 'SKY_PARENT_PID', value: String(process.pid) },
-          ],
-        },
-      };
+      return [
+        createRestartHarnessPiTool(
+          {
+            sessionKey,
+            channelId,
+            threadTs,
+            parentPid: process.pid,
+          },
+          options.restartSignalParent,
+        ),
+      ];
     },
   };
 }
