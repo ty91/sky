@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentConfig } from '../types.js';
-import type { SessionManager } from '../../session/manager.js';
+import type { ConversationManager } from '../../conversation/manager.js';
 import {
   dateKeyKst,
   getYesterdayKey,
@@ -25,7 +25,7 @@ const KNOWLEDGE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 export type DreamStep = 'summarize' | 'knowledge';
 
 export type DreamAgentOptions = {
-  sessionManager: SessionManager;
+  conversationManager: ConversationManager;
   workspace: string;
   /** KST date key `YYYY-MM-DD`. Defaults to yesterday (KST). */
   targetDate?: string;
@@ -142,10 +142,13 @@ async function runSummarize(
   }
 
   const key = 'dream:summarize';
-  options.sessionManager.open(key, createSummarizeAgentConfig(options.workspace));
   try {
     const userText = buildSummarizeUserPrompt(targetDate, entries, nowIso);
-    const result = await options.sessionManager.send(key, userText);
+    const result = await options.conversationManager.runTurn(
+      key,
+      createSummarizeAgentConfig(options.workspace),
+      userText,
+    );
     if (result.kind === 'interrupted') {
       throw new Error('dream-summarize was unexpectedly interrupted');
     }
@@ -154,7 +157,7 @@ async function runSummarize(
     }
     return result.text;
   } finally {
-    await options.sessionManager.close(key);
+    await options.conversationManager.close(key);
   }
 }
 
@@ -165,10 +168,13 @@ async function runKnowledge(
   nowIso: string,
 ): Promise<string> {
   const key = 'dream:knowledge';
-  options.sessionManager.open(key, createKnowledgeAgentConfig(options.workspace));
   try {
     const userText = buildKnowledgeUserPrompt(targetDate, entries, nowIso);
-    const result = await options.sessionManager.send(key, userText);
+    const result = await options.conversationManager.runTurn(
+      key,
+      createKnowledgeAgentConfig(options.workspace),
+      userText,
+    );
     if (result.kind === 'interrupted') {
       throw new Error('dream-knowledge was unexpectedly interrupted');
     }
@@ -177,7 +183,7 @@ async function runKnowledge(
     }
     return result.text;
   } finally {
-    await options.sessionManager.close(key);
+    await options.conversationManager.close(key);
   }
 }
 

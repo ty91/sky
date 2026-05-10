@@ -1,7 +1,7 @@
 import type { AgentConfig } from '../types.js';
 import { getUnreadTranscripts, advanceCursors, type UnreadTranscript } from './cursors.js';
 import { MEMORY_AGENT_SYSTEM_PROMPT } from './prompt.js';
-import type { SessionManager } from '../../session/manager.js';
+import type { ConversationManager } from '../../conversation/manager.js';
 
 // L2 Working Memory Agent — see docs/plans/active/2026-04-20-memory-v2.md
 // Fast, 5-minute cadence. Sonnet is sufficient for single-file rolling summary.
@@ -13,7 +13,7 @@ const MEMORY_AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 const SKIP_SENTINEL = 'SKIP';
 
 type MemoryAgentOptions = {
-  sessionManager: SessionManager;
+  conversationManager: ConversationManager;
   workspace: string;
 };
 
@@ -81,10 +81,8 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
   const memoryAgent = createMemoryAgentConfig(options.workspace);
   let finalText = '';
 
-  options.sessionManager.open(key, memoryAgent);
-
   try {
-    const result = await options.sessionManager.send(key, userText);
+    const result = await options.conversationManager.runTurn(key, memoryAgent, userText);
     if (result.kind === 'interrupted') {
       throw new Error('Memory agent session was unexpectedly interrupted');
     }
@@ -116,7 +114,7 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
       };
     }
   } finally {
-    await options.sessionManager.close(key);
+    await options.conversationManager.close(key);
   }
 
   return {

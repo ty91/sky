@@ -145,20 +145,18 @@ test('runDreamAgent uses yesterday by default and calls both steps', async () =>
       'utf8',
     );
 
-    const calls = [];
-    const sessionManager = {
-      open: (key) => calls.push(['open', key]),
-      send: async (key) => {
-        calls.push(['send', key]);
-        return { kind: 'ok', text: `ok:${key}` };
+    const calls = { runTurn: [], close: [] };
+    const conversationManager = {
+      runTurn: async (key, agent, text) => {
+        calls.runTurn.push({ key, agent, text });
+        return { kind: 'ok', text: `ok:${key}`, handle: { sessionId: `pi-${key}` } };
       },
-      getSessionId: () => undefined,
-      close: async (key) => calls.push(['close', key]),
+      close: async (key) => calls.close.push(key),
       closeAll: async () => {},
     };
 
     const result = await runDreamAgent({
-      sessionManager,
+      conversationManager,
       workspace: '/tmp/workspace',
       transcriptsDir: tmp,
     });
@@ -169,15 +167,16 @@ test('runDreamAgent uses yesterday by default and calls both steps', async () =>
     assert.equal(result.summarize?.summary, 'ok:dream:summarize');
     assert.equal(result.knowledge?.summary, 'ok:dream:knowledge');
 
-    // Two steps, each open/send/close.
-    assert.deepEqual(calls, [
-      ['open', 'dream:summarize'],
-      ['send', 'dream:summarize'],
-      ['close', 'dream:summarize'],
-      ['open', 'dream:knowledge'],
-      ['send', 'dream:knowledge'],
-      ['close', 'dream:knowledge'],
-    ]);
+    assert.deepEqual(
+      calls.runTurn.map((call) => [call.key, call.agent.name]),
+      [
+        ['dream:summarize', 'dream-summarize'],
+        ['dream:knowledge', 'dream-knowledge'],
+      ],
+    );
+    assert.match(calls.runTurn[0].text, /# L3 Dream — Step 1: Daily Summarization/);
+    assert.match(calls.runTurn[1].text, /# L3 Dream — Step 2: Knowledge Update/);
+    assert.deepEqual(calls.close, ['dream:summarize', 'dream:knowledge']);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -194,16 +193,14 @@ test('runDreamAgent preflight-deletes existing daily file before Step 1', async 
     fs.writeFileSync(targetFile, '# stale previous summary\n', 'utf8');
     assert.ok(fs.existsSync(targetFile));
 
-    const sessionManager = {
-      open: () => {},
-      send: async () => ({ kind: 'ok', text: 'ok' }),
-      getSessionId: () => undefined,
+    const conversationManager = {
+      runTurn: async () => ({ kind: 'ok', text: 'ok', handle: { sessionId: 'pi-dream' } }),
       close: async () => {},
       closeAll: async () => {},
     };
 
     await runDreamAgent({
-      sessionManager,
+      conversationManager,
       workspace,
       targetDate: '2026-04-19',
       transcriptsDir: tmp,
@@ -221,16 +218,14 @@ test('runDreamAgent preflight-deletes existing daily file before Step 1', async 
 test('runDreamAgent marks quiet day when there are no entries', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dream-quiet-'));
   try {
-    const sessionManager = {
-      open: () => {},
-      send: async () => ({ kind: 'ok', text: 'ok' }),
-      getSessionId: () => undefined,
+    const conversationManager = {
+      runTurn: async () => ({ kind: 'ok', text: 'ok', handle: { sessionId: 'pi-dream' } }),
       close: async () => {},
       closeAll: async () => {},
     };
 
     const result = await runDreamAgent({
-      sessionManager,
+      conversationManager,
       workspace: '/tmp/workspace',
       targetDate: '2026-04-19',
       transcriptsDir: tmp,
@@ -250,20 +245,18 @@ test('runDreamAgent marks quiet day when there are no entries', async () => {
 test('runDreamAgent respects onlyStep', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dream-onlystep-'));
   try {
-    const calls = [];
-    const sessionManager = {
-      open: (key) => calls.push(['open', key]),
-      send: async (key) => {
-        calls.push(['send', key]);
-        return { kind: 'ok', text: `ok:${key}` };
+    const calls = { runTurn: [], close: [] };
+    const conversationManager = {
+      runTurn: async (key) => {
+        calls.runTurn.push(key);
+        return { kind: 'ok', text: `ok:${key}`, handle: { sessionId: `pi-${key}` } };
       },
-      getSessionId: () => undefined,
-      close: async (key) => calls.push(['close', key]),
+      close: async (key) => calls.close.push(key),
       closeAll: async () => {},
     };
 
     const result = await runDreamAgent({
-      sessionManager,
+      conversationManager,
       workspace: '/tmp/workspace',
       targetDate: '2026-04-19',
       transcriptsDir: tmp,
@@ -272,10 +265,8 @@ test('runDreamAgent respects onlyStep', async () => {
 
     assert.ok(result.summarize?.ran);
     assert.equal(result.knowledge, undefined);
-    assert.deepEqual(
-      calls.map((c) => c[1]),
-      ['dream:summarize', 'dream:summarize', 'dream:summarize'],
-    );
+    assert.deepEqual(calls.runTurn, ['dream:summarize']);
+    assert.deepEqual(calls.close, ['dream:summarize']);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

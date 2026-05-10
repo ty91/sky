@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
 import { runDreamAgent, dreamDailyFilePath, type DreamStep } from '../agents/dream/agent.js';
-import { createAcpProviderFactory } from '../providers/acp.js';
-import { createSessionManager } from '../session/manager.js';
+import { createConversationManager } from '../conversation/manager.js';
 
 // L3 Dream Agent runs every day at 02:00 KST via cron.
 // See docs/plans/active/2026-04-20-memory-v2-phase3-dream.md.
@@ -30,13 +29,12 @@ export const dreamCommand = new Command('dream')
     const settings = loadSettings({ silent: true });
     console.log('[dream] starting L3 dream agent…');
 
-    const sessionManager = createSessionManager({
-      providerFactory: createAcpProviderFactory({ cwd: settings.workspace }),
+    const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,
     });
 
     const result = await runDreamAgent({
-      sessionManager,
+      conversationManager,
       workspace: settings.workspace,
       targetDate: opts.date,
       onlyStep: opts.step as DreamStep | undefined,
