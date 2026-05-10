@@ -36,8 +36,9 @@ export function loadSettings(options: { silent?: boolean } = {}): Settings {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       throw new Error(
         `Settings file not found: ${SETTINGS_FILE}\n` +
-          'Create it with Slack settings, for example: ' +
+          'Create it with Slack settings and a Pi model, for example: ' +
           '{ "slack": { "botToken": "...", "appToken": "..." }, "model": "anthropic/claude-opus-4-7" }',
+        { cause: error },
       );
     }
     throw error;

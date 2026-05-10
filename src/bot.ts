@@ -197,9 +197,9 @@ export async function startBot(): Promise<void> {
   const scheduleRestart = makeRestartScheduler();
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
 
-  // `initialPrompt` is a fallback for legacy resumed sessions that have no
-  // stored snapshot. `loadPrompt` runs again on every new session so edits to
-  // SOUL.md / AGENTS.md / USER.md / MEMORY.md take effect without a restart.
+  // `initialPrompt` is the static fallback for agents that cannot reload.
+  // `loadPrompt` runs again on every new Pi session so edits to SOUL.md /
+  // AGENTS.md / USER.md / MEMORY.md take effect without a restart.
   const mainAgent = createMainAgentConfig({
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,
