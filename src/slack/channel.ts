@@ -1,6 +1,6 @@
 import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
-import type { SessionManager } from '../session/manager.js';
+import type { ConversationManager } from '../conversation/manager.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
 import { addReaction, removeReaction } from './reactions.js';
 import { SlackSender } from './sender.js';
@@ -30,9 +30,9 @@ export type SlackChannelClient = {
 
 export type SlackChannelHandlerOptions = {
   botUserId: string;
+  conversationManager: ConversationManager;
   mainAgent: AgentConfig;
   mentionLabel?: string;
-  sessionManager: SessionManager;
   slack: SlackChannelClient;
 };
 
@@ -42,9 +42,9 @@ export type SlackChannelHandler = {
 
 export function createSlackChannelHandler({
   botUserId,
+  conversationManager,
   mainAgent,
   mentionLabel = '@sky',
-  sessionManager,
   slack,
 }: SlackChannelHandlerOptions): SlackChannelHandler {
   return {
@@ -58,7 +58,7 @@ export function createSlackChannelHandler({
       }
 
       const threadId = toThreadId(channelId, threadTs);
-      const existingThread = sessionManager.has(threadId, mainAgent);
+      const existingThread = conversationManager.has(threadId, mainAgent);
       const normalized = normalizeSlackMessage({
         allowUnmentionedChannelMessage: existingThread,
         botUserId,
@@ -84,13 +84,6 @@ export function createSlackChannelHandler({
       await addReaction(slack, channelId, messageTs, 'thought_balloon');
 
       try {
-        sessionManager.open(threadId, mainAgent);
-
-        const resumedId = sessionManager.getSessionId(threadId);
-        if (resumedId) {
-          transcript.setSessionId(resumedId);
-        }
-
         const text = await maybePrependThreadHistory({
           channelId,
           currentContent: normalized.text,
@@ -101,15 +94,11 @@ export function createSlackChannelHandler({
         });
 
         transcript.appendUser(text);
+        let streamedText = '';
 
-        const result = await sessionManager.send(threadId, text, {
-          onMessage: async (msg) => {
-            const sessionId = sessionManager.getSessionId(threadId);
-            if (sessionId) {
-              transcript.setSessionId(sessionId);
-            }
-            transcript.appendAssistant(msg);
-            await sender.sendReply(msg);
+        const result = await conversationManager.runTurn(threadId, mainAgent, text, {
+          onTextDelta: (delta) => {
+            streamedText += delta;
           },
         });
 
@@ -118,6 +107,10 @@ export function createSlackChannelHandler({
         } else if (result.kind === 'error') {
           throw result.error;
         } else {
+          const assistantText = result.text || streamedText;
+          transcript.setSessionId(result.handle.sessionId);
+          transcript.appendAssistant(assistantText);
+          await sender.sendReply(assistantText);
           await addReaction(slack, channelId, messageTs, 'white_check_mark');
         }
       } catch (error) {

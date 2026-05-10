@@ -232,7 +232,6 @@ export async function startBot(): Promise<void> {
       botToken: settings.slack.botToken,
       appToken: settings.slack.appToken,
       conversationManager,
-      sessionManager,
       mainAgent,
     });
 
