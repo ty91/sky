@@ -1,7 +1,7 @@
 {
   "name": "sky",
   "version": "0.1.0",
-  "description": "Slack chatbot with per-thread ACP sessions",
+  "description": "Slack chatbot with per-thread Pi AgentSession conversations",
   "type": "module",
   "private": true,
   "bin": {
@@ -23,9 +23,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.32.0",
-    "@agentclientprotocol/codex-acp": "^0.0.41",
-    "@agentclientprotocol/sdk": "^0.21.0",
     "@earendil-works/pi-coding-agent": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/bolt": "^4.6.0",

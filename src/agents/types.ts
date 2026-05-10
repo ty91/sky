@@ -1,5 +1,4 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { ProviderMcpServerConfig } from '../providers/types.js';
 
 /**
  * Context handed to per-session tool factories when a session opens. Lets
@@ -9,7 +8,6 @@ export type McpFactoryContext = {
   sessionKey: string;
 };
 
-export type McpServersFactory = (ctx: McpFactoryContext) => Record<string, ProviderMcpServerConfig>;
 export type PiCustomToolsFactory = (ctx: McpFactoryContext) => ToolDefinition<any, any, any>[];
 
 export type AgentConfig = {
@@ -22,19 +20,12 @@ export type AgentConfig = {
    */
   systemPrompt: string;
   /**
-   * Optional function invoked at `SessionManager.open()` for **new** sessions.
+   * Optional function invoked for **new** Pi sessions.
    * Lets the prompt be re-read from disk (e.g. AGENTS.md/MEMORY.md) so that
    * edits apply without restarting the bot process. Resumed sessions skip the
-   * loader and reuse the snapshot stored alongside their session id to keep
-   * Anthropic prompt caching intact.
+   * loader and continue from the Pi session file.
    */
   systemPromptLoader?: () => string;
-  /**
-   * Optional factory for per-session MCP servers. Invoked every time the
-   * session manager opens a session so each session can receive its own bound
-   * tools or stdio/http/sse server config.
-   */
-  mcpServersFactory?: McpServersFactory;
   /** Optional factory for per-session Pi custom tools. */
   customToolsFactory?: PiCustomToolsFactory;
   model?: string;
