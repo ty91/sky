@@ -63,7 +63,7 @@ test('channel ingress does not forward regular channel messages that mention the
   assert.deepEqual(channel.calls, []);
 });
 
-test('channel ingress forwards regular public and private channel messages through its judgment', async () => {
+test('channel ingress forwards unmentioned public channel messages to the channel conversation handler', async () => {
   const channel = createChannelHandler();
   const ingress = createSlackChannelIngress({
     botUserId: 'U999',
@@ -79,6 +79,27 @@ test('channel ingress forwards regular public and private channel messages throu
       user: 'U123',
     },
   });
+
+  assert.deepEqual(channel.calls, [
+    {
+      event: {
+        channel: 'C123',
+        channel_type: 'channel',
+        text: '이어서 설명해줘',
+        ts: '1777901000.000000',
+        user: 'U123',
+      },
+    },
+  ]);
+});
+
+test('channel ingress forwards unmentioned private channel messages to the channel conversation handler', async () => {
+  const channel = createChannelHandler();
+  const ingress = createSlackChannelIngress({
+    botUserId: 'U999',
+    channelHandler: channel.handler,
+  });
+
   await ingress.handleMessage({
     message: {
       channel: 'G123',
@@ -88,6 +109,27 @@ test('channel ingress forwards regular public and private channel messages throu
       user: 'U123',
     },
   });
+
+  assert.deepEqual(channel.calls, [
+    {
+      event: {
+        channel: 'G123',
+        channel_type: 'group',
+        text: '비공개 채널 후속 질문',
+        ts: '1777901001.000000',
+        user: 'U123',
+      },
+    },
+  ]);
+});
+
+test('channel ingress does not forward DM or unsupported channel messages', async () => {
+  const channel = createChannelHandler();
+  const ingress = createSlackChannelIngress({
+    botUserId: 'U999',
+    channelHandler: channel.handler,
+  });
+
   await ingress.handleMessage({
     message: {
       channel: 'D123',
@@ -97,6 +139,23 @@ test('channel ingress forwards regular public and private channel messages throu
       user: 'U123',
     },
   });
+  await ingress.handleMessage({
+    message: {
+      channel: 'G999',
+      channel_type: 'mpim',
+      text: '멀티 DM도 채널 ingress 대상이 아님',
+      ts: '1777901003.000000',
+      user: 'U123',
+    },
+  });
+  await ingress.handleMessage({
+    message: {
+      channel: 'C999',
+      text: 'channel_type이 없으면 지원하지 않는 이벤트로 취급',
+      ts: '1777901004.000000',
+      user: 'U123',
+    },
+  });
 
-  assert.deepEqual(channel.calls.map((call) => call.event.channel), ['C123', 'G123']);
+  assert.deepEqual(channel.calls, []);
 });
