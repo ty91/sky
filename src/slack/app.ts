@@ -7,9 +7,15 @@ import {
   type SlackChannelEvent,
 } from './channel.js';
 import {
+  createSlackChannelIngress,
+  type SlackChannelMessageIngressEvent,
+} from './channel-ingress.js';
+import {
   readSlackThreadMessages,
   type SlackThreadMessage,
 } from './thread-history.js';
+
+export { isPublicOrPrivateChannelMessage } from './channel-ingress.js';
 
 export type SlackAppOptions = {
   botToken: string;
@@ -50,17 +56,17 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
       },
     },
   });
+  const channelIngress = createSlackChannelIngress({
+    botUserId,
+    channelHandler,
+  });
 
   app.event('app_mention', async ({ event }) => {
-    await channelHandler.handleMessage({ event: event as SlackChannelEvent });
+    await channelIngress.handleAppMention({ event: event as SlackChannelEvent });
   });
 
   app.message(async ({ message }) => {
-    if (!isPublicOrPrivateChannelMessage(message)) {
-      return;
-    }
-
-    await channelHandler.handleMessage({ event: message as SlackChannelEvent });
+    await channelIngress.handleMessage({ message: message as SlackChannelMessageIngressEvent });
   });
 
   await app.start();
@@ -123,11 +129,3 @@ function readNextCursor(response: { response_metadata?: { next_cursor?: unknown 
   return typeof cursor === 'string' && cursor.trim() ? cursor : undefined;
 }
 
-export function isPublicOrPrivateChannelMessage(message: unknown): boolean {
-  if (typeof message !== 'object' || message === null) {
-    return false;
-  }
-
-  const channelType = 'channel_type' in message ? (message as { channel_type?: unknown }).channel_type : undefined;
-  return channelType === 'channel' || channelType === 'group';
-}
