@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "node": true
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**", ".env*"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "off",
+    "style": "off",
+    "pedantic": "off",
+    "nursery": "off",
+    "restriction": "off"
+  },
+  "rules": {
+    "no-console": "off"
+  }
+}
