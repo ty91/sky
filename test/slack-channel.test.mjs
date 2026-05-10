@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isPublicOrPrivateChannelMessage } from '../dist/slack/app.js';
 import { createSlackChannelHandler } from '../dist/slack/channel.js';
+import { createSlackChannelIngress } from '../dist/slack/channel-ingress.js';
 import { normalizeSlackMessage } from '../dist/slack/messages.js';
 import {
   prependSlackThreadHistoryToPrompt,
@@ -273,6 +274,71 @@ test('channel handler starts root mention conversations and replies in the root 
     'add:white_check_mark',
     'remove:thought_balloon',
   ]);
+});
+
+test('channel ingress processes duplicate app_mention and message mention events once without hand reaction', async () => {
+  const slack = createSlackClient();
+  const calls = {
+    has: [],
+    runTurn: [],
+  };
+  const conversationManager = {
+    has: (key, agent) => {
+      calls.has.push({ agent, key });
+      return false;
+    },
+    runTurn: async (key, agent, text, options) => {
+      calls.runTurn.push({ agent, key, text });
+
+      if (calls.runTurn.length > 1) {
+        return { kind: 'interrupted' };
+      }
+
+      await options?.onTextDelta?.('응답');
+      return {
+        kind: 'ok',
+        text: '응답',
+        handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
+      };
+    },
+  };
+  const channelHandler = createSlackChannelHandler({
+    botUserId: 'U999',
+    conversationManager,
+    mainAgent: MAIN_AGENT,
+    slack: slack.client,
+  });
+  const ingress = createSlackChannelIngress({
+    botUserId: 'U999',
+    channelHandler,
+  });
+  const mentionEvent = {
+    channel: 'C123',
+    text: '<@U999> 작업 상태 알려줘',
+    ts: '1777901000.000000',
+    user: 'U123',
+  };
+
+  await ingress.handleAppMention({ event: mentionEvent });
+  await ingress.handleMessage({
+    message: {
+      ...mentionEvent,
+      channel_type: 'channel',
+    },
+  });
+
+  assert.deepEqual(calls.runTurn.map((call) => ({ key: call.key, text: call.text })), [
+    { key: 'C123:1777901000.000000', text: '@sky 작업 상태 알려줘' },
+  ]);
+  assert.deepEqual(slack.calls.posts, [
+    { channel: 'C123', text: '응답', thread_ts: '1777901000.000000' },
+  ]);
+  assert.deepEqual(slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
+    'add:thought_balloon',
+    'add:white_check_mark',
+    'remove:thought_balloon',
+  ]);
+  assert.equal(slack.calls.reactions.some((call) => call.name === 'hand'), false);
 });
 
 test('channel handler uses thread_ts for thread mentions', async () => {
