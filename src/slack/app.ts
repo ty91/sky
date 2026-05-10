@@ -1,7 +1,6 @@
 import { App } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import type { SessionManager } from '../session/manager.js';
 import { createSlackAssistant } from './assistant.js';
 import {
   createSlackChannelHandler,
@@ -16,7 +15,6 @@ export type SlackAppOptions = {
   botToken: string;
   appToken: string;
   conversationManager: ConversationManager;
-  sessionManager: SessionManager;
   mainAgent: AgentConfig;
 };
 
@@ -38,7 +36,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
   const botUserId = readAuthString(auth.user_id, 'Slack auth.test did not return user_id.');
   const channelHandler = createSlackChannelHandler({
     botUserId,
-    sessionManager: options.sessionManager,
+    conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
     slack: {
       chat: {
