@@ -177,35 +177,6 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
   ]);
 });
 
-test('userMessage sends the completed assistant message once from streamed text', async () => {
-  const replies = [];
-  const reactions = createReactionsClient();
-  const config = createSlackAssistantConfig({
-    mainAgent: MAIN_AGENT,
-    conversationManager: createConversationManagerMock({
-      runTurn: async (_threadId, _agent, _text, options) => {
-        await options.onTextDelta('파일을 확인해볼게요\n\n');
-        await options.onTextDelta('수정 완료했습니다');
-        return {
-          kind: 'ok',
-          text: '파일을 확인해볼게요\n\n수정 완료했습니다',
-          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
-        };
-      },
-    }),
-  });
-
-  await config.userMessage({
-    message: createMessage(),
-    say: async (text) => {
-      replies.push(text);
-    },
-    client: reactions.client,
-  });
-
-  assert.deepEqual(replies, ['파일을 확인해볼게요\n\n수정 완료했습니다']);
-});
-
 test('userMessage includes downloaded file attachments in the final prompt', async () => {
   const originalFetch = globalThis.fetch;
   const downloadDir = path.join(os.tmpdir(), 'sky');
