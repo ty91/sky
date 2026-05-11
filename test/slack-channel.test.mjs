@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { isPublicOrPrivateChannelMessage } from '../dist/slack/app.js';
 import { createSlackChannelHandler } from '../dist/slack/channel.js';
 import { createSlackChannelIngress } from '../dist/slack/channel-ingress.js';
@@ -274,6 +275,15 @@ test('channel handler starts root mention conversations and replies in the root 
     'add:white_check_mark',
     'remove:thought_balloon',
   ]);
+});
+
+test('channel handler delegates turn lifecycle to the common Slack turn module', () => {
+  const source = fs.readFileSync(new URL('../src/slack/channel.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /from '\.\/turn\.js'/);
+  assert.doesNotMatch(source, /TranscriptWriter/);
+  assert.doesNotMatch(source, /from '\.\/reactions\.js'/);
+  assert.doesNotMatch(source, /\.runTurn\(/);
 });
 
 test('channel ingress processes duplicate app_mention and message mention events once without hand reaction', async () => {
