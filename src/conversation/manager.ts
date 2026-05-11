@@ -178,6 +178,7 @@ export const createDefaultPiSession: ConversationSessionFactory = async ({ key, 
     cwd,
     agentDir,
     systemPrompt: resolveSystemPrompt(agent),
+    noContextFiles: true,
   });
   await resourceLoader.reload();
   const customTools = agent.customToolsFactory?.({ sessionKey: key });
