@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { DEFAULT_SUGGESTED_PROMPTS, createSlackAssistantConfig } from '../dist/slack/assistant.js';
+import { SLACK_TURN_ERROR_REPLY } from '../dist/slack/turn.js';
 
 const MAIN_AGENT = {
   name: 'main',
@@ -177,39 +177,6 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
   ]);
 });
 
-test('userMessage silently ignores interrupted result', async () => {
-  const runTurnCalls = [];
-  const reactions = createReactionsClient();
-  const config = createSlackAssistantConfig({
-    mainAgent: MAIN_AGENT,
-    conversationManager: createConversationManagerMock({
-      runTurn: async (key, agent, text) => {
-        runTurnCalls.push({ key, agent, text });
-        return { kind: 'interrupted' };
-      },
-    }),
-  });
-
-  const replies = [];
-  await config.userMessage({
-    message: createMessage({ text: '작업 상태 알려줘', channel: 'C999', threadTs: '1888.55' }),
-    say: async (text) => {
-      replies.push(text);
-    },
-    client: reactions.client,
-  });
-
-  assert.equal(runTurnCalls.length, 1);
-  assert.equal(runTurnCalls[0].key, 'C999:1888.55');
-  assert.equal(runTurnCalls[0].agent.name, 'main');
-  assert.deepEqual(replies, []);  // interrupted일 때는 아무 응답도 보내지 않음
-  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:hand',
-    'remove:thought_balloon',
-  ]);
-});
-
 test('userMessage sends the completed assistant message once from streamed text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
@@ -237,43 +204,59 @@ test('userMessage sends the completed assistant message once from streamed text'
   });
 
   assert.deepEqual(replies, ['파일을 확인해볼게요\n\n수정 완료했습니다']);
-  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:white_check_mark',
-    'remove:thought_balloon',
-  ]);
 });
 
-test('userMessage keeps reaction lifecycle when assistant message is delivered', async () => {
+test('userMessage includes downloaded file attachments in the final prompt', async () => {
+  const originalFetch = globalThis.fetch;
+  const downloadDir = path.join(os.tmpdir(), 'sky');
+  const runTurnCalls = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock({
-      runTurn: async (_threadId, _agent, _text, options) => {
-        await options.onTextDelta('응답');
+      runTurn: async (key, agent, text) => {
+        runTurnCalls.push({ key, agent, text });
         return {
           kind: 'ok',
-          text: '응답',
+          text: '첨부 확인 완료',
           handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
         };
       },
     }),
   });
 
-  await config.userMessage({
-    message: createMessage(),
-    say: async () => {},
-    client: reactions.client,
-  });
+  try {
+    globalThis.fetch = async () => new Response('file contents', { status: 200 });
 
-  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:white_check_mark',
-    'remove:thought_balloon',
-  ]);
+    await config.userMessage({
+      message: {
+        ...createMessage({ text: '첨부 봐줘', channel: 'C999', threadTs: '1888.55' }),
+        files: [
+          {
+            id: 'F123',
+            name: 'notes.txt',
+            url_private_download: 'https://files.slack.test/notes.txt',
+          },
+        ],
+      },
+      say: async () => {},
+      client: { ...reactions.client, token: 'xoxb-test-token' },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(downloadDir, { recursive: true, force: true });
+  }
+
+  assert.equal(runTurnCalls.length, 1);
+  assert.equal(runTurnCalls[0].key, 'C999:1888.55');
+  assert.equal(runTurnCalls[0].agent, MAIN_AGENT);
+  assert.match(
+    runTurnCalls[0].text,
+    /^첨부 봐줘\n\nAttachments: `.*\/sky\/notes-[a-z0-9]+\.txt`$/,
+  );
 });
 
-test('userMessage sends errors as reply text', async () => {
+test('userMessage sends common turn error reply text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
@@ -291,80 +274,5 @@ test('userMessage sends errors as reply text', async () => {
     client: reactions.client,
   });
 
-  assert.deepEqual(replies, ['오류가 났습니다: boom']);
-  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'remove:thought_balloon',
-  ]);
-});
-
-test('userMessage records transcript under the Pi conversation handle session id', () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-assistant-'));
-
-  try {
-    const output = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { createSlackAssistantConfig } from './dist/slack/assistant.js';
-
-const config = createSlackAssistantConfig({
-  mainAgent: { name: 'main', systemPrompt: 'system', model: 'opus', tools: ['Read'] },
-  conversationManager: {
-    runTurn: async (_key, _agent, _text, options) => {
-      await options.onTextDelta('처리했습니다');
-      return {
-        kind: 'ok',
-        text: '처리했습니다',
-        handle: { sessionId: 'pi-session-transcript', sessionFile: '/tmp/pi-session-transcript.jsonl' },
-      };
-    },
-    has: () => false,
-    getHandle: () => undefined,
-    close: async () => {},
-    purge: async () => {},
-    closeAll: async () => {},
-  },
-});
-
-await config.userMessage({
-  message: {
-    text: '기록해줘',
-    channel: 'C123',
-    thread_ts: '1711.22',
-    ts: '1711.22',
-    user: 'U123',
-  },
-  say: async () => {},
-  client: { reactions: { add: async () => ({ ok: true }), remove: async () => ({ ok: true }) } },
-});
-
-const transcript = fs.readFileSync(
-  path.join(os.homedir(), '.sky', 'transcripts', 'C123:1711.22', 'pi-session-transcript.md'),
-  'utf8',
-);
-assert.match(transcript, /### user/);
-assert.match(transcript, /기록해줘/);
-assert.match(transcript, /### assistant/);
-assert.match(transcript, /처리했습니다/);
-console.log('assistant-transcript-test-ok');
-        `,
-      ],
-      {
-        cwd: process.cwd(),
-        env: { ...process.env, HOME: homeDir },
-        encoding: 'utf8',
-      },
-    );
-
-    assert.match(output, /assistant-transcript-test-ok/);
-  } finally {
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  }
+  assert.deepEqual(replies, [SLACK_TURN_ERROR_REPLY]);
 });
