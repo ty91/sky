@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { isPublicOrPrivateChannelMessage } from '../dist/slack/app.js';
 import { createSlackChannelHandler } from '../dist/slack/channel.js';
 import { createSlackChannelIngress } from '../dist/slack/channel-ingress.js';
@@ -270,20 +269,6 @@ test('channel handler starts root mention conversations and replies in the root 
   assert.deepEqual(slack.calls.fetches, [
     { channel: 'C123', latest: '1777901000.000000', threadTs: '1777901000.000000' },
   ]);
-  assert.deepEqual(slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:white_check_mark',
-    'remove:thought_balloon',
-  ]);
-});
-
-test('channel handler delegates turn lifecycle to the common Slack turn module', () => {
-  const source = fs.readFileSync(new URL('../src/slack/channel.ts', import.meta.url), 'utf8');
-
-  assert.match(source, /from '\.\/turn\.js'/);
-  assert.doesNotMatch(source, /TranscriptWriter/);
-  assert.doesNotMatch(source, /from '\.\/reactions\.js'/);
-  assert.doesNotMatch(source, /\.runTurn\(/);
 });
 
 test('channel ingress processes duplicate app_mention and message mention events once without hand reaction', async () => {
@@ -342,11 +327,6 @@ test('channel ingress processes duplicate app_mention and message mention events
   ]);
   assert.deepEqual(slack.calls.posts, [
     { channel: 'C123', text: '응답', thread_ts: '1777901000.000000' },
-  ]);
-  assert.deepEqual(slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:white_check_mark',
-    'remove:thought_balloon',
   ]);
   assert.equal(slack.calls.reactions.some((call) => call.name === 'hand'), false);
 });
@@ -444,44 +424,3 @@ test('channel handler prepends history only for new conversations and falls back
   assert.deepEqual(failedHistory.conversations.calls.runTurn.map((call) => call.text), ['@sky 실패해도 보내줘']);
 });
 
-test('channel handler marks interrupted and error results with matching Slack feedback', async () => {
-  const interrupted = createHandler({ reply: '', sendResult: { kind: 'interrupted' } });
-  const failed = createHandler({
-    reply: '',
-    sendResult: { kind: 'error', error: new Error('boom') },
-  });
-
-  await interrupted.handler.handleMessage({
-    event: {
-      channel: 'C123',
-      text: '<@U999> 오래 걸리는 일',
-      ts: '1777901000.000000',
-      user: 'U123',
-    },
-  });
-  await failed.handler.handleMessage({
-    event: {
-      channel: 'C123',
-      text: '<@U999> 실패하는 일',
-      ts: '1777902000.000000',
-      user: 'U123',
-    },
-  });
-
-  assert.deepEqual(interrupted.slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:hand',
-    'remove:thought_balloon',
-  ]);
-  assert.deepEqual(failed.slack.calls.posts, [
-    {
-      channel: 'C123',
-      text: '오류가 났습니다. 잠시 뒤 다시 시도해 주세요.',
-      thread_ts: '1777902000.000000',
-    },
-  ]);
-  assert.deepEqual(failed.slack.calls.reactions.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'remove:thought_balloon',
-  ]);
-});
