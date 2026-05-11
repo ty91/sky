@@ -1,11 +1,10 @@
-import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
-import { addReaction, removeReaction } from './reactions.js';
 import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
 import { toThreadId } from './thread-id.js';
+import { executeSlackTurn } from './turn.js';
 
 export type SlackChannelEvent = SlackChannelMessageEvent & {
   channel?: string;
@@ -79,47 +78,26 @@ export function createSlackChannelHandler({
           });
         },
       });
-      const transcript = new TranscriptWriter(threadId);
 
-      await addReaction(slack, channelId, messageTs, 'thought_balloon');
+      const text = await maybePrependThreadHistory({
+        channelId,
+        currentContent: normalized.text,
+        includeHistory: !existingThread,
+        latest: messageTs,
+        slack,
+        threadTs,
+      });
 
-      try {
-        const text = await maybePrependThreadHistory({
-          channelId,
-          currentContent: normalized.text,
-          includeHistory: !existingThread,
-          latest: messageTs,
-          slack,
-          threadTs,
-        });
-
-        transcript.appendUser(text);
-        let streamedText = '';
-
-        const result = await conversationManager.runTurn(threadId, mainAgent, text, {
-          onTextDelta: (delta) => {
-            streamedText += delta;
-          },
-        });
-
-        if (result.kind === 'interrupted') {
-          await addReaction(slack, channelId, messageTs, 'hand');
-        } else if (result.kind === 'error') {
-          throw result.error;
-        } else {
-          const assistantText = result.text || streamedText;
-          transcript.setSessionId(result.handle.sessionId);
-          transcript.appendAssistant(assistantText);
-          await sender.sendReply(assistantText);
-          await addReaction(slack, channelId, messageTs, 'white_check_mark');
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[slack] error handling channel message in ${threadId}: ${errorMessage}`);
-        await sender.sendReply('오류가 났습니다. 잠시 뒤 다시 시도해 주세요.');
-      } finally {
-        await removeReaction(slack, channelId, messageTs, 'thought_balloon');
-      }
+      await executeSlackTurn({
+        threadId,
+        channelId,
+        messageTs,
+        text,
+        conversationManager,
+        mainAgent,
+        reactionClient: slack,
+        reply: sender,
+      });
     },
   };
 }
