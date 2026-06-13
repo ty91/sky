@@ -235,6 +235,92 @@ console.log('slack-attach-main-agent-ok');
   }
 });
 
+test('Slack file uploader provider is lazy and reports unavailable Slack app at execution time', async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-slack-attach-lazy-'));
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createMainAgentConfig } from './dist/agents/main.js';
+import { createSlackFileUploaderProvider } from './dist/bot.js';
+
+let slackApp;
+const provider = createSlackFileUploaderProvider(() => slackApp);
+assert.equal(provider(), undefined);
+
+const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sky-lazy-uploader-'));
+try {
+const filePath = path.join(tempDir, 'report.txt');
+await writeFile(filePath, 'report', 'utf8');
+
+const agent = createMainAgentConfig({
+  systemPrompt: 'system',
+  slackFileUploaderProvider: provider,
+});
+const unavailableTool = agent
+  .customToolsFactory({ sessionKey: 'C123:111.22' })
+  .find((tool) => tool.name === 'slack_attach_files');
+await assert.rejects(
+  () =>
+    unavailableTool.execute('tool-1', { paths: [filePath] }, undefined, undefined, {
+      signal: undefined,
+      isIdle: () => false,
+      shutdown: () => undefined,
+    }),
+  /Slack app is not ready/,
+);
+
+  const uploadCalls = [];
+  slackApp = {
+    client: {
+      files: {
+        uploadV2: async (params) => {
+          uploadCalls.push(params);
+          return { ok: true, file: { id: 'F123' } };
+        },
+      },
+    },
+  };
+
+  const uploader = provider();
+  const result = await uploader.uploadFiles({
+    channelId: 'C123',
+    threadTs: '111.22',
+    paths: [filePath],
+  });
+
+  assert.deepEqual(result, [{ path: filePath, fileId: 'F123' }]);
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].channel_id, 'C123');
+  assert.equal(uploadCalls[0].thread_ts, '111.22');
+} finally {
+  await rm(tempDir, { recursive: true, force: true });
+}
+
+console.log('slack-lazy-uploader-ok');
+        `,
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: homeDir },
+        encoding: 'utf8',
+      },
+    );
+
+    assert.match(output, /slack-lazy-uploader-ok/);
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
 test('post-restart trigger is delivered through the original Pi conversation and Slack thread', () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-post-restart-'));
 
