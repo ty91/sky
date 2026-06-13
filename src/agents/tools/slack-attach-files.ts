@@ -77,7 +77,7 @@ export async function runSlackAttachFilesTool(
     };
   } catch (error) {
     if (error instanceof SlackFileUploadError) {
-      throw new Error(formatUploadFailure(error.successes, error.failures));
+      throw new Error(formatUploadFailure(error.successes, error.failures), { cause: error });
     }
     throw error;
   }
