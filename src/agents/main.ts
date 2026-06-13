@@ -1,8 +1,14 @@
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   createRestartHarnessPiTool,
   RESTART_HARNESS_TOOL_NAME,
 } from './tools/restart-harness.js';
+import {
+  createSlackAttachFilesPiTool,
+  SLACK_ATTACH_FILES_TOOL_NAME,
+} from './tools/slack-attach-files.js';
 import type { AgentConfig } from './types.js';
+import type { SlackFileUploader } from '../slack/files.js';
 
 const MAIN_AGENT_TOOLS = [
   'Bash',
@@ -18,6 +24,7 @@ const MAIN_AGENT_TOOLS = [
   'WebFetch',
   'WebSearch',
   RESTART_HARNESS_TOOL_NAME,
+  SLACK_ATTACH_FILES_TOOL_NAME,
 ] as const;
 
 export type MainAgentConfigOptions = {
@@ -28,6 +35,8 @@ export type MainAgentConfigOptions = {
   model?: string;
   /** Test seam for the in-process restart signal. Production defaults to process.kill. */
   restartSignalParent?: (pid: number, signal: NodeJS.Signals) => void;
+  /** Lazily resolves a Slack uploader for Slack-bound sessions. */
+  slackFileUploaderProvider?: () => SlackFileUploader | undefined;
 };
 
 function parseSessionKey(sessionKey: string): { channelId: string; threadTs: string } {
@@ -52,7 +61,7 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
     tools: [...MAIN_AGENT_TOOLS],
     customToolsFactory: ({ sessionKey }) => {
       const { channelId, threadTs } = parseSessionKey(sessionKey);
-      return [
+      const tools: ToolDefinition<any, any, any>[] = [
         createRestartHarnessPiTool(
           {
             sessionKey,
@@ -63,6 +72,28 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
           options.restartSignalParent,
         ),
       ];
+
+      if (options.slackFileUploaderProvider) {
+        tools.push(
+          createSlackAttachFilesPiTool(
+            {
+              channelId,
+              threadTs,
+            },
+            {
+              uploadFiles: async (params) => {
+                const uploader = options.slackFileUploaderProvider?.();
+                if (!uploader) {
+                  throw new Error('Slack file upload is unavailable: Slack app is not ready.');
+                }
+                return uploader.uploadFiles(params);
+              },
+            },
+          ),
+        );
+      }
+
+      return tools;
     },
   };
 }

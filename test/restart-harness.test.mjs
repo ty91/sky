@@ -153,6 +153,88 @@ console.log('restart-pi-tool-ok');
   }
 });
 
+test('main agent exposes slack_attach_files only when a Slack uploader provider is configured', async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-slack-attach-main-'));
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createMainAgentConfig } from './dist/agents/main.js';
+
+const agentWithoutUploader = createMainAgentConfig({ systemPrompt: 'system' });
+assert.ok(agentWithoutUploader.tools.includes('slack_attach_files'));
+assert.deepEqual(
+  agentWithoutUploader.customToolsFactory({ sessionKey: 'C123:111.22' }).map((tool) => tool.name),
+  ['restart_harness'],
+);
+
+const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sky-main-tool-'));
+try {
+  const filePath = path.join(tempDir, 'report.txt');
+  await writeFile(filePath, 'report', 'utf8');
+  const uploadCalls = [];
+  const agentWithUploader = createMainAgentConfig({
+    systemPrompt: 'system',
+    slackFileUploaderProvider: () => ({
+      uploadFiles: async (params) => {
+        uploadCalls.push(params);
+        return params.paths.map((uploadedPath) => ({ path: uploadedPath, fileId: 'F1' }));
+      },
+    }),
+  });
+
+  const tools = agentWithUploader.customToolsFactory({ sessionKey: 'C123:111.22' });
+  assert.deepEqual(tools.map((tool) => tool.name), ['restart_harness', 'slack_attach_files']);
+
+  const attachTool = tools.find((tool) => tool.name === 'slack_attach_files');
+  const result = await attachTool.execute('tool-1', { paths: [filePath] }, undefined, undefined, {
+    signal: undefined,
+    isIdle: () => false,
+    shutdown: () => undefined,
+  });
+
+  assert.deepEqual(uploadCalls, [
+    {
+      channelId: 'C123',
+      threadTs: '111.22',
+      paths: [filePath],
+    },
+  ]);
+  assert.deepEqual(result.details, {
+    channelId: 'C123',
+    threadTs: '111.22',
+    uploadedCount: 1,
+    uploadedPaths: [filePath],
+    uploads: [{ path: filePath, fileId: 'F1' }],
+  });
+} finally {
+  await rm(tempDir, { recursive: true, force: true });
+}
+
+console.log('slack-attach-main-agent-ok');
+        `,
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: homeDir },
+        encoding: 'utf8',
+      },
+    );
+
+    assert.match(output, /slack-attach-main-agent-ok/);
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
 test('post-restart trigger is delivered through the original Pi conversation and Slack thread', () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-post-restart-'));
 
