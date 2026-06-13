@@ -8,6 +8,11 @@ import { openConversationStore } from './conversation/store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
+import {
+  createSlackFileUploader,
+  type SlackFileUploader,
+  type SlackUploadV2Client,
+} from './slack/files.js';
 import { loadSettings } from './settings.js';
 
 /** Delay before we spawn the replacement daemon and exit ourselves. */
@@ -114,6 +119,15 @@ export function registerRestartSignalHandler(scheduleRestart: () => void): () =>
   };
 }
 
+export function createSlackFileUploaderProvider(
+  getSlackApp: () => { client: SlackUploadV2Client } | undefined,
+): () => SlackFileUploader | undefined {
+  return () => {
+    const slackApp = getSlackApp();
+    return slackApp ? createSlackFileUploader(slackApp.client) : undefined;
+  };
+}
+
 /**
  * Build the synthetic post-restart user message injected into the session
  * that originally asked for the restart. Rendered as a `<system-reminder>`
@@ -196,6 +210,7 @@ export async function startBot(): Promise<void> {
 
   const scheduleRestart = makeRestartScheduler();
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
+  let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
 
   // `initialPrompt` is the static fallback for agents that cannot reload.
   // `loadPrompt` runs again on every new Pi session so edits to SOUL.md /
@@ -204,6 +219,7 @@ export async function startBot(): Promise<void> {
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,
     model: settings.model,
+    slackFileUploaderProvider: createSlackFileUploaderProvider(() => slackApp),
   });
 
   const conversationStore = openConversationStore();
@@ -212,8 +228,6 @@ export async function startBot(): Promise<void> {
     defaultCwd: settings.workspace,
     store: conversationStore,
   });
-
-  let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
 
   try {
     console.log('[startup] starting slack app...');
