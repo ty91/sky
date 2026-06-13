@@ -12,7 +12,7 @@ Slack에서 Pi coding agent 기반 에이전트 봇을 **CLI + 데몬**으로 �
 - `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 Pi resource/system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, Pi model, workspace를 보여줍니다.
-- 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`로 제한되어 있습니다.
+- 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`로 제한되어 있습니다.
 - 에이전트 작업 디렉토리(`cwd`)는 기본적으로 `~/.sky/workspace`로 고정됩니다.
 
 ## 준비물
@@ -20,7 +20,7 @@ Slack에서 Pi coding agent 기반 에이전트 봇을 **CLI + 데몬**으로 �
 - Node.js 18+
 - Slack bot token + app token (Socket Mode 사용 시)
 - Slack app event subscriptions: `app_mention`, public channel message events, private channel message events
-- Slack scopes: `app_mentions.read`, `channels:history`, `groups:history`
+- Slack scopes: `app_mentions.read`, `channels:history`, `groups:history`, `files:write`
 - Pi coding agent에서 사용할 모델 인증 설정
 
 ## 인증 방식
