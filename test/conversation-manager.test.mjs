@@ -11,14 +11,15 @@ const AGENT = {
 
 function createFakeAgentSession({
   sessionId = 'agent-session-1',
-  resumeRef = '/tmp/pi-session-1.jsonl',
   onPrompt,
   onAbort,
+  ...options
 } = {}) {
+  const resumeRef = Object.hasOwn(options, 'resumeRef') ? options.resumeRef : '/tmp/pi-session-1.jsonl';
   const listeners = new Set();
   return {
     sessionId,
-    resumeRef,
+    ...(resumeRef !== undefined ? { resumeRef } : {}),
     prompt: async (text) => {
       if (onPrompt) {
         await onPrompt(text, (event) => {
@@ -116,7 +117,8 @@ test('conversation manager persists successful agent conversation handles', asyn
       key: 'thread-1',
       conversation: {
         sessionId: 'agent-session-persisted',
-        sessionFile: '/tmp/pi-session-persisted.jsonl',
+        backend: 'pi',
+        resumeRef: '/tmp/pi-session-persisted.jsonl',
         model: 'anthropic/claude-opus-4-7',
         agentName: 'main',
       },
@@ -128,7 +130,8 @@ test('conversation manager resumes a persisted session file after restart', asyn
   const { store } = createMockConversationStore({
     'thread-1': {
       sessionId: 'pi-session-existing',
-      sessionFile: '/tmp/pi-session-existing.jsonl',
+      backend: 'pi',
+      resumeRef: '/tmp/pi-session-existing.jsonl',
       model: 'anthropic/claude-opus-4-7',
       agentName: 'main',
     },
@@ -160,15 +163,23 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   const { store, data, calls } = createMockConversationStore({
     persisted: {
       sessionId: 'pi-session-persisted',
-      sessionFile: '/tmp/pi-session-persisted.jsonl',
+      backend: 'pi',
+      resumeRef: '/tmp/pi-session-persisted.jsonl',
       model: 'anthropic/claude-opus-4-7',
       agentName: 'main',
     },
     otherAgent: {
       sessionId: 'pi-session-other',
-      sessionFile: '/tmp/pi-session-other.jsonl',
+      backend: 'pi',
+      resumeRef: '/tmp/pi-session-other.jsonl',
       model: 'anthropic/claude-opus-4-7',
       agentName: 'memory',
+    },
+    otherBackend: {
+      sessionId: 'claude-session-other',
+      backend: 'claude',
+      model: 'anthropic/claude-opus-4-7',
+      agentName: 'main',
     },
   });
   const manager = createConversationManager({
@@ -180,6 +191,7 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   assert.equal(manager.has('missing', AGENT), false);
   assert.equal(manager.has('persisted', AGENT), true);
   assert.equal(manager.has('otherAgent', AGENT), false);
+  assert.equal(manager.has('otherBackend', AGENT), false);
   assert.deepEqual(manager.getHandle('persisted', AGENT), {
     sessionId: 'pi-session-persisted',
     sessionFile: '/tmp/pi-session-persisted.jsonl',
@@ -282,4 +294,32 @@ test('conversation manager interrupts an active turn and lets the latest turn co
   assert.equal(secondResult.kind, 'ok');
   assert.equal(secondResult.text, 'latest:second');
   assert.equal(abortCount, 1);
+});
+
+test('conversation manager persists handles that only have a session id', async () => {
+  const { store, calls } = createMockConversationStore();
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: async () =>
+      createFakeAgentSession({
+        sessionId: 'agent-session-without-resume-ref',
+        resumeRef: undefined,
+      }),
+  });
+
+  const result = await manager.runTurn('thread-1', AGENT, 'hello');
+
+  assert.equal(result.kind, 'ok');
+  assert.deepEqual(calls.put, [
+    {
+      key: 'thread-1',
+      conversation: {
+        sessionId: 'agent-session-without-resume-ref',
+        backend: 'pi',
+        model: 'anthropic/claude-opus-4-7',
+        agentName: 'main',
+      },
+    },
+  ]);
 });

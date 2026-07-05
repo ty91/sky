@@ -8,9 +8,10 @@ export type ConversationHandle = {
 
 export type PersistedConversation = {
   sessionId: string;
-  sessionFile: string;
+  backend: string;
   model: string;
   agentName: string;
+  resumeRef?: string;
 };
 
 export interface ConversationStore {

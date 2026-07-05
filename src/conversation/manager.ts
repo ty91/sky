@@ -10,6 +10,8 @@ import type {
   PersistedConversation,
 } from './types.js';
 
+const DEFAULT_AGENT_BACKEND = 'pi';
+
 export type {
   ConversationHandle,
   ConversationManager,
@@ -33,6 +35,7 @@ type PendingTurn = {
 
 type ConversationEntry = {
   key: string;
+  backend: string;
   agentName: string;
   model: string;
   sessionPromise: Promise<AgentSession>;
@@ -65,6 +68,10 @@ function resolveAgentModel(agent: AgentConfig): string {
   return agent.model ?? '';
 }
 
+function resolveAgentBackend(_agent: AgentConfig): string {
+  return DEFAULT_AGENT_BACKEND;
+}
+
 function isConversationOwnedBy(
   conversation: PersistedConversation,
   agent: AgentConfig | undefined,
@@ -72,13 +79,31 @@ function isConversationOwnedBy(
   if (!agent) {
     return true;
   }
-  return conversation.agentName === agent.name && conversation.model === resolveAgentModel(agent);
+  return (
+    conversation.agentName === agent.name &&
+    conversation.model === resolveAgentModel(agent) &&
+    conversation.backend === resolveAgentBackend(agent)
+  );
 }
 
 function toHandle(session: AgentSession): ConversationHandle {
   return {
     sessionId: session.sessionId,
-    ...(session.resumeRef ? { sessionFile: session.resumeRef } : {}),
+    ...(session.resumeRef !== undefined ? { sessionFile: session.resumeRef } : {}),
+  };
+}
+
+function toPersistedHandle(conversation: PersistedConversation): ConversationHandle {
+  return {
+    sessionId: conversation.sessionId,
+    ...(conversation.resumeRef !== undefined ? { sessionFile: conversation.resumeRef } : {}),
+  };
+}
+
+function toResume(conversation: PersistedConversation): { sessionId: string; resumeRef?: string } {
+  return {
+    sessionId: conversation.sessionId,
+    ...(conversation.resumeRef !== undefined ? { resumeRef: conversation.resumeRef } : {}),
   };
 }
 
@@ -176,14 +201,15 @@ export function createConversationManager(options: ConversationManagerOptions): 
   }
 
   function persistConversation(entry: ConversationEntry, handle: ConversationHandle): void {
-    if (!handle.sessionFile || sessions.get(entry.key) !== entry) {
+    if (!handle.sessionId || sessions.get(entry.key) !== entry) {
       return;
     }
     options.store?.put(entry.key, {
       sessionId: handle.sessionId,
-      sessionFile: handle.sessionFile,
+      backend: entry.backend,
       model: entry.model,
       agentName: entry.agentName,
+      ...(handle.sessionFile !== undefined ? { resumeRef: handle.sessionFile } : {}),
     });
   }
 
@@ -201,19 +227,16 @@ export function createConversationManager(options: ConversationManagerOptions): 
         const persisted = getPersistedConversation(key, agent);
         entry = {
           key,
+          backend: resolveAgentBackend(agent),
           agentName: agent.name,
           model: resolveAgentModel(agent),
           sessionPromise: createSession({
             key,
             agent,
             cwd,
-            ...(persisted
-              ? { resume: { sessionId: persisted.sessionId, resumeRef: persisted.sessionFile } }
-              : {}),
+            ...(persisted ? { resume: toResume(persisted) } : {}),
           }),
-          ...(persisted
-            ? { handle: { sessionId: persisted.sessionId, sessionFile: persisted.sessionFile } }
-            : {}),
+          ...(persisted ? { handle: toPersistedHandle(persisted) } : {}),
           turnCounter: 0,
           activeTurnInterrupted: false,
           activeText: '',
@@ -252,7 +275,12 @@ export function createConversationManager(options: ConversationManagerOptions): 
     has(key, agent) {
       const entry = sessions.get(key);
       if (entry) {
-        return !agent || (entry.agentName === agent.name && entry.model === resolveAgentModel(agent));
+        return (
+          !agent ||
+          (entry.agentName === agent.name &&
+            entry.model === resolveAgentModel(agent) &&
+            entry.backend === resolveAgentBackend(agent))
+        );
       }
       return getPersistedConversation(key, agent) !== undefined;
     },
@@ -260,16 +288,19 @@ export function createConversationManager(options: ConversationManagerOptions): 
     getHandle(key, agent) {
       const entry = sessions.get(key);
       if (entry) {
-        if (agent && (entry.agentName !== agent.name || entry.model !== resolveAgentModel(agent))) {
+        if (
+          agent &&
+          (entry.agentName !== agent.name ||
+            entry.model !== resolveAgentModel(agent) ||
+            entry.backend !== resolveAgentBackend(agent))
+        ) {
           return undefined;
         }
         return entry.handle;
       }
 
       const persisted = getPersistedConversation(key, agent);
-      return persisted
-        ? { sessionId: persisted.sessionId, sessionFile: persisted.sessionFile }
-        : undefined;
+      return persisted ? toPersistedHandle(persisted) : undefined;
     },
 
     async close(key) {
