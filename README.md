@@ -11,7 +11,7 @@ Slack에서 Pi coding agent 기반 에이전트 봇을 **CLI + 데몬**으로 �
 - 채널 thread 중간에서 Sky를 처음 멘션하면 이전 thread 메시지가 첫 요청 앞에 포함됩니다.
 - `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 Pi resource/system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
-- `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, Pi model, workspace를 보여줍니다.
+- `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, model, agent backend, workspace를 보여줍니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`로 제한되어 있습니다.
 - 에이전트 작업 디렉토리(`cwd`)는 기본적으로 `~/.sky/workspace`로 고정됩니다.
 
@@ -47,6 +47,7 @@ pnpm install
     "appToken": "xapp-your-slack-app-token"
   },
   "model": "anthropic/claude-opus-4-7",
+  "agentBackend": "pi",
   "workspace": "/Users/taeyoung/.sky/workspace"
 }
 ```
@@ -54,6 +55,7 @@ pnpm install
 - `slack.botToken` — Slack bot token.
 - `slack.appToken` — Socket Mode용 app token.
 - `model` — 필수. Pi coding agent가 인식하는 `<provider>/<model>` 형식입니다.
+- `agentBackend`: 선택. 기본값 `pi`. `claude-agent-sdk` 값은 TY-6에서 구현될 때까지 명확한 미구현 에러를 냅니다.
 - `workspace` — 선택. 기본값 `~/.sky/workspace`. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
 - `slack` 설정은 필수입니다.
 
@@ -110,10 +112,10 @@ sky run
 - `sky status`는 다음 정보를 보여줍니다.
   - 프로세스 상태와 로그 파일 경로
   - Slack 설정 여부
-  - 설정 파일을 읽을 수 있는 경우 Pi model과 workspace
+  - 설정 파일을 읽을 수 있는 경우 model, agent backend, workspace
 - 데몬 PID/log 파일은 기본적으로 `~/.sky/` 아래에 저장됩니다.
-- Pi conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.
-- 저장 record에는 Pi session id, Pi session file, agent 이름, model이 들어갑니다.
+- Conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.
+- 저장 record에는 backend, session id, resume reference, agent 이름, model이 들어갑니다.
 
 ## 사용법
 

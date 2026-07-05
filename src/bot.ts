@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { App } from '@slack/bolt';
+import { resolveAgentSessionFactory } from './agents/backend/index.js';
 import { createMainAgentConfig } from './agents/main.js';
 import type { AgentConfig } from './agents/types.js';
 import { createConversationManager, type ConversationManager } from './conversation/manager.js';
@@ -206,7 +207,9 @@ export async function startBot(): Promise<void> {
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
   console.log(`[startup] model: ${settings.model}`);
+  console.log(`[startup] agent backend: ${settings.agentBackend}`);
   console.log(`[startup] workspace: ${settings.workspace}`);
+  const createSession = resolveAgentSessionFactory(settings.agentBackend);
 
   const scheduleRestart = makeRestartScheduler();
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
@@ -227,6 +230,7 @@ export async function startBot(): Promise<void> {
   const conversationManager: ConversationManager = createConversationManager({
     defaultCwd: settings.workspace,
     store: conversationStore,
+    createSession,
   });
 
   try {

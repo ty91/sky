@@ -19,7 +19,13 @@ export type CreateAgentSessionOptions = {
   resume?: { sessionId: string; resumeRef?: string };
 };
 
-export type AgentSessionFactory = (options: CreateAgentSessionOptions) => Promise<AgentSession>;
+export type AgentBackend = 'pi' | 'claude-agent-sdk';
+
+export type AgentSessionFactory = ((
+  options: CreateAgentSessionOptions,
+) => Promise<AgentSession>) & {
+  readonly backend: AgentBackend;
+};
 
 export type AgentToolResult = {
   content: { type: 'text'; text: string }[];

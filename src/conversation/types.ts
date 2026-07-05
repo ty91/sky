@@ -15,9 +15,9 @@ export type PersistedConversation = {
 };
 
 export interface ConversationStore {
-  get(key: string): PersistedConversation | undefined;
+  get(key: string, backend: string): PersistedConversation | undefined;
   put(key: string, conversation: PersistedConversation): void;
-  remove(key: string): void;
+  remove(key: string, backend: string): void;
   close(): void;
 }
 
