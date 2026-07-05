@@ -12,20 +12,8 @@ test('resolveAgentSessionFactory uses pi as the configured pi backend', () => {
   assert.equal(createSession.backend, 'pi');
 });
 
-test('resolveAgentSessionFactory exposes a clear pending error for claude-agent-sdk', async () => {
+test('resolveAgentSessionFactory exposes the claude-agent-sdk backend', () => {
   const createSession = resolveAgentSessionFactory('claude-agent-sdk');
 
   assert.equal(createSession.backend, 'claude-agent-sdk');
-  await assert.rejects(
-    () =>
-      createSession({
-        key: 'thread-1',
-        agent: {
-          name: 'main',
-          systemPrompt: 'system',
-        },
-        cwd: '/tmp/workspace',
-      }),
-    /Claude Agent SDK backend is not implemented yet/,
-  );
 });
