@@ -15,6 +15,7 @@ function printSettings(settings: Settings | undefined): void {
 
   console.log('slack app: configured');
   console.log(`model: ${settings.model}`);
+  console.log(`agent backend: ${settings.agentBackend}`);
   console.log(`workspace: ${settings.workspace}`);
 }
 

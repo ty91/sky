@@ -5,7 +5,7 @@ import { SKY_DIR } from '../settings.js';
 import type { ConversationStore, PersistedConversation } from './types.js';
 
 const DEFAULT_DB_PATH = path.join(SKY_DIR, 'sky.db');
-const CONVERSATION_SCHEMA_VERSION = '2';
+const CONVERSATION_SCHEMA_VERSION = '3';
 
 type StoreHandles = {
   db: DatabaseSync;
@@ -17,14 +17,15 @@ type StoreHandles = {
 function createConversationsTable(db: DatabaseSync, tableName = 'conversations'): void {
   db.exec(`
     CREATE TABLE ${tableName} (
-      key           TEXT PRIMARY KEY,
+      key           TEXT NOT NULL,
       session_id    TEXT NOT NULL,
       backend       TEXT NOT NULL,
       resume_ref    TEXT,
       model         TEXT NOT NULL,
       agent_name    TEXT NOT NULL,
       created_at    INTEGER NOT NULL,
-      updated_at    INTEGER NOT NULL
+      updated_at    INTEGER NOT NULL,
+      PRIMARY KEY (key, backend)
     )
   `);
 }
@@ -50,19 +51,40 @@ function setSchemaVersion(db: DatabaseSync): void {
   );
 }
 
-function migrateConversationsV1ToV2(db: DatabaseSync): void {
+function migrateConversationsV1ToV3(db: DatabaseSync): void {
   db.exec('BEGIN');
   try {
-    createConversationsTable(db, 'conversations_v2');
+    createConversationsTable(db, 'conversations_v3');
     db.exec(`
-      INSERT INTO conversations_v2
+      INSERT INTO conversations_v3
         (key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at)
       SELECT
         key, session_id, 'pi', session_file, model, agent_name, created_at, updated_at
       FROM conversations
     `);
     db.exec('DROP TABLE conversations');
-    db.exec('ALTER TABLE conversations_v2 RENAME TO conversations');
+    db.exec('ALTER TABLE conversations_v3 RENAME TO conversations');
+    setSchemaVersion(db);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateConversationsV2ToV3(db: DatabaseSync): void {
+  db.exec('BEGIN');
+  try {
+    createConversationsTable(db, 'conversations_v3');
+    db.exec(`
+      INSERT INTO conversations_v3
+        (key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at)
+      SELECT
+        key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at
+      FROM conversations
+    `);
+    db.exec('DROP TABLE conversations');
+    db.exec('ALTER TABLE conversations_v3 RENAME TO conversations');
     setSchemaVersion(db);
     db.exec('COMMIT');
   } catch (error) {
@@ -93,7 +115,11 @@ function ensureSchema(db: DatabaseSync): void {
     return;
   }
   if (version === '1') {
-    migrateConversationsV1ToV2(db);
+    migrateConversationsV1ToV3(db);
+    return;
+  }
+  if (version === '2') {
+    migrateConversationsV2ToV3(db);
     return;
   }
   if (version !== CONVERSATION_SCHEMA_VERSION) {
@@ -112,25 +138,24 @@ export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): Convers
   const handles: StoreHandles = {
     db,
     getStmt: db.prepare(
-      'SELECT session_id, backend, resume_ref, model, agent_name FROM conversations WHERE key = ?',
+      'SELECT session_id, backend, resume_ref, model, agent_name FROM conversations WHERE key = ? AND backend = ?',
     ),
     putStmt: db.prepare(
       `INSERT INTO conversations (key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET
+       ON CONFLICT(key, backend) DO UPDATE SET
          session_id = excluded.session_id,
-         backend = excluded.backend,
          resume_ref = excluded.resume_ref,
          model = excluded.model,
          agent_name = excluded.agent_name,
          updated_at = excluded.updated_at`,
     ),
-    removeStmt: db.prepare('DELETE FROM conversations WHERE key = ?'),
+    removeStmt: db.prepare('DELETE FROM conversations WHERE key = ? AND backend = ?'),
   };
 
   return {
-    get(key: string): PersistedConversation | undefined {
-      const row = handles.getStmt.get(key) as
+    get(key: string, backend: string): PersistedConversation | undefined {
+      const row = handles.getStmt.get(key, backend) as
         | {
             session_id: string;
             backend: string;
@@ -165,8 +190,8 @@ export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): Convers
       );
     },
 
-    remove(key: string): void {
-      handles.removeStmt.run(key);
+    remove(key: string, backend: string): void {
+      handles.removeStmt.run(key, backend);
     },
 
     close(): void {

@@ -1,5 +1,5 @@
 import { createDefaultAgentSessionFactory } from '../agents/backend/index.js';
-import type { AgentSession } from '../agents/backend/types.js';
+import type { AgentBackend, AgentSession } from '../agents/backend/types.js';
 import type { AgentConfig } from '../agents/types.js';
 import type {
   ConversationHandle,
@@ -9,8 +9,6 @@ import type {
   ConversationTurnResult,
   PersistedConversation,
 } from './types.js';
-
-const DEFAULT_AGENT_BACKEND = 'pi';
 
 export type {
   ConversationHandle,
@@ -68,13 +66,10 @@ function resolveAgentModel(agent: AgentConfig): string {
   return agent.model ?? '';
 }
 
-function resolveAgentBackend(_agent: AgentConfig): string {
-  return DEFAULT_AGENT_BACKEND;
-}
-
 function isConversationOwnedBy(
   conversation: PersistedConversation,
   agent: AgentConfig | undefined,
+  agentBackend: AgentBackend,
 ): boolean {
   if (!agent) {
     return true;
@@ -82,7 +77,7 @@ function isConversationOwnedBy(
   return (
     conversation.agentName === agent.name &&
     conversation.model === resolveAgentModel(agent) &&
-    conversation.backend === resolveAgentBackend(agent)
+    conversation.backend === agentBackend
   );
 }
 
@@ -187,14 +182,15 @@ async function runWorker(
 
 export function createConversationManager(options: ConversationManagerOptions): ConversationManager {
   const createSession = options.createSession ?? createDefaultAgentSessionFactory;
+  const agentBackend = createSession.backend;
   const sessions = new Map<string, ConversationEntry>();
 
   function getPersistedConversation(
     key: string,
     agent?: AgentConfig,
   ): PersistedConversation | undefined {
-    const persisted = options.store?.get(key);
-    if (!persisted || !isConversationOwnedBy(persisted, agent)) {
+    const persisted = options.store?.get(key, agentBackend);
+    if (!persisted || !isConversationOwnedBy(persisted, agent, agentBackend)) {
       return undefined;
     }
     return persisted;
@@ -227,7 +223,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
         const persisted = getPersistedConversation(key, agent);
         entry = {
           key,
-          backend: resolveAgentBackend(agent),
+          backend: agentBackend,
           agentName: agent.name,
           model: resolveAgentModel(agent),
           sessionPromise: createSession({
@@ -279,7 +275,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
           !agent ||
           (entry.agentName === agent.name &&
             entry.model === resolveAgentModel(agent) &&
-            entry.backend === resolveAgentBackend(agent))
+            entry.backend === agentBackend)
         );
       }
       return getPersistedConversation(key, agent) !== undefined;
@@ -292,7 +288,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
           agent &&
           (entry.agentName !== agent.name ||
             entry.model !== resolveAgentModel(agent) ||
-            entry.backend !== resolveAgentBackend(agent))
+            entry.backend !== agentBackend)
         ) {
           return undefined;
         }
@@ -333,7 +329,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
 
     async purge(key) {
       await manager.close(key);
-      options.store?.remove(key);
+      options.store?.remove(key, agentBackend);
     },
 
     async closeAll() {

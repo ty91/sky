@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
+import { resolveAgentSessionFactory } from '../agents/backend/index.js';
 import { runMemoryAgent } from '../agents/memory/agent.js';
 import { createConversationManager } from '../conversation/manager.js';
 
@@ -13,8 +14,10 @@ export const memoryCommand = new Command('memory')
   .action(async () => {
     const settings = loadSettings({ silent: true });
     console.log('[memory] starting L2 working memory agent...');
+    const createSession = resolveAgentSessionFactory(settings.agentBackend);
     const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,
+      createSession,
     });
 
     const result = await runMemoryAgent({

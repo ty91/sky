@@ -17,6 +17,38 @@ test('parseSettings accepts slack-only configuration', () => {
   });
   assert.equal(settings.model, 'anthropic/claude-opus-4-7');
   assert.equal(typeof settings.workspace, 'string');
+  assert.equal(settings.agentBackend, 'pi');
+});
+
+test('parseSettings accepts configured agent backend', () => {
+  const settings = parseSettings({
+    slack: {
+      botToken: 'xoxb-test',
+      appToken: 'xapp-test',
+    },
+    model: 'anthropic/claude-opus-4-7',
+    agentBackend: 'claude-agent-sdk',
+  });
+
+  assert.equal(settings.agentBackend, 'claude-agent-sdk');
+});
+
+test('parseSettings rejects unknown agent backend', () => {
+  assert.throws(
+    () =>
+      parseSettings({
+        slack: {
+          botToken: 'xoxb-test',
+          appToken: 'xapp-test',
+        },
+        model: 'anthropic/claude-opus-4-7',
+        agentBackend: 'unknown',
+      }),
+    (error) => {
+      assert.match(error.message, /Invalid option/);
+      return true;
+    },
+  );
 });
 
 test('parseSettings requires slack configuration', () => {

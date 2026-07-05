@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { loadSettings } from '../settings.js';
+import { resolveAgentSessionFactory } from '../agents/backend/index.js';
 import { runDreamAgent, dreamDailyFilePath, type DreamStep } from '../agents/dream/agent.js';
 import { createConversationManager } from '../conversation/manager.js';
 
@@ -28,9 +29,11 @@ export const dreamCommand = new Command('dream')
 
     const settings = loadSettings({ silent: true });
     console.log('[dream] starting L3 dream agent…');
+    const createSession = resolveAgentSessionFactory(settings.agentBackend);
 
     const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,
+      createSession,
     });
 
     const result = await runDreamAgent({

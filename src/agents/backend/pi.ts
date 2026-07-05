@@ -9,7 +9,12 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { z } from 'zod';
 import type { AgentConfig } from '../types.js';
-import type { AgentSession, AgentSessionFactory, AgentToolSpec } from './types.js';
+import type {
+  AgentSession,
+  AgentSessionFactory,
+  AgentToolSpec,
+  CreateAgentSessionOptions,
+} from './types.js';
 
 type PiSession = Awaited<ReturnType<typeof createAgentSession>>['session'];
 
@@ -120,7 +125,12 @@ function toAgentSession(session: PiSession): AgentSession {
   };
 }
 
-export const createPiSessionFactory: AgentSessionFactory = async ({ key, agent, cwd, resume }) => {
+const createPiSession = async ({
+  key,
+  agent,
+  cwd,
+  resume,
+}: CreateAgentSessionOptions): Promise<AgentSession> => {
   const agentDir = getAgentDir();
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
@@ -148,3 +158,7 @@ export const createPiSessionFactory: AgentSessionFactory = async ({ key, agent, 
   });
   return toAgentSession(session);
 };
+
+export const createPiSessionFactory: AgentSessionFactory = Object.assign(createPiSession, {
+  backend: 'pi' as const,
+});

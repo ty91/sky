@@ -15,6 +15,7 @@ const settingsSchema = z
   .object({
     slack: slackSettingsSchema,
     model: z.string().min(1),
+    agentBackend: z.enum(['pi', 'claude-agent-sdk']).default('pi'),
     workspace: z.string().default(path.join(os.homedir(), '.sky', 'workspace')),
   })
   .strict();
