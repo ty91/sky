@@ -9,16 +9,16 @@ const AGENT = {
   tools: ['read', 'bash'],
 };
 
-function createFakePiSession({
-  sessionId = 'pi-session-1',
-  sessionFile = '/tmp/pi-session-1.jsonl',
+function createFakeAgentSession({
+  sessionId = 'agent-session-1',
+  resumeRef = '/tmp/pi-session-1.jsonl',
   onPrompt,
   onAbort,
 } = {}) {
   const listeners = new Set();
   return {
     sessionId,
-    sessionFile,
+    resumeRef,
     prompt: async (text) => {
       if (onPrompt) {
         await onPrompt(text, (event) => {
@@ -28,8 +28,8 @@ function createFakePiSession({
       }
       for (const listener of listeners) {
         listener({
-          type: 'message_update',
-          assistantMessageEvent: { type: 'text_delta', delta: `reply to ${text}` },
+          type: 'text_delta',
+          delta: `reply to ${text}`,
         });
       }
     },
@@ -68,13 +68,13 @@ function createMockConversationStore(initial = {}) {
   };
 }
 
-test('conversation manager creates a Pi session for a new key and returns final text with handle', async () => {
+test('conversation manager creates an agent session for a new key and returns final text with handle', async () => {
   const created = [];
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     createSession: async (config) => {
       created.push(config);
-      return createFakePiSession();
+      return createFakeAgentSession();
     },
   });
 
@@ -84,7 +84,7 @@ test('conversation manager creates a Pi session for a new key and returns final 
     kind: 'ok',
     text: 'reply to hello',
     handle: {
-      sessionId: 'pi-session-1',
+      sessionId: 'agent-session-1',
       sessionFile: '/tmp/pi-session-1.jsonl',
     },
   });
@@ -96,15 +96,15 @@ test('conversation manager creates a Pi session for a new key and returns final 
   });
 });
 
-test('conversation manager persists successful Pi conversation handles', async () => {
+test('conversation manager persists successful agent conversation handles', async () => {
   const { store, calls } = createMockConversationStore();
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
     createSession: async () =>
-      createFakePiSession({
-        sessionId: 'pi-session-persisted',
-        sessionFile: '/tmp/pi-session-persisted.jsonl',
+      createFakeAgentSession({
+        sessionId: 'agent-session-persisted',
+        resumeRef: '/tmp/pi-session-persisted.jsonl',
       }),
   });
 
@@ -115,7 +115,7 @@ test('conversation manager persists successful Pi conversation handles', async (
     {
       key: 'thread-1',
       conversation: {
-        sessionId: 'pi-session-persisted',
+        sessionId: 'agent-session-persisted',
         sessionFile: '/tmp/pi-session-persisted.jsonl',
         model: 'anthropic/claude-opus-4-7',
         agentName: 'main',
@@ -124,7 +124,7 @@ test('conversation manager persists successful Pi conversation handles', async (
   ]);
 });
 
-test('conversation manager resumes a persisted Pi session file after restart', async () => {
+test('conversation manager resumes a persisted session file after restart', async () => {
   const { store } = createMockConversationStore({
     'thread-1': {
       sessionId: 'pi-session-existing',
@@ -139,9 +139,9 @@ test('conversation manager resumes a persisted Pi session file after restart', a
     store,
     createSession: async (config) => {
       created.push(config);
-      return createFakePiSession({
+      return createFakeAgentSession({
         sessionId: 'pi-session-existing',
-        sessionFile: '/tmp/pi-session-existing.jsonl',
+        resumeRef: '/tmp/pi-session-existing.jsonl',
       });
     },
   });
@@ -150,7 +150,10 @@ test('conversation manager resumes a persisted Pi session file after restart', a
 
   assert.equal(result.kind, 'ok');
   assert.equal(created.length, 1);
-  assert.equal(created[0].sessionFile, '/tmp/pi-session-existing.jsonl');
+  assert.deepEqual(created[0].resume, {
+    sessionId: 'pi-session-existing',
+    resumeRef: '/tmp/pi-session-existing.jsonl',
+  });
 });
 
 test('conversation manager has/getHandle/purge cover in-memory and persisted conversations', async () => {
@@ -171,7 +174,7 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
-    createSession: async () => createFakePiSession({ sessionId: 'pi-session-open' }),
+    createSession: async () => createFakeAgentSession({ sessionId: 'agent-session-open' }),
   });
 
   assert.equal(manager.has('missing', AGENT), false);
@@ -187,7 +190,7 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   assert.equal(manager.has('open', AGENT), true);
   assert.equal(manager.has('open', { ...AGENT, name: 'memory' }), false);
   assert.deepEqual(manager.getHandle('open', AGENT), {
-    sessionId: 'pi-session-open',
+    sessionId: 'agent-session-open',
     sessionFile: '/tmp/pi-session-1.jsonl',
   });
 
@@ -201,24 +204,24 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   assert.deepEqual(calls.remove, ['open', 'persisted']);
 });
 
-test('conversation manager forwards Pi text deltas to the caller callback', async () => {
+test('conversation manager forwards agent text deltas to the caller callback', async () => {
   const deltas = [];
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     createSession: async () =>
-      createFakePiSession({
+      createFakeAgentSession({
         onPrompt: async (_text, emit) => {
           emit({
-            type: 'message_update',
-            assistantMessageEvent: { type: 'text_delta', delta: 'hello ' },
+            type: 'text_delta',
+            delta: 'hello ',
           });
           emit({
-            type: 'message_update',
-            assistantMessageEvent: { type: 'thinking_delta', delta: 'hidden' },
+            type: 'thinking_delta',
+            delta: 'hidden',
           });
           emit({
-            type: 'message_update',
-            assistantMessageEvent: { type: 'text_delta', delta: 'world' },
+            type: 'text_delta',
+            delta: 'world',
           });
         },
       }),
@@ -243,13 +246,13 @@ test('conversation manager interrupts an active turn and lets the latest turn co
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     createSession: async () =>
-      createFakePiSession({
+      createFakeAgentSession({
         onPrompt: async (text, emit) => {
           promptCount += 1;
           if (promptCount === 1) {
             emit({
-              type: 'message_update',
-              assistantMessageEvent: { type: 'text_delta', delta: `stale:${text}` },
+              type: 'text_delta',
+              delta: `stale:${text}`,
             });
             await new Promise((resolve) => {
               releaseFirstPrompt = resolve;
@@ -258,8 +261,8 @@ test('conversation manager interrupts an active turn and lets the latest turn co
           }
 
           emit({
-            type: 'message_update',
-            assistantMessageEvent: { type: 'text_delta', delta: `latest:${text}` },
+            type: 'text_delta',
+            delta: `latest:${text}`,
           });
         },
         onAbort: async () => {
