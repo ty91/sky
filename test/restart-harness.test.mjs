@@ -89,7 +89,7 @@ console.log('restart-harness-ok');
   }
 });
 
-test('main agent exposes restart_harness as a Pi custom tool bound to Slack session context', async () => {
+test('main agent exposes restart_harness as a backend-neutral tool spec bound to Slack session context', async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-restart-pi-tool-'));
 
   try {
@@ -118,11 +118,7 @@ const tools = agentWithFakeSignal.customToolsFactory({ sessionKey: 'C123:111.22'
 assert.equal(tools.length, 1);
 assert.equal(tools[0].name, 'restart_harness');
 
-const result = await tools[0].execute('tool-1', { reason: 'reload' }, undefined, undefined, {
-  signal: undefined,
-  isIdle: () => false,
-  shutdown: () => undefined,
-});
+const result = await tools[0].execute({ reason: 'reload' });
 
 assert.match(result.content[0].text, /Restart scheduled/);
 assert.deepEqual(result.details, {
@@ -137,7 +133,7 @@ assert.equal(pending.channelId, 'C123');
 assert.equal(pending.threadTs, '111.22');
 assert.equal(pending.reason, 'reload');
 assert.deepEqual(signals, [{ pid: process.pid, signal: 'SIGUSR2' }]);
-console.log('restart-pi-tool-ok');
+console.log('restart-tool-spec-ok');
         `,
       ],
       {
@@ -147,7 +143,90 @@ console.log('restart-pi-tool-ok');
       },
     );
 
-    assert.match(output, /restart-pi-tool-ok/);
+    assert.match(output, /restart-tool-spec-ok/);
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('Pi adapter converts backend-neutral tool specs to Pi tool definitions', async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-pi-tool-adapter-'));
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+import assert from 'node:assert/strict';
+import { z } from 'zod';
+import { toPiToolDefinition } from './dist/agents/backend/pi.js';
+
+const calls = [];
+const piTool = toPiToolDefinition({
+  name: 'sample_tool',
+  label: 'Sample tool',
+  description: 'Run a sample tool.',
+  inputSchema: {
+    message: z.string(),
+  },
+  execute: async (input) => {
+    calls.push(input);
+    return {
+      content: [{ type: 'text', text: 'ok' }],
+      details: { echoed: input.message },
+    };
+  },
+});
+
+assert.equal(piTool.name, 'sample_tool');
+assert.equal(piTool.label, 'Sample tool');
+assert.equal(piTool.description, 'Run a sample tool.');
+assert.equal(piTool.executionMode, 'sequential');
+assert.deepEqual(piTool.parameters.properties.message, { type: 'string' });
+
+const result = await piTool.execute('tool-1', { message: 'hello' }, undefined, undefined, {
+  signal: undefined,
+  isIdle: () => false,
+  shutdown: () => undefined,
+});
+
+assert.deepEqual(calls, [{ message: 'hello' }]);
+assert.deepEqual(result, {
+  content: [{ type: 'text', text: 'ok' }],
+  details: { echoed: 'hello' },
+});
+
+const failingTool = toPiToolDefinition({
+  name: 'failing_tool',
+  description: 'Fail.',
+  inputSchema: {},
+  execute: async () => ({
+    content: [{ type: 'text', text: 'nope' }],
+    isError: true,
+  }),
+});
+await assert.rejects(
+  () => failingTool.execute('tool-2', {}, undefined, undefined, {
+    signal: undefined,
+    isIdle: () => false,
+    shutdown: () => undefined,
+  }),
+  /nope/,
+);
+
+console.log('pi-tool-adapter-ok');
+        `,
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: homeDir },
+        encoding: 'utf8',
+      },
+    );
+
+    assert.match(output, /pi-tool-adapter-ok/);
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
@@ -195,11 +274,7 @@ try {
   assert.deepEqual(tools.map((tool) => tool.name), ['restart_harness', 'slack_attach_files']);
 
   const attachTool = tools.find((tool) => tool.name === 'slack_attach_files');
-  const result = await attachTool.execute('tool-1', { paths: [filePath] }, undefined, undefined, {
-    signal: undefined,
-    isIdle: () => false,
-    shutdown: () => undefined,
-  });
+  const result = await attachTool.execute({ paths: [filePath] });
 
   assert.deepEqual(uploadCalls, [
     {
@@ -269,12 +344,7 @@ const unavailableTool = agent
   .customToolsFactory({ sessionKey: 'C123:111.22' })
   .find((tool) => tool.name === 'slack_attach_files');
 await assert.rejects(
-  () =>
-    unavailableTool.execute('tool-1', { paths: [filePath] }, undefined, undefined, {
-      signal: undefined,
-      isIdle: () => false,
-      shutdown: () => undefined,
-    }),
+  () => unavailableTool.execute({ paths: [filePath] }),
   /Slack app is not ready/,
 );
 

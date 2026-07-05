@@ -5,9 +5,11 @@ import {
   getAgentDir,
   ModelRegistry,
   SessionManager as PiSessionManager,
+  type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import { z } from 'zod';
 import type { AgentConfig } from '../types.js';
-import type { AgentSession, AgentSessionFactory } from './types.js';
+import type { AgentSession, AgentSessionFactory, AgentToolSpec } from './types.js';
 
 type PiSession = Awaited<ReturnType<typeof createAgentSession>>['session'];
 
@@ -81,6 +83,26 @@ function extractPiTextDelta(event: PiSessionEvent): string | undefined {
   return assistantEvent.delta;
 }
 
+export function toPiToolDefinition(spec: AgentToolSpec): ToolDefinition {
+  return {
+    name: spec.name,
+    label: spec.label ?? spec.name,
+    description: spec.description,
+    parameters: z.toJSONSchema(z.object(spec.inputSchema)) as unknown as ToolDefinition['parameters'],
+    executionMode: 'sequential',
+    async execute(_toolCallId, params) {
+      const result = await spec.execute(params);
+      if (result.isError) {
+        throw new Error(result.content.map((item) => item.text).join('\n'));
+      }
+      return {
+        content: result.content,
+        details: result.details,
+      };
+    },
+  };
+}
+
 function toAgentSession(session: PiSession): AgentSession {
   return {
     sessionId: session.sessionId,
@@ -110,7 +132,7 @@ export const createPiSessionFactory: AgentSessionFactory = async ({ key, agent, 
     noContextFiles: true,
   });
   await resourceLoader.reload();
-  const customTools = agent.customToolsFactory?.({ sessionKey: key });
+  const customTools = agent.customToolsFactory?.({ sessionKey: key }).map(toPiToolDefinition);
   const { session } = await createAgentSession({
     cwd,
     agentDir,

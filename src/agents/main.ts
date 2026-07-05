@@ -1,12 +1,12 @@
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
-  createRestartHarnessPiTool,
+  createRestartHarnessToolSpec,
   RESTART_HARNESS_TOOL_NAME,
 } from './tools/restart-harness.js';
 import {
-  createSlackAttachFilesPiTool,
+  createSlackAttachFilesToolSpec,
   SLACK_ATTACH_FILES_TOOL_NAME,
 } from './tools/slack-attach-files.js';
+import type { AgentToolSpec } from './backend/types.js';
 import type { AgentConfig } from './types.js';
 import type { SlackFileUploader } from '../slack/files.js';
 
@@ -61,8 +61,8 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
     tools: [...MAIN_AGENT_TOOLS],
     customToolsFactory: ({ sessionKey }) => {
       const { channelId, threadTs } = parseSessionKey(sessionKey);
-      const tools: ToolDefinition<any, any, any>[] = [
-        createRestartHarnessPiTool(
+      const tools: AgentToolSpec[] = [
+        createRestartHarnessToolSpec(
           {
             sessionKey,
             channelId,
@@ -75,7 +75,7 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
 
       if (options.slackFileUploaderProvider) {
         tools.push(
-          createSlackAttachFilesPiTool(
+          createSlackAttachFilesToolSpec(
             {
               channelId,
               threadTs,
