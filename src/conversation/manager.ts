@@ -1,22 +1,13 @@
-import {
-  AuthStorage,
-  createAgentSession,
-  DefaultResourceLoader,
-  getAgentDir,
-  ModelRegistry,
-  SessionManager as PiSessionManager,
-} from '@earendil-works/pi-coding-agent';
+import { createDefaultAgentSessionFactory } from '../agents/backend/index.js';
+import type { AgentSession } from '../agents/backend/types.js';
 import type { AgentConfig } from '../agents/types.js';
 import type {
   ConversationHandle,
   ConversationManager,
   ConversationManagerOptions,
-  ConversationSessionFactory,
   ConversationTurnOptions,
   ConversationTurnResult,
   PersistedConversation,
-  PiAgentSession,
-  PiSessionEvent,
 } from './types.js';
 
 export type {
@@ -44,7 +35,7 @@ type ConversationEntry = {
   key: string;
   agentName: string;
   model: string;
-  sessionPromise: Promise<PiAgentSession>;
+  sessionPromise: Promise<AgentSession>;
   handle?: ConversationHandle;
   unsubscribe?: () => void;
   turnCounter: number;
@@ -84,119 +75,30 @@ function isConversationOwnedBy(
   return conversation.agentName === agent.name && conversation.model === resolveAgentModel(agent);
 }
 
-function toHandle(session: PiAgentSession): ConversationHandle {
+function toHandle(session: AgentSession): ConversationHandle {
   return {
     sessionId: session.sessionId,
-    ...(session.sessionFile ? { sessionFile: session.sessionFile } : {}),
+    ...(session.resumeRef ? { sessionFile: session.resumeRef } : {}),
   };
 }
 
-function extractTextDelta(event: PiSessionEvent): string | undefined {
-  if (event.type !== 'message_update') {
-    return undefined;
-  }
-  const assistantEvent = event.assistantMessageEvent;
-  if (assistantEvent?.type !== 'text_delta' || typeof assistantEvent.delta !== 'string') {
-    return undefined;
-  }
-  return assistantEvent.delta;
-}
-
-function wireStreaming(entry: ConversationEntry, session: PiAgentSession): void {
+function wireStreaming(entry: ConversationEntry, session: AgentSession): void {
   if (entry.unsubscribe) {
     return;
   }
 
   entry.unsubscribe = session.subscribe((event) => {
-    const delta = extractTextDelta(event);
-    if (delta === undefined || entry.activeTurnId === undefined || entry.activeTurnInterrupted) {
+    if (event.type !== 'text_delta' || entry.activeTurnId === undefined || entry.activeTurnInterrupted) {
       return;
     }
 
-    entry.activeText += delta;
-    const maybeTask = entry.activeOptions?.onTextDelta?.(delta);
+    entry.activeText += event.delta;
+    const maybeTask = entry.activeOptions?.onTextDelta?.(event.delta);
     if (maybeTask) {
       entry.activeDeltaTasks.push(Promise.resolve(maybeTask));
     }
   });
 }
-
-function resolveModel(modelRegistry: ModelRegistry, modelName: string) {
-  const slash = modelName.indexOf('/');
-  if (slash <= 0 || slash === modelName.length - 1) {
-    throw new Error(`Invalid Pi model name: ${modelName}`);
-  }
-
-  const provider = modelName.slice(0, slash);
-  const modelId = modelName.slice(slash + 1);
-  const model = modelRegistry.find(provider, modelId);
-  if (!model) {
-    throw new Error(`Pi model not found: ${modelName}`);
-  }
-  return model;
-}
-
-function resolveSystemPrompt(agent: AgentConfig): string {
-  return agent.systemPromptLoader ? agent.systemPromptLoader() : agent.systemPrompt;
-}
-
-function toPiToolNames(tools: string[] | undefined): string[] | undefined {
-  if (!tools) {
-    return undefined;
-  }
-
-  const names = tools.map((tool) => {
-    switch (tool) {
-      case 'Bash':
-        return 'bash';
-      case 'Edit':
-        return 'edit';
-      case 'Find':
-      case 'Glob':
-        return 'find';
-      case 'Grep':
-        return 'grep';
-      case 'Ls':
-        return 'ls';
-      case 'Read':
-        return 'read';
-      case 'Write':
-        return 'write';
-      default:
-        return tool;
-    }
-  });
-  return [...new Set(names)];
-}
-
-export const createDefaultPiSession: ConversationSessionFactory = async ({ key, agent, cwd, sessionFile }) => {
-  const agentDir = getAgentDir();
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const model = agent.model ? resolveModel(modelRegistry, agent.model) : undefined;
-  const resourceLoader = new DefaultResourceLoader({
-    cwd,
-    agentDir,
-    systemPrompt: resolveSystemPrompt(agent),
-    noContextFiles: true,
-  });
-  await resourceLoader.reload();
-  const customTools = agent.customToolsFactory?.({ sessionKey: key });
-  const { session } = await createAgentSession({
-    cwd,
-    agentDir,
-    authStorage,
-    modelRegistry,
-    ...(model ? { model } : {}),
-    ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),
-    ...(customTools ? { customTools } : {}),
-    resourceLoader,
-    sessionManager: sessionFile
-      ? PiSessionManager.open(sessionFile, undefined, cwd)
-      : PiSessionManager.create(cwd),
-  });
-  return session;
-};
 
 async function runWorker(
   sessions: Map<string, ConversationEntry>,
@@ -259,7 +161,7 @@ async function runWorker(
 }
 
 export function createConversationManager(options: ConversationManagerOptions): ConversationManager {
-  const createSession = options.createSession ?? createDefaultPiSession;
+  const createSession = options.createSession ?? createDefaultAgentSessionFactory;
   const sessions = new Map<string, ConversationEntry>();
 
   function getPersistedConversation(
@@ -285,7 +187,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
     });
   }
 
-  async function getSession(entry: ConversationEntry): Promise<PiAgentSession> {
+  async function getSession(entry: ConversationEntry): Promise<AgentSession> {
     const session = await entry.sessionPromise;
     wireStreaming(entry, session);
     return session;
@@ -305,8 +207,10 @@ export function createConversationManager(options: ConversationManagerOptions): 
             key,
             agent,
             cwd,
-            ...(persisted ? { sessionFile: persisted.sessionFile } : {}),
-          }) as Promise<PiAgentSession>,
+            ...(persisted
+              ? { resume: { sessionId: persisted.sessionId, resumeRef: persisted.sessionFile } }
+              : {}),
+          }),
           ...(persisted
             ? { handle: { sessionId: persisted.sessionId, sessionFile: persisted.sessionFile } }
             : {}),
@@ -409,4 +313,3 @@ export function createConversationManager(options: ConversationManagerOptions): 
 
   return manager;
 }
-
