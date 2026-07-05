@@ -1,4 +1,5 @@
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { z } from 'zod';
+import type { AgentToolSpec } from '../backend/types.js';
 import { requestRestart, type PendingRestart } from '../../runtime/pending-restart.js';
 
 /**
@@ -29,7 +30,7 @@ export type RestartHarnessToolResult = {
   isError?: boolean;
 };
 
-export type RestartHarnessPiToolDetails = {
+export type RestartHarnessToolDetails = {
   sessionKey: string;
   channelId: string;
   threadTs: string;
@@ -88,33 +89,26 @@ export function runRestartHarnessTool(
   };
 }
 
-const RESTART_HARNESS_PARAMETERS = {
-  type: 'object',
-  properties: {
-    reason: {
-      type: 'string',
-      description:
-        'Short human-readable reason for the restart, surfaced back to you in the post-restart notice.',
-    },
-  },
-  additionalProperties: false,
-} as unknown as ToolDefinition['parameters'];
+const RESTART_HARNESS_INPUT_SCHEMA = {
+  reason: z
+    .string()
+    .describe('Short human-readable reason for the restart, surfaced back to you in the post-restart notice.')
+    .optional(),
+};
 
-export function createRestartHarnessPiTool(
+export function createRestartHarnessToolSpec(
   ctx: RestartHarnessContext,
   signalParent: (pid: number, signal: NodeJS.Signals) => void = process.kill,
-): ToolDefinition<typeof RESTART_HARNESS_PARAMETERS, RestartHarnessPiToolDetails> {
+): AgentToolSpec {
   return {
     name: RESTART_HARNESS_TOOL_NAME,
     label: 'Restart harness',
     description: RESTART_HARNESS_DESCRIPTION,
-    parameters: RESTART_HARNESS_PARAMETERS,
-    executionMode: 'sequential',
-    async execute(_toolCallId, params) {
-      const input = params as RestartHarnessInput;
-      const result = runRestartHarnessTool(ctx, input, signalParent);
+    inputSchema: RESTART_HARNESS_INPUT_SCHEMA,
+    async execute(input) {
+      const result = runRestartHarnessTool(ctx, input as RestartHarnessInput, signalParent);
       if (result.isError) {
-        throw new Error(result.content.map((item) => item.text).join('\n'));
+        return result;
       }
 
       return {

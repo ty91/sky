@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { AgentToolSpec } from './backend/types.js';
 
 /**
  * Context handed to per-session tool factories when a session opens. Lets
@@ -8,7 +8,7 @@ export type McpFactoryContext = {
   sessionKey: string;
 };
 
-export type PiCustomToolsFactory = (ctx: McpFactoryContext) => ToolDefinition<any, any, any>[];
+export type AgentToolSpecFactory = (ctx: McpFactoryContext) => AgentToolSpec[];
 
 export type AgentConfig = {
   name: string;
@@ -26,8 +26,8 @@ export type AgentConfig = {
    * loader and continue from the Pi session file.
    */
   systemPromptLoader?: () => string;
-  /** Optional factory for per-session Pi custom tools. */
-  customToolsFactory?: PiCustomToolsFactory;
+  /** Optional factory for per-session custom tools. */
+  customToolsFactory?: AgentToolSpecFactory;
   model?: string;
   tools?: string[];
   maxTurns?: number;

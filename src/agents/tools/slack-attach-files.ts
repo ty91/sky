@@ -1,6 +1,7 @@
 import { constants as fsConstants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { z } from 'zod';
+import type { AgentToolSpec } from '../backend/types.js';
 import {
   SlackFileUploadError,
   type SlackFileUploadFailure,
@@ -32,18 +33,9 @@ export type SlackAttachFilesToolResult = {
   details: SlackAttachFilesToolDetails;
 };
 
-const SLACK_ATTACH_FILES_PARAMETERS = {
-  type: 'object',
-  properties: {
-    paths: {
-      type: 'array',
-      items: { type: 'string' },
-      minItems: 1,
-    },
-  },
-  required: ['paths'],
-  additionalProperties: false,
-} as unknown as ToolDefinition['parameters'];
+const SLACK_ATTACH_FILES_INPUT_SCHEMA = {
+  paths: z.array(z.string()).min(1),
+};
 
 export async function runSlackAttachFilesTool(
   ctx: SlackAttachFilesContext,
@@ -83,10 +75,10 @@ export async function runSlackAttachFilesTool(
   }
 }
 
-export function createSlackAttachFilesPiTool(
+export function createSlackAttachFilesToolSpec(
   ctx: SlackAttachFilesContext,
   uploader: SlackFileUploader,
-): ToolDefinition<typeof SLACK_ATTACH_FILES_PARAMETERS, SlackAttachFilesToolDetails> {
+): AgentToolSpec {
   return {
     name: SLACK_ATTACH_FILES_TOOL_NAME,
     label: 'Attach Slack files',
@@ -95,10 +87,9 @@ export function createSlackAttachFilesPiTool(
       'Use only when the user explicitly asks you to attach or share local files.',
       'Provide local filesystem paths only. Do not include comments or titles.',
     ].join('\n'),
-    parameters: SLACK_ATTACH_FILES_PARAMETERS,
-    executionMode: 'sequential',
-    async execute(_toolCallId, params) {
-      return runSlackAttachFilesTool(ctx, params as SlackAttachFilesInput, uploader);
+    inputSchema: SLACK_ATTACH_FILES_INPUT_SCHEMA,
+    async execute(input) {
+      return runSlackAttachFilesTool(ctx, input as SlackAttachFilesInput, uploader);
     },
   };
 }

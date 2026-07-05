@@ -1,4 +1,5 @@
 import type { AgentConfig } from '../types.js';
+import type { ZodRawShape } from 'zod';
 
 export type AgentSessionEvent = { type: 'text_delta'; delta: string };
 
@@ -19,3 +20,17 @@ export type CreateAgentSessionOptions = {
 };
 
 export type AgentSessionFactory = (options: CreateAgentSessionOptions) => Promise<AgentSession>;
+
+export type AgentToolResult = {
+  content: { type: 'text'; text: string }[];
+  details?: unknown;
+  isError?: boolean;
+};
+
+export type AgentToolSpec = {
+  name: string;
+  label?: string;
+  description: string;
+  inputSchema: ZodRawShape;
+  execute(input: unknown): Promise<AgentToolResult>;
+};
