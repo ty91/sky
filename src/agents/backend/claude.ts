@@ -218,6 +218,7 @@ function resolveClaudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 class ClaudeAgentSdkSession implements AgentSession {
   private sessionIdValue: string;
   private activeTurn?: ActiveTurn;
+  private disposed = false;
   private readonly listeners = new Set<(event: AgentSessionEvent) => void>();
   private readonly customTools: AgentToolSpec[];
   private readonly customToolNames: Set<string>;
@@ -247,6 +248,9 @@ class ClaudeAgentSdkSession implements AgentSession {
   }
 
   async prompt(text: string): Promise<void> {
+    if (this.disposed) {
+      throw new Error('Claude Agent SDK session has been disposed.');
+    }
     if (this.activeTurn) {
       throw new Error('Claude Agent SDK session already has an active turn.');
     }
@@ -324,6 +328,7 @@ class ClaudeAgentSdkSession implements AgentSession {
   }
 
   dispose(): void {
+    this.disposed = true;
     const turn = this.activeTurn;
     if (turn) {
       turn.interrupted = true;
