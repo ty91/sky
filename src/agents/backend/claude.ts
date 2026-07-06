@@ -74,6 +74,13 @@ function resolveSystemPrompt(agent: AgentConfig): string {
   return agent.systemPromptLoader ? agent.systemPromptLoader() : agent.systemPrompt;
 }
 
+function resolveSessionSystemPrompt(agent: AgentConfig, resume: CreateAgentSessionOptions['resume']): string {
+  if (resume) {
+    return resume.systemPrompt || agent.systemPrompt;
+  }
+  return resolveSystemPrompt(agent);
+}
+
 function resolveClaudeModel(modelName: string | undefined): string | undefined {
   if (!modelName) {
     return undefined;
@@ -245,6 +252,7 @@ class ClaudeAgentSdkSession implements AgentSession {
   private readonly customToolNames: Set<string>;
   private readonly mcpServer: ReturnType<typeof sdkCreateSdkMcpServer>;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly systemPromptValue: string;
 
   constructor(
     private readonly options: CreateAgentSessionOptions,
@@ -258,6 +266,7 @@ class ClaudeAgentSdkSession implements AgentSession {
       tools: this.customTools.map((toolSpec) => toSdkTool(toolSpec, deps)),
     });
     this.env = resolveClaudeEnv(deps.env ?? process.env);
+    this.systemPromptValue = resolveSessionSystemPrompt(options.agent, options.resume);
   }
 
   get sessionId(): string {
@@ -266,6 +275,10 @@ class ClaudeAgentSdkSession implements AgentSession {
 
   get resumeRef(): undefined {
     return undefined;
+  }
+
+  get systemPrompt(): string {
+    return this.systemPromptValue;
   }
 
   async prompt(text: string): Promise<void> {
@@ -379,7 +392,7 @@ class ClaudeAgentSdkSession implements AgentSession {
     // concurrency cap is intentionally out of this slice's scope.
     return {
       cwd: this.options.cwd,
-      systemPrompt: resolveSystemPrompt(this.options.agent),
+      systemPrompt: this.systemPromptValue,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: [],

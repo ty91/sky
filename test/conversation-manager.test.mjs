@@ -11,6 +11,7 @@ const AGENT = {
 
 function createFakeAgentSession({
   sessionId = 'agent-session-1',
+  systemPrompt,
   onPrompt,
   onAbort,
   ...options
@@ -20,6 +21,7 @@ function createFakeAgentSession({
   return {
     sessionId,
     ...(resumeRef !== undefined ? { resumeRef } : {}),
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     prompt: async (text) => {
       if (onPrompt) {
         await onPrompt(text, (event) => {
@@ -149,6 +151,7 @@ test('conversation manager resumes a persisted session file after restart', asyn
       resumeRef: '/tmp/pi-session-existing.jsonl',
       model: 'anthropic/claude-opus-4-7',
       agentName: 'main',
+      systemPrompt: 'frozen prompt',
     },
   });
   const created = [];
@@ -171,6 +174,7 @@ test('conversation manager resumes a persisted session file after restart', asyn
   assert.deepEqual(created[0].resume, {
     sessionId: 'pi-session-existing',
     resumeRef: '/tmp/pi-session-existing.jsonl',
+    systemPrompt: 'frozen prompt',
   });
 });
 
@@ -387,6 +391,7 @@ test('conversation manager persists the injected session factory backend', async
       createFakeAgentSession({
         sessionId: 'claude-session-1',
         resumeRef: undefined,
+        systemPrompt: 'frozen prompt',
       }),
     { backend: 'claude-agent-sdk' },
   );
@@ -407,6 +412,7 @@ test('conversation manager persists the injected session factory backend', async
         backend: 'claude-agent-sdk',
         model: 'anthropic/claude-opus-4-7',
         agentName: 'main',
+        systemPrompt: 'frozen prompt',
       },
     },
   ]);

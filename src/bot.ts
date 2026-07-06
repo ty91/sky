@@ -215,9 +215,9 @@ export async function startBot(): Promise<void> {
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
 
-  // `initialPrompt` is the static fallback for agents that cannot reload.
-  // `loadPrompt` runs again on every new Pi session so edits to SOUL.md /
-  // AGENTS.md / USER.md / MEMORY.md take effect without a restart.
+  // `initialPrompt` is the static fallback for resumed sessions that have no
+  // stored snapshot. `loadPrompt` runs again on new sessions so prompt file
+  // edits take effect without a restart.
   const mainAgent = createMainAgentConfig({
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,

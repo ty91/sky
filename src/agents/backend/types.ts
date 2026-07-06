@@ -8,6 +8,7 @@ export type AgentSessionEvent =
 export type AgentSession = {
   readonly sessionId: string;
   readonly resumeRef?: string;
+  readonly systemPrompt?: string;
   prompt(text: string): Promise<void>;
   abort(): Promise<void>;
   dispose(): void;
@@ -18,7 +19,7 @@ export type CreateAgentSessionOptions = {
   key: string;
   agent: AgentConfig;
   cwd: string;
-  resume?: { sessionId: string; resumeRef?: string };
+  resume?: { sessionId: string; resumeRef?: string; systemPrompt?: string };
 };
 
 export type AgentBackend = 'pi' | 'claude-agent-sdk';

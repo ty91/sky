@@ -236,7 +236,7 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
   });
 });
 
-test('claude agent sdk session resumes by session id and reloads system prompt every turn', async () => {
+test('claude agent sdk session freezes the loaded system prompt for the session', async () => {
   const prompts = [];
   const options = [];
   let loaderCalls = 0;
@@ -256,7 +256,6 @@ test('claude agent sdk session resumes by session id and reloads system prompt e
   const session = await createSession({
     key: 'thread-1',
     cwd: '/tmp/workspace',
-    resume: { sessionId: 'claude-session-existing' },
     agent: {
       name: 'main',
       systemPrompt: 'fallback',
@@ -269,14 +268,97 @@ test('claude agent sdk session resumes by session id and reloads system prompt e
   await session.prompt('two');
 
   assert.deepEqual(prompts, ['one', 'two']);
+  assert.equal(loaderCalls, 1);
+  assert.equal(session.systemPrompt, 'loaded-1');
+  assert.deepEqual(
+    options.map((option) => option.resume),
+    [undefined, 'claude-session-existing'],
+  );
+  assert.deepEqual(
+    options.map((option) => option.systemPrompt),
+    ['loaded-1', 'loaded-1'],
+  );
+});
+
+test('claude agent sdk session resumes with the stored system prompt snapshot', async () => {
+  const prompts = [];
+  const options = [];
+  let loaderCalls = 0;
+  const { deps } = createFakeDeps({
+    env: { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
+    query: (params) =>
+      createQuery(async function* () {
+        options.push(params.options);
+        const input = params.prompt[Symbol.asyncIterator]();
+        prompts.push((await input.next()).value.message.content);
+        yield initMessage('claude-session-existing');
+        yield successResult('claude-session-existing');
+        await input.next();
+      }),
+  });
+  const createSession = createClaudeAgentSdkSessionFactory(deps);
+  const session = await createSession({
+    key: 'thread-1',
+    cwd: '/tmp/workspace',
+    resume: { sessionId: 'claude-session-existing', systemPrompt: 'stored prompt' },
+    agent: {
+      name: 'main',
+      systemPrompt: 'fallback',
+      systemPromptLoader: () => `loaded-${++loaderCalls}`,
+      model: 'anthropic/claude-sonnet-4-6',
+    },
+  });
+
+  await session.prompt('one');
+  await session.prompt('two');
+
+  assert.deepEqual(prompts, ['one', 'two']);
+  assert.equal(loaderCalls, 0);
+  assert.equal(session.systemPrompt, 'stored prompt');
   assert.deepEqual(
     options.map((option) => option.resume),
     ['claude-session-existing', 'claude-session-existing'],
   );
   assert.deepEqual(
     options.map((option) => option.systemPrompt),
-    ['loaded-1', 'loaded-2'],
+    ['stored prompt', 'stored prompt'],
   );
+});
+
+test('claude agent sdk resumed legacy session falls back without reloading prompt files', async () => {
+  let loaderCalls = 0;
+  let queryOptions;
+  const { deps } = createFakeDeps({
+    env: { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
+    query: (params) => {
+      queryOptions = params.options;
+      return createQuery(async function* () {
+        const input = params.prompt[Symbol.asyncIterator]();
+        await input.next();
+        yield initMessage('claude-session-existing');
+        yield successResult('claude-session-existing');
+        await input.next();
+      });
+    },
+  });
+  const createSession = createClaudeAgentSdkSessionFactory(deps);
+  const session = await createSession({
+    key: 'thread-1',
+    cwd: '/tmp/workspace',
+    resume: { sessionId: 'claude-session-existing' },
+    agent: {
+      name: 'main',
+      systemPrompt: 'fallback',
+      systemPromptLoader: () => `loaded-${++loaderCalls}`,
+      model: 'anthropic/claude-sonnet-4-6',
+    },
+  });
+
+  await session.prompt('one');
+
+  assert.equal(loaderCalls, 0);
+  assert.equal(session.systemPrompt, 'fallback');
+  assert.equal(queryOptions.systemPrompt, 'fallback');
 });
 
 test('claude agent sdk abort interrupts the active query and swallows the sdk diagnostic quirk', async () => {

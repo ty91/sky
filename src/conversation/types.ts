@@ -12,6 +12,7 @@ export type PersistedConversation = {
   model: string;
   agentName: string;
   resumeRef?: string;
+  systemPrompt?: string;
 };
 
 export interface ConversationStore {

@@ -97,10 +97,15 @@ function toPersistedHandle(conversation: PersistedConversation): ConversationHan
   };
 }
 
-function toResume(conversation: PersistedConversation): { sessionId: string; resumeRef?: string } {
+function toResume(conversation: PersistedConversation): {
+  sessionId: string;
+  resumeRef?: string;
+  systemPrompt?: string;
+} {
   return {
     sessionId: conversation.sessionId,
     ...(conversation.resumeRef !== undefined ? { resumeRef: conversation.resumeRef } : {}),
+    ...(conversation.systemPrompt !== undefined ? { systemPrompt: conversation.systemPrompt } : {}),
   };
 }
 
@@ -141,7 +146,7 @@ function flushActiveMessage(entry: ConversationEntry): void {
 async function runWorker(
   sessions: Map<string, ConversationEntry>,
   entry: ConversationEntry,
-  persistConversation: (entry: ConversationEntry, handle: ConversationHandle) => void,
+  persistConversation: (entry: ConversationEntry, session: AgentSession) => void,
 ): Promise<void> {
   entry.workerRunning = true;
 
@@ -171,7 +176,7 @@ async function runWorker(
       } else {
         const handle = toHandle(session);
         entry.handle = handle;
-        persistConversation(entry, handle);
+        persistConversation(entry, session);
         req.deferred.resolve({
           kind: 'ok',
           text: entry.activeText,
@@ -218,7 +223,8 @@ export function createConversationManager(options: ConversationManagerOptions): 
     return persisted;
   }
 
-  function persistConversation(entry: ConversationEntry, handle: ConversationHandle): void {
+  function persistConversation(entry: ConversationEntry, session: AgentSession): void {
+    const handle = toHandle(session);
     if (!handle.sessionId || sessions.get(entry.key) !== entry) {
       return;
     }
@@ -228,6 +234,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
       model: entry.model,
       agentName: entry.agentName,
       ...(handle.sessionFile !== undefined ? { resumeRef: handle.sessionFile } : {}),
+      ...(session.systemPrompt !== undefined ? { systemPrompt: session.systemPrompt } : {}),
     });
   }
 

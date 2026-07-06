@@ -5,7 +5,7 @@ import { SKY_DIR } from '../settings.js';
 import type { ConversationStore, PersistedConversation } from './types.js';
 
 const DEFAULT_DB_PATH = path.join(SKY_DIR, 'sky.db');
-const CONVERSATION_SCHEMA_VERSION = '3';
+const CONVERSATION_SCHEMA_VERSION = '4';
 
 type StoreHandles = {
   db: DatabaseSync;
@@ -23,6 +23,7 @@ function createConversationsTable(db: DatabaseSync, tableName = 'conversations')
       resume_ref    TEXT,
       model         TEXT NOT NULL,
       agent_name    TEXT NOT NULL,
+      system_prompt TEXT,
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL,
       PRIMARY KEY (key, backend)
@@ -44,6 +45,11 @@ function hasConversationsTable(db: DatabaseSync): boolean {
   return row !== undefined;
 }
 
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return rows.some((row) => row.name === column);
+}
+
 function setSchemaVersion(db: DatabaseSync): void {
   db.prepare('INSERT OR REPLACE INTO schema_meta (name, value) VALUES (?, ?)').run(
     'conversation_schema_version',
@@ -51,19 +57,19 @@ function setSchemaVersion(db: DatabaseSync): void {
   );
 }
 
-function migrateConversationsV1ToV3(db: DatabaseSync): void {
+function migrateConversationsV1ToV4(db: DatabaseSync): void {
   db.exec('BEGIN');
   try {
-    createConversationsTable(db, 'conversations_v3');
+    createConversationsTable(db, 'conversations_v4');
     db.exec(`
-      INSERT INTO conversations_v3
-        (key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at)
+      INSERT INTO conversations_v4
+        (key, session_id, backend, resume_ref, model, agent_name, system_prompt, created_at, updated_at)
       SELECT
-        key, session_id, 'pi', session_file, model, agent_name, created_at, updated_at
+        key, session_id, 'pi', session_file, model, agent_name, NULL, created_at, updated_at
       FROM conversations
     `);
     db.exec('DROP TABLE conversations');
-    db.exec('ALTER TABLE conversations_v3 RENAME TO conversations');
+    db.exec('ALTER TABLE conversations_v4 RENAME TO conversations');
     setSchemaVersion(db);
     db.exec('COMMIT');
   } catch (error) {
@@ -72,19 +78,19 @@ function migrateConversationsV1ToV3(db: DatabaseSync): void {
   }
 }
 
-function migrateConversationsV2ToV3(db: DatabaseSync): void {
+function migrateConversationsV2OrV3ToV4(db: DatabaseSync): void {
   db.exec('BEGIN');
   try {
-    createConversationsTable(db, 'conversations_v3');
+    createConversationsTable(db, 'conversations_v4');
     db.exec(`
-      INSERT INTO conversations_v3
-        (key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at)
+      INSERT INTO conversations_v4
+        (key, session_id, backend, resume_ref, model, agent_name, system_prompt, created_at, updated_at)
       SELECT
-        key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at
+        key, session_id, backend, resume_ref, model, agent_name, NULL, created_at, updated_at
       FROM conversations
     `);
     db.exec('DROP TABLE conversations');
-    db.exec('ALTER TABLE conversations_v3 RENAME TO conversations');
+    db.exec('ALTER TABLE conversations_v4 RENAME TO conversations');
     setSchemaVersion(db);
     db.exec('COMMIT');
   } catch (error) {
@@ -110,16 +116,18 @@ function ensureSchema(db: DatabaseSync): void {
   if (!version) {
     if (!hasConversationsTable(db)) {
       createConversationsTable(db);
+    } else if (!hasColumn(db, 'conversations', 'system_prompt')) {
+      db.exec('ALTER TABLE conversations ADD COLUMN system_prompt TEXT');
     }
     setSchemaVersion(db);
     return;
   }
   if (version === '1') {
-    migrateConversationsV1ToV3(db);
+    migrateConversationsV1ToV4(db);
     return;
   }
-  if (version === '2') {
-    migrateConversationsV2ToV3(db);
+  if (version === '2' || version === '3') {
+    migrateConversationsV2OrV3ToV4(db);
     return;
   }
   if (version !== CONVERSATION_SCHEMA_VERSION) {
@@ -138,16 +146,17 @@ export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): Convers
   const handles: StoreHandles = {
     db,
     getStmt: db.prepare(
-      'SELECT session_id, backend, resume_ref, model, agent_name FROM conversations WHERE key = ? AND backend = ?',
+      'SELECT session_id, backend, resume_ref, model, agent_name, system_prompt FROM conversations WHERE key = ? AND backend = ?',
     ),
     putStmt: db.prepare(
-      `INSERT INTO conversations (key, session_id, backend, resume_ref, model, agent_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO conversations (key, session_id, backend, resume_ref, model, agent_name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(key, backend) DO UPDATE SET
          session_id = excluded.session_id,
          resume_ref = excluded.resume_ref,
          model = excluded.model,
          agent_name = excluded.agent_name,
+         system_prompt = excluded.system_prompt,
          updated_at = excluded.updated_at`,
     ),
     removeStmt: db.prepare('DELETE FROM conversations WHERE key = ? AND backend = ?'),
@@ -162,6 +171,7 @@ export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): Convers
             resume_ref: string | null;
             model: string;
             agent_name: string;
+            system_prompt: string | null;
           }
         | undefined;
       if (!row) {
@@ -173,6 +183,7 @@ export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): Convers
         model: row.model,
         agentName: row.agent_name,
         ...(row.resume_ref !== null ? { resumeRef: row.resume_ref } : {}),
+        ...(row.system_prompt !== null ? { systemPrompt: row.system_prompt } : {}),
       };
     },
 
@@ -185,6 +196,7 @@ export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): Convers
         conversation.resumeRef ?? null,
         conversation.model,
         conversation.agentName,
+        conversation.systemPrompt ?? null,
         now,
         now,
       );

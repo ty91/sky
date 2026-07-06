@@ -135,7 +135,7 @@ sky run
 
 | 항목 | pi | claude-agent-sdk |
 | -- | -- | -- |
-| 복원 세션의 system prompt | 세션 파일의 prompt snapshot을 사용하고 loader를 스킵합니다. | 매 턴 loader를 호출하므로 prompt 파일 수정이 복원 세션에도 반영됩니다. |
+| 복원 세션의 system prompt | 세션 파일의 prompt snapshot을 사용하고 loader를 스킵합니다. | Sky DB에 저장한 최초 prompt snapshot을 사용하고 loader를 스킵합니다. |
 | 세션 파일 | Sky가 Pi session file 경로를 `resumeRef`로 저장합니다. | SDK가 `~/.claude/projects/` 아래에서 자체 관리하며 Sky의 `resumeRef`는 비어 있습니다. |
 | 프로세스 모델 | 데몬 프로세스 안에서 실행됩니다. | 턴마다 서브프로세스를 사용합니다. 턴당 약 330MB를 쓰고 종료 시 회수되며, 스폰 비용은 약 200ms입니다. |
 | 인증 | Pi AuthStorage를 사용합니다. | `CLAUDE_CODE_OAUTH_TOKEN` 환경변수를 사용합니다. 다른 Anthropic 인증 변수가 있으면 SDK 우선순위에 주의하세요. |

@@ -22,8 +22,8 @@ export type AgentConfig = {
   /**
    * Optional function for loading the current system prompt from disk.
    * Pi stores the prompt snapshot in its session file, so resumed Pi sessions
-   * skip this loader. Claude Agent SDK resume does not persist the system
-   * prompt, so the loader runs on every turn.
+   * skip this loader. Claude Agent SDK stores the prompt snapshot in Sky's
+   * conversation record and reuses it for resumed sessions.
    */
   systemPromptLoader?: () => string;
   /** Optional factory for per-session custom tools. */
