@@ -1,6 +1,10 @@
 import { App } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import {
+  createSlackAgentDmHandler,
+  type SlackAgentDmMessageEvent,
+} from './agent-dm.js';
 import { createSlackAssistant } from './assistant.js';
 import {
   createSlackChannelHandler,
@@ -64,12 +68,33 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     botUserId,
     channelHandler,
   });
+  const agentDmHandler = createSlackAgentDmHandler({
+    botUserId,
+    conversationManager: options.conversationManager,
+    mainAgent: options.mainAgent,
+    slack: {
+      chat: {
+        postMessage: async (message) => app.client.chat.postMessage(message),
+      },
+      reactions: {
+        add: async (params) => app.client.reactions.add(params),
+        remove: async (params) => app.client.reactions.remove(params),
+      },
+      token: options.botToken,
+    },
+    userNameResolver,
+  });
 
   app.event('app_mention', async ({ event }) => {
     await channelIngress.handleAppMention({ event: event as SlackChannelEvent });
   });
 
   app.message(async ({ message }) => {
+    const handledAgentDm = await agentDmHandler.handleMessage({ message: message as SlackAgentDmMessageEvent });
+    if (handledAgentDm) {
+      return;
+    }
+
     await channelIngress.handleMessage({ message: message as SlackChannelMessageIngressEvent });
   });
 

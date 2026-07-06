@@ -19,8 +19,9 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 
 - Node.js 18+
 - Slack bot token + app token (Socket Mode 사용 시)
-- Slack app event subscriptions: `app_mention`, public channel message events, private channel message events
-- Slack scopes: `app_mentions.read`, `channels:history`, `groups:history`, `files:write`
+- Slack app event subscriptions: `app_mention`, `message.im`, public channel message events, private channel message events
+- Slack agent messaging experience: `agent_view`
+- Slack scopes: `app_mentions.read`, `chat:write`, `im:history`, `channels:history`, `groups:history`, `files:write`, `reactions:write`
 - 선택한 backend에서 사용할 모델 인증 설정
 
 ## 에이전트 백엔드와 인증 방식
@@ -143,7 +144,7 @@ sky run
 
 ## 사용법
 
-- Slack에서는 Assistant DM thread를 열면 새 backend session이 시작됩니다.
+- Slack agent Messages 탭에서는 루트 DM을 보내면 해당 메시지의 Slack thread로 새 backend session이 시작됩니다.
 - 같은 Slack thread에 이어서 메시지를 보내면 같은 backend session으로 이어집니다.
 - public/private 채널에서는 루트 메시지 또는 thread reply에서 Sky를 멘션하면 해당 Slack thread에 답변합니다.
 - Conversation이 `~/.sky/sky.db`에 저장된 채널 thread는 멘션 없는 후속 reply도 같은 session으로 처리합니다.
