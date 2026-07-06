@@ -20,10 +20,10 @@ export type AgentConfig = {
    */
   systemPrompt: string;
   /**
-   * Optional function invoked for **new** Pi sessions.
-   * Lets the prompt be re-read from disk (e.g. AGENTS.md/MEMORY.md) so that
-   * edits apply without restarting the bot process. Resumed sessions skip the
-   * loader and continue from the Pi session file.
+   * Optional function for loading the current system prompt from disk.
+   * Pi stores the prompt snapshot in its session file, so resumed Pi sessions
+   * skip this loader. Claude Agent SDK resume does not persist the system
+   * prompt, so the loader runs on every turn.
    */
   systemPromptLoader?: () => string;
   /** Optional factory for per-session custom tools. */

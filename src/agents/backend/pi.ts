@@ -1,9 +1,9 @@
 import {
-  AuthStorage,
-  createAgentSession,
-  DefaultResourceLoader,
-  getAgentDir,
-  ModelRegistry,
+  AuthStorage as PiAuthStorage,
+  createAgentSession as piCreateAgentSession,
+  DefaultResourceLoader as PiDefaultResourceLoader,
+  getAgentDir as piGetAgentDir,
+  ModelRegistry as PiModelRegistry,
   SessionManager as PiSessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
@@ -16,7 +16,16 @@ import type {
   CreateAgentSessionOptions,
 } from './types.js';
 
-type PiSession = Awaited<ReturnType<typeof createAgentSession>>['session'];
+type PiSession = Awaited<ReturnType<typeof piCreateAgentSession>>['session'];
+type PiModelRegistryInstance = ReturnType<typeof PiModelRegistry.create>;
+type PiBackendDeps = {
+  AuthStorage: typeof PiAuthStorage;
+  createAgentSession: typeof piCreateAgentSession;
+  DefaultResourceLoader: typeof PiDefaultResourceLoader;
+  getAgentDir: typeof piGetAgentDir;
+  ModelRegistry: typeof PiModelRegistry;
+  SessionManager: typeof PiSessionManager;
+};
 
 type PiSessionEvent = {
   type: string;
@@ -26,7 +35,16 @@ type PiSessionEvent = {
   };
 };
 
-function resolveModel(modelRegistry: ModelRegistry, modelName: string) {
+const DEFAULT_PI_BACKEND_DEPS: PiBackendDeps = {
+  AuthStorage: PiAuthStorage,
+  createAgentSession: piCreateAgentSession,
+  DefaultResourceLoader: PiDefaultResourceLoader,
+  getAgentDir: piGetAgentDir,
+  ModelRegistry: PiModelRegistry,
+  SessionManager: PiSessionManager,
+};
+
+function resolveModel(modelRegistry: PiModelRegistryInstance, modelName: string) {
   const slash = modelName.indexOf('/');
   if (slash <= 0 || slash === modelName.length - 1) {
     throw new Error(`Invalid Pi model name: ${modelName}`);
@@ -125,40 +143,40 @@ function toAgentSession(session: PiSession): AgentSession {
   };
 }
 
-const createPiSession = async ({
-  key,
-  agent,
-  cwd,
-  resume,
-}: CreateAgentSessionOptions): Promise<AgentSession> => {
-  const agentDir = getAgentDir();
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const model = agent.model ? resolveModel(modelRegistry, agent.model) : undefined;
-  const resourceLoader = new DefaultResourceLoader({
-    cwd,
-    agentDir,
-    systemPrompt: resolveSystemPrompt(agent, Boolean(resume?.resumeRef)),
-    noContextFiles: true,
-  });
-  await resourceLoader.reload();
-  const customTools = agent.customToolsFactory?.({ sessionKey: key }).map(toPiToolDefinition);
-  const { session } = await createAgentSession({
-    cwd,
-    agentDir,
-    authStorage,
-    modelRegistry,
-    ...(model ? { model } : {}),
-    ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),
-    ...(customTools ? { customTools } : {}),
-    resourceLoader,
-    sessionManager: resume?.resumeRef
-      ? PiSessionManager.open(resume.resumeRef, undefined, cwd)
-      : PiSessionManager.create(cwd),
-  });
-  return toAgentSession(session);
-};
+export function createPiSessionFactoryWithDeps(
+  deps: PiBackendDeps = DEFAULT_PI_BACKEND_DEPS,
+): AgentSessionFactory {
+  return Object.assign(
+    async ({ key, agent, cwd, resume }: CreateAgentSessionOptions): Promise<AgentSession> => {
+      const agentDir = deps.getAgentDir();
+      const authStorage = deps.AuthStorage.create();
+      const modelRegistry = deps.ModelRegistry.create(authStorage);
+      const model = agent.model ? resolveModel(modelRegistry, agent.model) : undefined;
+      const resourceLoader = new deps.DefaultResourceLoader({
+        cwd,
+        agentDir,
+        systemPrompt: resolveSystemPrompt(agent, Boolean(resume?.resumeRef)),
+        noContextFiles: true,
+      });
+      await resourceLoader.reload();
+      const customTools = agent.customToolsFactory?.({ sessionKey: key }).map(toPiToolDefinition);
+      const { session } = await deps.createAgentSession({
+        cwd,
+        agentDir,
+        authStorage,
+        modelRegistry,
+        ...(model ? { model } : {}),
+        ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),
+        ...(customTools ? { customTools } : {}),
+        resourceLoader,
+        sessionManager: resume?.resumeRef
+          ? deps.SessionManager.open(resume.resumeRef, undefined, cwd)
+          : deps.SessionManager.create(cwd),
+      });
+      return toAgentSession(session);
+    },
+    { backend: 'pi' as const },
+  );
+}
 
-export const createPiSessionFactory: AgentSessionFactory = Object.assign(createPiSession, {
-  backend: 'pi' as const,
-});
+export const createPiSessionFactory: AgentSessionFactory = createPiSessionFactoryWithDeps();
