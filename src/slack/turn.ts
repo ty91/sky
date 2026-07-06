@@ -54,9 +54,12 @@ export async function executeSlackTurn({
     }
 
     const assistantText = result.text || streamedText;
+    const assistantMessages = result.messages.length > 0 ? result.messages : [assistantText];
     transcript.setSessionId(result.handle.sessionId);
-    transcript.appendAssistant(assistantText);
-    await reply.sendReply(assistantText);
+    for (const message of assistantMessages) {
+      transcript.appendAssistant(message);
+      await reply.sendReply(message);
+    }
     await addReaction(reactionClient, channelId, messageTs, 'white_check_mark');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

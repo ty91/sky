@@ -196,6 +196,10 @@ function extractClaudeTextDelta(message: SDKMessage): string | undefined {
   return undefined;
 }
 
+function isClaudeMessageEnd(message: SDKMessage): boolean {
+  return message.type === 'stream_event' && message.event.type === 'message_stop';
+}
+
 function formatResultError(message: SDKMessage): Error | undefined {
   if (message.type !== 'result' || message.subtype === 'success') {
     return undefined;
@@ -302,6 +306,11 @@ class ClaudeAgentSdkSession implements AgentSession {
         const delta = extractClaudeTextDelta(message);
         if (delta !== undefined) {
           this.emit({ type: 'text_delta', delta });
+          continue;
+        }
+
+        if (isClaudeMessageEnd(message)) {
+          this.emit({ type: 'message_end' });
           continue;
         }
 

@@ -97,6 +97,7 @@ test('conversation manager creates an agent session for a new key and returns fi
   assert.deepEqual(result, {
     kind: 'ok',
     text: 'reply to hello',
+    messages: ['reply to hello'],
     handle: {
       sessionId: 'agent-session-1',
       sessionFile: '/tmp/pi-session-1.jsonl',
@@ -268,6 +269,39 @@ test('conversation manager forwards agent text deltas to the caller callback', a
   assert.deepEqual(deltas, ['hello ', 'world']);
   assert.equal(result.kind, 'ok');
   assert.equal(result.text, 'hello world');
+  assert.deepEqual(result.messages, ['hello world']);
+});
+
+test('conversation manager keeps assistant message boundaries when the backend emits them', async () => {
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    createSession: createSessionFactory(async () =>
+      createFakeAgentSession({
+        onPrompt: async (_text, emit) => {
+          emit({
+            type: 'text_delta',
+            delta: 'first',
+          });
+          emit({
+            type: 'message_end',
+          });
+          emit({
+            type: 'text_delta',
+            delta: 'second',
+          });
+          emit({
+            type: 'message_end',
+          });
+        },
+      }),
+    ),
+  });
+
+  const result = await manager.runTurn('thread-1', AGENT, 'hello');
+
+  assert.equal(result.kind, 'ok');
+  assert.equal(result.text, 'firstsecond');
+  assert.deepEqual(result.messages, ['first', 'second']);
 });
 
 test('conversation manager interrupts an active turn and lets the latest turn complete', async () => {

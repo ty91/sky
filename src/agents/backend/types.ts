@@ -1,7 +1,9 @@
 import type { AgentConfig } from '../types.js';
 import type { ZodRawShape } from 'zod';
 
-export type AgentSessionEvent = { type: 'text_delta'; delta: string };
+export type AgentSessionEvent =
+  | { type: 'text_delta'; delta: string }
+  | { type: 'message_end' };
 
 export type AgentSession = {
   readonly sessionId: string;

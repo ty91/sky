@@ -22,7 +22,7 @@ export interface ConversationStore {
 }
 
 export type ConversationTurnResult =
-  | { kind: 'ok'; text: string; handle: ConversationHandle }
+  | { kind: 'ok'; text: string; messages: string[]; handle: ConversationHandle }
   | { kind: 'interrupted' }
   | { kind: 'error'; error: Error };
 

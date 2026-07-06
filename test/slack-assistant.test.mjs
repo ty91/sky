@@ -33,6 +33,7 @@ function createConversationManagerMock(overrides = {}) {
     runTurn: async () => ({
       kind: 'ok',
       text: 'unused',
+      messages: ['unused'],
       handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
     }),
     has: () => false,
@@ -125,6 +126,7 @@ test('userMessage rejects empty text', async () => {
         return {
           kind: 'ok',
           text: 'unused',
+          messages: ['unused'],
           handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
         };
       },
@@ -155,6 +157,7 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
         return {
           kind: 'ok',
           text: '좋아요',
+          messages: ['좋아요'],
           handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
         };
       },
@@ -190,6 +193,7 @@ test('userMessage includes downloaded file attachments in the final prompt', asy
         return {
           kind: 'ok',
           text: '첨부 확인 완료',
+          messages: ['첨부 확인 완료'],
           handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
         };
       },

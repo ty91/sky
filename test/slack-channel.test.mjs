@@ -69,7 +69,8 @@ function createConversationManagerMock({ has = false, runTurnResult, reply = '�
         }
         return runTurnResult ?? {
           kind: 'ok',
-          text: '',
+          text: reply,
+          messages: reply ? [reply] : [],
           handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
         };
       },
@@ -293,6 +294,7 @@ test('channel ingress processes duplicate app_mention and message mention events
       return {
         kind: 'ok',
         text: '응답',
+        messages: ['응답'],
         handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
       };
     },
@@ -423,4 +425,3 @@ test('channel handler prepends history only for new conversations and falls back
   assert.deepEqual(existing.conversations.calls.runTurn.map((call) => call.text), ['후속 질문']);
   assert.deepEqual(failedHistory.conversations.calls.runTurn.map((call) => call.text), ['@sky 실패해도 보내줘']);
 });
-

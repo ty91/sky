@@ -68,6 +68,7 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
       return {
         kind: 'ok',
         text: '',
+        messages: [],
         handle: { sessionId: 'pi-session-turn', sessionFile: '/tmp/pi-session-turn.jsonl' },
       };
     },
@@ -107,6 +108,52 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
   assert.match(transcript, /작업 상태 알려줘/);
   assert.match(transcript, /### assistant/);
   assert.match(transcript, /streamed reply/);
+});
+
+test('executeSlackTurn sends each assistant message separately before marking complete', async () => {
+  const events = [];
+  const conversationManager = {
+    runTurn: async () => ({
+      kind: 'ok',
+      text: 'firstsecond',
+      messages: ['first', 'second'],
+      handle: { sessionId: 'pi-session-turn', sessionFile: '/tmp/pi-session-turn.jsonl' },
+    }),
+  };
+
+  await executeSlackTurn({
+    channelId: 'C123',
+    conversationManager,
+    mainAgent: MAIN_AGENT,
+    messageTs: '1777901000.000001',
+    reactionClient: {
+      reactions: {
+        add: async ({ name }) => {
+          events.push(`reaction:${name}`);
+          return { ok: true };
+        },
+        remove: async ({ name }) => {
+          events.push(`remove:${name}`);
+          return { ok: true };
+        },
+      },
+    },
+    reply: {
+      sendReply: async (text) => {
+        events.push(`reply:${text}`);
+      },
+    },
+    text: '여러 답변',
+    threadId: 'C123:1777901000.000001',
+  });
+
+  assert.deepEqual(events, [
+    'reaction:thought_balloon',
+    'reply:first',
+    'reply:second',
+    'reaction:white_check_mark',
+    'remove:thought_balloon',
+  ]);
 });
 
 test('executeSlackTurn marks interrupted turns without sending a reply', async () => {

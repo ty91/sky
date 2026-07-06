@@ -43,6 +43,8 @@ type ConversationEntry = {
   activeTurnId?: number;
   activeTurnInterrupted: boolean;
   activeText: string;
+  activeMessageText: string;
+  activeMessages: string[];
   activeDeltaTasks: Promise<void>[];
   activeOptions?: ConversationTurnOptions;
   pending?: PendingTurn;
@@ -108,16 +110,32 @@ function wireStreaming(entry: ConversationEntry, session: AgentSession): void {
   }
 
   entry.unsubscribe = session.subscribe((event) => {
-    if (event.type !== 'text_delta' || entry.activeTurnId === undefined || entry.activeTurnInterrupted) {
+    if (entry.activeTurnId === undefined || entry.activeTurnInterrupted) {
       return;
     }
 
-    entry.activeText += event.delta;
-    const maybeTask = entry.activeOptions?.onTextDelta?.(event.delta);
-    if (maybeTask) {
-      entry.activeDeltaTasks.push(Promise.resolve(maybeTask));
+    if (event.type === 'message_end') {
+      flushActiveMessage(entry);
+      return;
+    }
+
+    if (event.type === 'text_delta') {
+      entry.activeText += event.delta;
+      entry.activeMessageText += event.delta;
+      const maybeTask = entry.activeOptions?.onTextDelta?.(event.delta);
+      if (maybeTask) {
+        entry.activeDeltaTasks.push(Promise.resolve(maybeTask));
+      }
     }
   });
+}
+
+function flushActiveMessage(entry: ConversationEntry): void {
+  if (!entry.activeMessageText) {
+    return;
+  }
+  entry.activeMessages.push(entry.activeMessageText);
+  entry.activeMessageText = '';
 }
 
 async function runWorker(
@@ -135,6 +153,8 @@ async function runWorker(
     entry.activeTurnId = turnId;
     entry.activeTurnInterrupted = false;
     entry.activeText = '';
+    entry.activeMessageText = '';
+    entry.activeMessages = [];
     entry.activeDeltaTasks = [];
     entry.activeOptions = req.options;
 
@@ -143,6 +163,7 @@ async function runWorker(
       wireStreaming(entry, session);
 
       await session.prompt(req.text);
+      flushActiveMessage(entry);
       await Promise.all(entry.activeDeltaTasks);
 
       if (entry.activeTurnInterrupted || entry.activeTurnId !== turnId || entry.closed) {
@@ -154,6 +175,7 @@ async function runWorker(
         req.deferred.resolve({
           kind: 'ok',
           text: entry.activeText,
+          messages: entry.activeMessages,
           handle,
         });
       }
@@ -236,6 +258,8 @@ export function createConversationManager(options: ConversationManagerOptions): 
           turnCounter: 0,
           activeTurnInterrupted: false,
           activeText: '',
+          activeMessageText: '',
+          activeMessages: [],
           activeDeltaTasks: [],
           workerRunning: false,
           closed: false,
