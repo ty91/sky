@@ -1,0 +1,389 @@
+import {
+  createSdkMcpServer as sdkCreateSdkMcpServer,
+  query as sdkQuery,
+  tool as sdkTool,
+  type Options as ClaudeOptions,
+  type Query as ClaudeQuery,
+  type SDKMessage,
+  type SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { AgentConfig } from '../types.js';
+import {
+  RESTART_HARNESS_FQ_TOOL_NAME,
+  RESTART_HARNESS_SERVER_NAME,
+  RESTART_HARNESS_TOOL_NAME,
+} from '../tools/restart-harness.js';
+import { Pushable } from '../../session/pushable.js';
+import type {
+  AgentSession,
+  AgentSessionEvent,
+  AgentSessionFactory,
+  AgentToolResult,
+  AgentToolSpec,
+  CreateAgentSessionOptions,
+} from './types.js';
+
+const CLAUDE_MCP_SERVER_NAME = RESTART_HARNESS_SERVER_NAME;
+const CLAUDE_MODEL_PROVIDER = 'anthropic';
+
+// Rechecked against @anthropic-ai/claude-agent-sdk 0.3.201 sdk-tools.d.ts.
+// Main-agent tools TaskOutput, TaskStop, and TodoWrite are supported in this
+// version; Agent and Skill are SDK features outside Options.tools and are
+// intentionally filtered from this adapter's built-in tool allowlist.
+const SUPPORTED_CLAUDE_BUILTIN_TOOLS = new Set([
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'WebFetch',
+  'WebSearch',
+  'TodoWrite',
+  'TaskOutput',
+  'TaskStop',
+  'NotebookEdit',
+  'ListMcpResources',
+  'ReadMcpResource',
+  'ReadMcpResourceDir',
+]);
+
+type ClaudeAgentSdkDeps = {
+  query: typeof sdkQuery;
+  createSdkMcpServer: typeof sdkCreateSdkMcpServer;
+  tool: typeof sdkTool;
+  env?: NodeJS.ProcessEnv;
+};
+
+type ActiveTurn = {
+  query: ClaudeQuery;
+  input: Pushable<SDKUserMessage>;
+  interrupted: boolean;
+};
+
+type ToolSelection = {
+  builtins?: string[];
+  allowed?: string[];
+};
+
+function resolveSystemPrompt(agent: AgentConfig): string {
+  return agent.systemPromptLoader ? agent.systemPromptLoader() : agent.systemPrompt;
+}
+
+function resolveClaudeModel(modelName: string | undefined): string | undefined {
+  if (!modelName) {
+    return undefined;
+  }
+
+  const slash = modelName.indexOf('/');
+  if (slash <= 0 || slash === modelName.length - 1) {
+    throw new Error(`Invalid Claude Agent SDK model name: ${modelName}`);
+  }
+
+  const provider = modelName.slice(0, slash);
+  if (provider !== CLAUDE_MODEL_PROVIDER) {
+    throw new Error(
+      `Unsupported Claude Agent SDK model provider: ${provider}. Expected ${CLAUDE_MODEL_PROVIDER}.`,
+    );
+  }
+
+  return modelName.slice(slash + 1);
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function toMcpToolName(name: string): string {
+  if (name === RESTART_HARNESS_TOOL_NAME) {
+    return RESTART_HARNESS_FQ_TOOL_NAME;
+  }
+  return `mcp__${CLAUDE_MCP_SERVER_NAME}__${name}`;
+}
+
+function resolveToolSelection(
+  tools: string[] | undefined,
+  customToolNames: Set<string>,
+): ToolSelection {
+  if (!tools) {
+    return {};
+  }
+
+  const builtins: string[] = [];
+  const allowed: string[] = [];
+
+  for (const name of tools) {
+    if (SUPPORTED_CLAUDE_BUILTIN_TOOLS.has(name)) {
+      builtins.push(name);
+      allowed.push(name);
+      continue;
+    }
+
+    if (customToolNames.has(name)) {
+      allowed.push(toMcpToolName(name));
+    }
+  }
+
+  return {
+    builtins: unique(builtins),
+    allowed: unique(allowed),
+  };
+}
+
+function toStructuredContent(details: unknown): Record<string, unknown> | undefined {
+  if (details === undefined) {
+    return undefined;
+  }
+  if (details !== null && typeof details === 'object' && !Array.isArray(details)) {
+    return details as Record<string, unknown>;
+  }
+  return { details };
+}
+
+function toCallToolResult(result: AgentToolResult): CallToolResult {
+  return {
+    content: result.content,
+    ...(result.details !== undefined ? { structuredContent: toStructuredContent(result.details) } : {}),
+    ...(result.isError !== undefined ? { isError: result.isError } : {}),
+  };
+}
+
+function toSdkTool(spec: AgentToolSpec, deps: ClaudeAgentSdkDeps) {
+  return deps.tool(spec.name, spec.description, spec.inputSchema, async (args) =>
+    toCallToolResult(await spec.execute(args)),
+  );
+}
+
+function extractClaudeTextDelta(message: SDKMessage): string | undefined {
+  if (message.type !== 'stream_event') {
+    return undefined;
+  }
+
+  const event = message.event as {
+    type?: unknown;
+    delta?: {
+      type?: unknown;
+      text?: unknown;
+    };
+  };
+
+  if (
+    event.type === 'content_block_delta' &&
+    event.delta?.type === 'text_delta' &&
+    typeof event.delta.text === 'string'
+  ) {
+    return event.delta.text;
+  }
+
+  return undefined;
+}
+
+function formatResultError(message: SDKMessage): Error | undefined {
+  if (message.type !== 'result' || message.subtype === 'success') {
+    return undefined;
+  }
+
+  const details =
+    'errors' in message && Array.isArray(message.errors) && message.errors.length > 0
+      ? `: ${message.errors.join('\n')}`
+      : '';
+  return new Error(`Claude Agent SDK query failed (${message.subtype})${details}`);
+}
+
+function isEdeDiagnostic(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('[ede_diagnostic]');
+}
+
+function resolveClaudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const token = env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!token) {
+    throw new Error(
+      'CLAUDE_CODE_OAUTH_TOKEN is required for the Claude Agent SDK backend. Run `claude setup-token` and provide the token in the daemon environment.',
+    );
+  }
+
+  const resolved: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key === 'ANTHROPIC_API_KEY') {
+      continue;
+    }
+    resolved[key] = value;
+  }
+  resolved.CLAUDE_CODE_OAUTH_TOKEN = token;
+  return resolved;
+}
+
+class ClaudeAgentSdkSession implements AgentSession {
+  private sessionIdValue: string;
+  private activeTurn?: ActiveTurn;
+  private readonly listeners = new Set<(event: AgentSessionEvent) => void>();
+  private readonly customTools: AgentToolSpec[];
+  private readonly customToolNames: Set<string>;
+  private readonly mcpServer: ReturnType<typeof sdkCreateSdkMcpServer>;
+  private readonly env: NodeJS.ProcessEnv;
+
+  constructor(
+    private readonly options: CreateAgentSessionOptions,
+    private readonly deps: ClaudeAgentSdkDeps,
+  ) {
+    this.sessionIdValue = options.resume?.sessionId ?? '';
+    this.customTools = options.agent.customToolsFactory?.({ sessionKey: options.key }) ?? [];
+    this.customToolNames = new Set(this.customTools.map((toolSpec) => toolSpec.name));
+    this.mcpServer = deps.createSdkMcpServer({
+      name: CLAUDE_MCP_SERVER_NAME,
+      tools: this.customTools.map((toolSpec) => toSdkTool(toolSpec, deps)),
+    });
+    this.env = resolveClaudeEnv(deps.env ?? process.env);
+  }
+
+  get sessionId(): string {
+    return this.sessionIdValue;
+  }
+
+  get resumeRef(): undefined {
+    return undefined;
+  }
+
+  async prompt(text: string): Promise<void> {
+    if (this.activeTurn) {
+      throw new Error('Claude Agent SDK session already has an active turn.');
+    }
+
+    const input = new Pushable<SDKUserMessage>();
+    const query = this.deps.query({
+      prompt: input,
+      options: this.createQueryOptions(),
+    });
+    const turn: ActiveTurn = {
+      query,
+      input,
+      interrupted: false,
+    };
+    this.activeTurn = turn;
+
+    input.push({
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+    });
+
+    let resultError: Error | undefined;
+
+    try {
+      for await (const message of query) {
+        if (message.type === 'system' && message.subtype === 'init') {
+          this.sessionIdValue = message.session_id;
+          continue;
+        }
+
+        const delta = extractClaudeTextDelta(message);
+        if (delta !== undefined) {
+          this.emit({ type: 'text_delta', delta });
+          continue;
+        }
+
+        if (message.type === 'result') {
+          input.end();
+          if (!turn.interrupted) {
+            resultError = formatResultError(message);
+          }
+        }
+      }
+    } catch (error) {
+      if (turn.interrupted && isEdeDiagnostic(error)) {
+        return;
+      }
+      throw error;
+    } finally {
+      input.end();
+      if (this.activeTurn === turn) {
+        this.activeTurn = undefined;
+      }
+    }
+
+    if (resultError) {
+      throw resultError;
+    }
+  }
+
+  async abort(): Promise<void> {
+    const turn = this.activeTurn;
+    if (!turn) {
+      return;
+    }
+
+    turn.interrupted = true;
+    try {
+      await turn.query.interrupt();
+    } catch (error) {
+      turn.input.end();
+      throw error;
+    }
+  }
+
+  dispose(): void {
+    const turn = this.activeTurn;
+    if (turn) {
+      turn.interrupted = true;
+      turn.input.end();
+      turn.query.close();
+    }
+    this.listeners.clear();
+  }
+
+  subscribe(listener: (event: AgentSessionEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private createQueryOptions(): ClaudeOptions {
+    const toolSelection = resolveToolSelection(this.options.agent.tools, this.customToolNames);
+
+    // Per TY-6 verification, per-turn query has no idle subprocess, but each active
+    // turn spawns about 330 MB RSS and pays about 200 ms spawn overhead. A manager
+    // concurrency cap is intentionally out of this slice's scope.
+    return {
+      cwd: this.options.cwd,
+      systemPrompt: resolveSystemPrompt(this.options.agent),
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      settingSources: [],
+      strictMcpConfig: true,
+      includePartialMessages: true,
+      env: this.env,
+      mcpServers: {
+        [CLAUDE_MCP_SERVER_NAME]: this.mcpServer,
+      },
+      ...(this.options.agent.model ? { model: resolveClaudeModel(this.options.agent.model) } : {}),
+      ...(this.options.agent.maxTurns !== undefined ? { maxTurns: this.options.agent.maxTurns } : {}),
+      ...(toolSelection.builtins !== undefined ? { tools: toolSelection.builtins } : {}),
+      ...(toolSelection.allowed !== undefined ? { allowedTools: toolSelection.allowed } : {}),
+      ...(this.sessionIdValue ? { resume: this.sessionIdValue } : {}),
+    };
+  }
+
+  private emit(event: AgentSessionEvent): void {
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+}
+
+export function createClaudeAgentSdkSessionFactory(
+  deps: ClaudeAgentSdkDeps = {
+    query: sdkQuery,
+    createSdkMcpServer: sdkCreateSdkMcpServer,
+    tool: sdkTool,
+  },
+): AgentSessionFactory {
+  return Object.assign(
+    async (options: CreateAgentSessionOptions) => new ClaudeAgentSdkSession(options, deps),
+    { backend: 'claude-agent-sdk' as const },
+  );
+}
+
+export const createDefaultClaudeAgentSdkSessionFactory = createClaudeAgentSdkSessionFactory();
