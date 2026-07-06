@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import {
   createSdkMcpServer as sdkCreateSdkMcpServer,
   query as sdkQuery,
@@ -28,8 +30,8 @@ const CLAUDE_MCP_SERVER_NAME = RESTART_HARNESS_SERVER_NAME;
 const CLAUDE_MODEL_PROVIDER = 'anthropic';
 
 // Rechecked against @anthropic-ai/claude-agent-sdk 0.3.201 sdk-tools.d.ts.
-// Main-agent tools TaskOutput, TaskStop, and TodoWrite are supported in this
-// version; Agent and Skill are SDK features outside Options.tools and are
+// Main-agent tools TaskOutput, TaskStop, TodoWrite, and Skill are supported in
+// this version; Agent is an SDK feature outside Options.tools and is
 // intentionally filtered from this adapter's built-in tool allowlist.
 const SUPPORTED_CLAUDE_BUILTIN_TOOLS = new Set([
   'Bash',
@@ -40,6 +42,7 @@ const SUPPORTED_CLAUDE_BUILTIN_TOOLS = new Set([
   'Grep',
   'WebFetch',
   'WebSearch',
+  'Skill',
   'TodoWrite',
   'TaskOutput',
   'TaskStop',
@@ -102,6 +105,18 @@ function toMcpToolName(name: string): string {
   return `mcp__${CLAUDE_MCP_SERVER_NAME}__${name}`;
 }
 
+function resolveSkyPlugin(cwd: string): NonNullable<ClaudeOptions['plugins']> | undefined {
+  const pluginPath = path.join(cwd, '.agents');
+  if (
+    !existsSync(path.join(pluginPath, 'skills')) &&
+    !existsSync(path.join(pluginPath, '.claude-plugin', 'plugin.json'))
+  ) {
+    return undefined;
+  }
+
+  return [{ type: 'local', path: pluginPath, skipMcpDiscovery: true }];
+}
+
 function resolveToolSelection(
   tools: string[] | undefined,
   customToolNames: Set<string>,
@@ -116,7 +131,9 @@ function resolveToolSelection(
   for (const name of tools) {
     if (SUPPORTED_CLAUDE_BUILTIN_TOOLS.has(name)) {
       builtins.push(name);
-      allowed.push(name);
+      if (name !== 'Skill') {
+        allowed.push(name);
+      }
       continue;
     }
 
@@ -357,6 +374,11 @@ class ClaudeAgentSdkSession implements AgentSession {
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: [],
+      settings: {
+        disableBundledSkills: true,
+      },
+      plugins: resolveSkyPlugin(this.options.cwd),
+      skills: 'all',
       strictMcpConfig: true,
       includePartialMessages: true,
       env: this.env,

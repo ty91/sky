@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import { createClaudeAgentSdkSessionFactory } from '../dist/agents/backend/claude.js';
 
@@ -105,11 +108,14 @@ test('claude agent sdk factory fails fast without an OAuth token', async () => {
   );
 });
 
-test('claude agent sdk session streams text and passes isolated per-turn query options', async () => {
+test('claude agent sdk session streams text and passes isolated per-turn query options', async (t) => {
   let queryParams;
   let observedUserMessage;
   let inputEnded = false;
   let loaderCalls = 0;
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'sky-claude-agent-sdk-'));
+  mkdirSync(path.join(workspace, '.agents', 'skills'), { recursive: true });
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
   const { deps, toolCalls, mcpServerCalls } = createFakeDeps({
     env: {
       PATH: '/bin',
@@ -134,7 +140,7 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
     key: 'thread-1',
-    cwd: '/tmp/workspace',
+    cwd: workspace,
     agent: {
       name: 'main',
       systemPrompt: 'fallback',
@@ -170,18 +176,30 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
     message: { role: 'user', content: 'say hello' },
     parent_tool_use_id: null,
   });
-  assert.equal(queryParams.options.cwd, '/tmp/workspace');
+  assert.equal(queryParams.options.cwd, workspace);
   assert.equal(queryParams.options.model, 'claude-opus-4-7');
   assert.equal(queryParams.options.systemPrompt, 'loaded-1');
   assert.equal(queryParams.options.permissionMode, 'bypassPermissions');
   assert.equal(queryParams.options.allowDangerouslySkipPermissions, true);
   assert.deepEqual(queryParams.options.settingSources, []);
+  assert.deepEqual(queryParams.options.settings, { disableBundledSkills: true });
   assert.equal(queryParams.options.strictMcpConfig, true);
   assert.equal(queryParams.options.includePartialMessages, true);
   assert.equal(queryParams.options.maxTurns, 3);
   assert.equal(queryParams.options.env.CLAUDE_CODE_OAUTH_TOKEN, 'oauth-token');
   assert.equal(queryParams.options.env.ANTHROPIC_API_KEY, undefined);
-  assert.deepEqual(queryParams.options.tools, ['Bash', 'Read', 'TodoWrite', 'TaskOutput', 'TaskStop']);
+  assert.deepEqual(queryParams.options.plugins, [
+    { type: 'local', path: path.join(workspace, '.agents'), skipMcpDiscovery: true },
+  ]);
+  assert.equal(queryParams.options.skills, 'all');
+  assert.deepEqual(queryParams.options.tools, [
+    'Bash',
+    'Read',
+    'Skill',
+    'TodoWrite',
+    'TaskOutput',
+    'TaskStop',
+  ]);
   assert.deepEqual(queryParams.options.allowedTools, [
     'Bash',
     'Read',
