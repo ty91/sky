@@ -14,6 +14,7 @@ import {
   readSlackThreadMessages,
   type SlackThreadMessage,
 } from './thread-history.js';
+import { createCachedSlackUserNameResolver } from './users.js';
 
 export { isPublicOrPrivateChannelMessage } from './channel-ingress.js';
 
@@ -31,9 +32,11 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     socketMode: true,
   });
 
+  const userNameResolver = createCachedSlackUserNameResolver(app.client);
   const assistant = createSlackAssistant({
     conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
+    userNameResolver,
   });
 
   app.assistant(assistant);
@@ -55,6 +58,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
         remove: async (params) => app.client.reactions.remove(params),
       },
     },
+    userNameResolver,
   });
   const channelIngress = createSlackChannelIngress({
     botUserId,
@@ -128,4 +132,3 @@ function readNextCursor(response: { response_metadata?: { next_cursor?: unknown 
   const cursor = response.response_metadata?.next_cursor;
   return typeof cursor === 'string' && cursor.trim() ? cursor : undefined;
 }
-

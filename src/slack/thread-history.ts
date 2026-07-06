@@ -1,3 +1,5 @@
+import { formatSlackUserLabel } from './users.js';
+
 export type SlackThreadMessage = {
   bot_id?: string;
   text?: string;
@@ -10,6 +12,7 @@ export type PrependSlackThreadHistoryInput = {
   maxCharacters?: number;
   maxMessages?: number;
   messages: SlackThreadMessage[];
+  userDisplayNames?: ReadonlyMap<string, string | undefined>;
 };
 
 const DEFAULT_MAX_THREAD_HISTORY_CHARACTERS = 20_000;
@@ -24,11 +27,13 @@ export function prependSlackThreadHistoryToPrompt({
   maxCharacters = DEFAULT_MAX_THREAD_HISTORY_CHARACTERS,
   maxMessages = DEFAULT_MAX_THREAD_HISTORY_MESSAGES,
   messages,
+  userDisplayNames,
 }: PrependSlackThreadHistoryInput): string {
   const history = formatSlackThreadHistory({
     maxCharacters,
     maxMessages,
     messages,
+    userDisplayNames,
   });
 
   if (!history) {
@@ -68,10 +73,12 @@ function formatSlackThreadHistory({
   maxCharacters,
   maxMessages,
   messages,
+  userDisplayNames,
 }: {
   maxCharacters: number;
   maxMessages: number;
   messages: SlackThreadMessage[];
+  userDisplayNames?: ReadonlyMap<string, string | undefined>;
 }): string | undefined {
   const lines: string[] = [];
   let truncated = false;
@@ -88,7 +95,7 @@ function formatSlackThreadHistory({
       break;
     }
 
-    const line = `${message.ts} ${readSlackThreadMessageAuthor(message)}: ${text}`;
+    const line = `${message.ts} ${readSlackThreadMessageAuthor(message, userDisplayNames)}: ${text}`;
     if (formatSlackThreadHistoryBlock(lines.concat(line)).length > maxCharacters) {
       truncated = true;
       break;
@@ -122,9 +129,13 @@ function formatSlackThreadHistoryBlock(lines: string[]): string {
   return [THREAD_HISTORY_HEADER, THREAD_HISTORY_UNTRUSTED_NOTICE, ...lines].join('\n');
 }
 
-function readSlackThreadMessageAuthor(message: SlackThreadMessage): string {
+function readSlackThreadMessageAuthor(
+  message: SlackThreadMessage,
+  userDisplayNames?: ReadonlyMap<string, string | undefined>,
+): string {
   if (message.user?.trim()) {
-    return message.user.trim();
+    const userId = message.user.trim();
+    return formatSlackUserLabel(userId, userDisplayNames?.get(userId));
   }
 
   if (message.bot_id?.trim()) {

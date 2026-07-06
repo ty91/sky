@@ -5,10 +5,12 @@ import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './fil
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
 import { executeSlackTurn } from './turn.js';
+import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
 export type SlackAssistantOptions = {
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
+  userNameResolver?: SlackUserNameResolver;
 };
 
 export const DEFAULT_SUGGESTED_PROMPTS = [
@@ -18,7 +20,7 @@ export const DEFAULT_SUGGESTED_PROMPTS = [
 ] as const;
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
-  const { conversationManager, mainAgent } = options;
+  const { conversationManager, mainAgent, userNameResolver } = options;
 
   return {
     threadStarted: async ({ say, setSuggestedPrompts, saveThreadContext, event }) => {
@@ -61,12 +63,16 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         ? [rawText, attachmentsLine].filter(Boolean).join('\n\n')
         : rawText;
 
-      console.log(`[slack] user message in ${threadId}: ${JSON.stringify(text)}`);
-
       if (!text) {
         await say('빈 메시지는 처리할 수 없습니다.');
         return;
       }
+
+      const userId = 'user' in message && typeof message.user === 'string' ? message.user : undefined;
+      const displayName = userId ? await userNameResolver?.getDisplayName(userId) : undefined;
+      const userText = prefixSlackUserMessage(text, userId, displayName);
+
+      console.log(`[slack] user message in ${threadId}: ${JSON.stringify(userText)}`);
 
       const messageTs = message.ts;
       const sender = new SlackSender({ say });
@@ -75,7 +81,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         threadId,
         channelId,
         messageTs,
-        text,
+        text: userText,
         conversationManager,
         mainAgent,
         reactionClient: client,

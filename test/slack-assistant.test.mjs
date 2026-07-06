@@ -151,6 +151,9 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
+    userNameResolver: {
+      getDisplayName: async () => '태영',
+    },
     conversationManager: createConversationManagerMock({
       runTurn: async (key, agent, text, options) => {
         runTurnCalls.push({ key, agent, text, hasStreamingCallback: typeof options?.onTextDelta === 'function' });
@@ -174,7 +177,7 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
     {
       key: 'C999:1888.55',
       agent: MAIN_AGENT,
-      text: '작업 상태 알려줘',
+      text: '태영(<@U123>): 작업 상태 알려줘',
       hasStreamingCallback: true,
     },
   ]);
@@ -187,6 +190,9 @@ test('userMessage includes downloaded file attachments in the final prompt', asy
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
     mainAgent: MAIN_AGENT,
+    userNameResolver: {
+      getDisplayName: async () => '태영',
+    },
     conversationManager: createConversationManagerMock({
       runTurn: async (key, agent, text) => {
         runTurnCalls.push({ key, agent, text });
@@ -227,7 +233,7 @@ test('userMessage includes downloaded file attachments in the final prompt', asy
   assert.equal(runTurnCalls[0].agent, MAIN_AGENT);
   assert.match(
     runTurnCalls[0].text,
-    /^첨부 봐줘\n\nAttachments: `.*\/sky\/notes-[a-z0-9]+\.txt`$/,
+    /^태영\(<@U123>\): 첨부 봐줘\n\nAttachments: `.*\/sky\/notes-[a-z0-9]+\.txt`$/,
   );
 });
 

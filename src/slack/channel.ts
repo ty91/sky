@@ -5,6 +5,7 @@ import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
 import { toThreadId } from './thread-id.js';
 import { executeSlackTurn } from './turn.js';
+import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
 export type SlackChannelEvent = SlackChannelMessageEvent & {
   channel?: string;
@@ -33,6 +34,7 @@ export type SlackChannelHandlerOptions = {
   mainAgent: AgentConfig;
   mentionLabel?: string;
   slack: SlackChannelClient;
+  userNameResolver?: SlackUserNameResolver;
 };
 
 export type SlackChannelHandler = {
@@ -45,6 +47,7 @@ export function createSlackChannelHandler({
   mainAgent,
   mentionLabel = '@sky',
   slack,
+  userNameResolver,
 }: SlackChannelHandlerOptions): SlackChannelHandler {
   return {
     async handleMessage({ event }) {
@@ -69,6 +72,10 @@ export function createSlackChannelHandler({
         return;
       }
 
+      const userId = readNonEmptyString(event.user);
+      const displayName = userId ? await userNameResolver?.getDisplayName(userId) : undefined;
+      const currentContent = prefixSlackUserMessage(normalized.text, userId, displayName);
+
       const sender = new SlackSender({
         say: async (text) => {
           await slack.chat.postMessage({
@@ -81,11 +88,12 @@ export function createSlackChannelHandler({
 
       const text = await maybePrependThreadHistory({
         channelId,
-        currentContent: normalized.text,
+        currentContent,
         includeHistory: !existingThread,
         latest: messageTs,
         slack,
         threadTs,
+        userNameResolver,
       });
 
       await executeSlackTurn({
@@ -109,6 +117,7 @@ async function maybePrependThreadHistory({
   latest,
   slack,
   threadTs,
+  userNameResolver,
 }: {
   channelId: string;
   currentContent: string;
@@ -116,6 +125,7 @@ async function maybePrependThreadHistory({
   latest: string;
   slack: SlackChannelClient;
   threadTs: string;
+  userNameResolver?: SlackUserNameResolver;
 }): Promise<string> {
   if (!includeHistory) {
     return currentContent;
@@ -131,12 +141,34 @@ async function maybePrependThreadHistory({
     return prependSlackThreadHistoryToPrompt({
       currentContent,
       messages,
+      userDisplayNames: await resolveSlackThreadUserDisplayNames(messages, userNameResolver),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[slack] thread history fetch failed channel=${channelId} thread_ts=${threadTs}: ${message}`);
     return currentContent;
   }
+}
+
+async function resolveSlackThreadUserDisplayNames(
+  messages: SlackThreadMessage[],
+  userNameResolver?: SlackUserNameResolver,
+): Promise<ReadonlyMap<string, string | undefined>> {
+  const displayNames = new Map<string, string | undefined>();
+  if (!userNameResolver) {
+    return displayNames;
+  }
+
+  const userIds = [...new Set(messages.flatMap((message) => {
+    const userId = message.user?.trim();
+    return userId ? [userId] : [];
+  }))];
+
+  await Promise.all(userIds.map(async (userId) => {
+    displayNames.set(userId, await userNameResolver.getDisplayName(userId));
+  }));
+
+  return displayNames;
 }
 
 function readNonEmptyString(value: string | undefined): string | undefined {
