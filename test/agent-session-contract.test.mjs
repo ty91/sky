@@ -137,12 +137,15 @@ function createPiAdapterHarness() {
         sessionFile,
       }),
     },
-    createAgentSession: async (options) => ({
-      session: createControllablePiSession(state, {
-        sessionId: options.sessionManager.sessionId,
-        sessionFile: options.sessionManager.sessionFile,
-      }),
-    }),
+    createAgentSession: async (options) => {
+      state.createAgentSessionOptions = options;
+      return {
+        session: createControllablePiSession(state, {
+          sessionId: options.sessionManager.sessionId,
+          sessionFile: options.sessionManager.sessionFile,
+        }),
+      };
+    },
   };
   const actualFactory = createPiSessionFactoryWithDeps(deps);
   const factory = Object.assign(
@@ -396,6 +399,24 @@ function defineAgentSessionContract(name, createHarness) {
 defineAgentSessionContract('pi adapter with fake backend', createPiAdapterHarness);
 
 defineAgentSessionContract('claude agent sdk adapter with fake backend', createClaudeAdapterHarness);
+
+test('pi adapter passes configured effort as thinking level', async () => {
+  const { factory, state } = createPiAdapterHarness();
+  await factory({
+    key: 'thread-1',
+    agent: { ...AGENT, effort: 'high' },
+    cwd: '/tmp/workspace',
+  });
+
+  assert.equal(state.createAgentSessionOptions.thinkingLevel, 'high');
+});
+
+test('pi adapter omits thinking level when effort is not configured', async () => {
+  const { factory, state } = createPiAdapterHarness();
+  await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+
+  assert.equal(Object.hasOwn(state.createAgentSessionOptions, 'thinkingLevel'), false);
+});
 
 async function withTempWorkspace(fn) {
   const workspace = await mkdtemp(path.join(os.tmpdir(), 'sky-agent-backend-smoke-'));

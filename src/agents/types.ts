@@ -1,4 +1,5 @@
 import type { AgentToolSpec } from './backend/types.js';
+import type { AgentEffort } from './effort.js';
 
 /**
  * Context handed to per-session tool factories when a session opens. Lets
@@ -29,6 +30,7 @@ export type AgentConfig = {
   /** Optional factory for per-session custom tools. */
   customToolsFactory?: AgentToolSpecFactory;
   model?: string;
+  effort?: AgentEffort;
   tools?: string[];
   maxTurns?: number;
   cwd?: string;

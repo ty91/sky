@@ -222,6 +222,7 @@ export async function startBot(): Promise<void> {
     systemPrompt: initialPrompt,
     systemPromptLoader: loadPrompt,
     model: settings.model,
+    effort: settings.effort,
     slackFileUploaderProvider: createSlackFileUploaderProvider(() => slackApp),
   });
 

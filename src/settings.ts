@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { AGENT_EFFORT_LEVELS } from './agents/effort.js';
 
 export const SKY_DIR = path.join(os.homedir(), '.sky');
 const SETTINGS_FILE = path.join(SKY_DIR, 'settings.json');
@@ -16,6 +17,7 @@ const settingsSchema = z
     slack: slackSettingsSchema,
     model: z.string().min(1),
     agentBackend: z.enum(['pi', 'claude-agent-sdk']).default('pi'),
+    effort: z.enum(AGENT_EFFORT_LEVELS).optional(),
     workspace: z.string().default(path.join(os.homedir(), '.sky', 'workspace')),
   })
   .strict();

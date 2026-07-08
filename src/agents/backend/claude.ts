@@ -403,11 +403,13 @@ class ClaudeAgentSdkSession implements AgentSession {
       skills: 'all',
       strictMcpConfig: true,
       includePartialMessages: true,
+      thinking: { type: 'adaptive' },
       env: this.env,
       mcpServers: {
         [CLAUDE_MCP_SERVER_NAME]: this.mcpServer,
       },
       ...(this.options.agent.model ? { model: resolveClaudeModel(this.options.agent.model) } : {}),
+      ...(this.options.agent.effort ? { effort: this.options.agent.effort } : {}),
       ...(this.options.agent.maxTurns !== undefined ? { maxTurns: this.options.agent.maxTurns } : {}),
       ...(toolSelection.builtins !== undefined ? { tools: toolSelection.builtins } : {}),
       ...(toolSelection.allowed !== undefined ? { allowedTools: toolSelection.allowed } : {}),

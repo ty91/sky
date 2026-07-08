@@ -52,6 +52,7 @@ pnpm install
   },
   "model": "anthropic/claude-opus-4-7",
   "agentBackend": "pi",
+  "effort": "xhigh",
   "workspace": "/Users/taeyoung/.sky/workspace"
 }
 ```
@@ -60,6 +61,7 @@ pnpm install
 - `slack.appToken`: Socket Mode용 app token.
 - `model`: 필수. `<provider>/<model>` 형식입니다.
 - `agentBackend`: 선택. 기본값 `pi`. `pi` 또는 `claude-agent-sdk`를 지정합니다.
+- `effort`: 선택. `medium`, `high`, `xhigh` 중 하나입니다. 생략하면 backend 기본값을 사용합니다.
 - `workspace`: 선택. 기본값 `~/.sky/workspace`. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
 - `slack` 설정은 필수입니다.
 

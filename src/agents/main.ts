@@ -7,6 +7,7 @@ import {
   SLACK_ATTACH_FILES_TOOL_NAME,
 } from './tools/slack-attach-files.js';
 import type { AgentToolSpec } from './backend/types.js';
+import type { AgentEffort } from './effort.js';
 import type { AgentConfig } from './types.js';
 import type { SlackFileUploader } from '../slack/files.js';
 
@@ -33,6 +34,7 @@ export type MainAgentConfigOptions = {
   /** Called on new sessions so AGENTS.md/MEMORY.md edits take effect without a bot restart. */
   systemPromptLoader?: () => string;
   model?: string;
+  effort?: AgentEffort;
   /** Test seam for the in-process restart signal. Production defaults to process.kill. */
   restartSignalParent?: (pid: number, signal: NodeJS.Signals) => void;
   /** Lazily resolves a Slack uploader for Slack-bound sessions. */
@@ -58,6 +60,7 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
     systemPrompt: options.systemPrompt,
     systemPromptLoader: options.systemPromptLoader,
     model: options.model ?? 'anthropic/claude-opus-4-7',
+    ...(options.effort ? { effort: options.effort } : {}),
     tools: [...MAIN_AGENT_TOOLS],
     customToolsFactory: ({ sessionKey }) => {
       const { channelId, threadTs } = parseSessionKey(sessionKey);

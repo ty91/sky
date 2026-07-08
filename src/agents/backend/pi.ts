@@ -166,6 +166,7 @@ export function createPiSessionFactoryWithDeps(
         authStorage,
         modelRegistry,
         ...(model ? { model } : {}),
+        ...(agent.effort ? { thinkingLevel: agent.effort } : {}),
         ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),
         ...(customTools ? { customTools } : {}),
         resourceLoader,

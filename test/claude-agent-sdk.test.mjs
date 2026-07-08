@@ -200,6 +200,8 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
   assert.deepEqual(queryParams.options.settings, { disableBundledSkills: true });
   assert.equal(queryParams.options.strictMcpConfig, true);
   assert.equal(queryParams.options.includePartialMessages, true);
+  assert.deepEqual(queryParams.options.thinking, { type: 'adaptive' });
+  assert.equal(queryParams.options.effort, undefined);
   assert.equal(queryParams.options.maxTurns, 3);
   assert.equal(queryParams.options.env.CLAUDE_CODE_OAUTH_TOKEN, 'oauth-token');
   assert.equal(queryParams.options.env.ANTHROPIC_API_KEY, undefined);
@@ -234,6 +236,40 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
     content: [{ type: 'text', text: 'scheduled:reload' }],
     structuredContent: { accepted: true },
   });
+});
+
+test('claude agent sdk session passes configured effort', async () => {
+  let queryParams;
+  const { deps } = createFakeDeps({
+    env: {
+      PATH: '/bin',
+      HOME: '/tmp/home',
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+    },
+    query: (params) => {
+      queryParams = params;
+      return createQuery(async function* () {
+        yield initMessage('claude-session-effort');
+        yield successResult('claude-session-effort');
+      });
+    },
+  });
+  const createSession = createClaudeAgentSdkSessionFactory(deps);
+  const session = await createSession({
+    key: 'thread-1',
+    cwd: '/tmp/workspace',
+    agent: {
+      name: 'main',
+      systemPrompt: 'system',
+      model: 'anthropic/claude-opus-4-7',
+      effort: 'xhigh',
+    },
+  });
+
+  await session.prompt('hello');
+
+  assert.deepEqual(queryParams.options.thinking, { type: 'adaptive' });
+  assert.equal(queryParams.options.effort, 'xhigh');
 });
 
 test('claude agent sdk session freezes the loaded system prompt for the session', async () => {

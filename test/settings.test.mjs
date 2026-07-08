@@ -33,6 +33,37 @@ test('parseSettings accepts configured agent backend', () => {
   assert.equal(settings.agentBackend, 'claude-agent-sdk');
 });
 
+test('parseSettings accepts configured effort', () => {
+  const settings = parseSettings({
+    slack: {
+      botToken: 'xoxb-test',
+      appToken: 'xapp-test',
+    },
+    model: 'anthropic/claude-opus-4-7',
+    effort: 'xhigh',
+  });
+
+  assert.equal(settings.effort, 'xhigh');
+});
+
+test('parseSettings rejects unsupported effort', () => {
+  assert.throws(
+    () =>
+      parseSettings({
+        slack: {
+          botToken: 'xoxb-test',
+          appToken: 'xapp-test',
+        },
+        model: 'anthropic/claude-opus-4-7',
+        effort: 'low',
+      }),
+    (error) => {
+      assert.match(error.message, /Invalid option/);
+      return true;
+    },
+  );
+});
+
 test('parseSettings rejects unknown agent backend', () => {
   assert.throws(
     () =>
