@@ -96,7 +96,6 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
   assert.deepEqual(replies.replies, ['streamed reply']);
   assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
     'add:thought_balloon',
-    'add:white_check_mark',
     'remove:thought_balloon',
   ]);
 
@@ -151,7 +150,6 @@ test('executeSlackTurn sends each assistant message separately before marking co
     'reaction:thought_balloon',
     'reply:first',
     'reply:second',
-    'reaction:white_check_mark',
     'remove:thought_balloon',
   ]);
 });

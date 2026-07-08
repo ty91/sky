@@ -106,7 +106,7 @@ test('agent DM handler starts a thread from a root DM and replies in that thread
   ]);
   assert.deepEqual(
     slack.calls.reactions.filter((call) => call.method === 'add').map((call) => call.name),
-    ['thought_balloon', 'white_check_mark'],
+    ['thought_balloon'],
   );
 });
 

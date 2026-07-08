@@ -60,7 +60,6 @@ export async function executeSlackTurn({
       transcript.appendAssistant(message);
       await reply.sendReply(message);
     }
-    await addReaction(reactionClient, channelId, messageTs, 'white_check_mark');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[slack] error handling turn in ${threadId}: ${message}`);
