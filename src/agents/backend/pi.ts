@@ -29,6 +29,9 @@ type PiBackendDeps = {
 
 type PiSessionEvent = {
   type: string;
+  message?: {
+    role?: unknown;
+  };
   assistantMessageEvent?: {
     type: string;
     delta?: unknown;
@@ -106,6 +109,10 @@ function extractPiTextDelta(event: PiSessionEvent): string | undefined {
   return assistantEvent.delta;
 }
 
+function isPiAssistantMessageEnd(event: PiSessionEvent): boolean {
+  return event.type === 'message_end' && event.message?.role === 'assistant';
+}
+
 export function toPiToolDefinition(spec: AgentToolSpec): ToolDefinition {
   return {
     name: spec.name,
@@ -138,6 +145,10 @@ function toAgentSession(session: PiSession): AgentSession {
         const delta = extractPiTextDelta(event);
         if (delta !== undefined) {
           listener({ type: 'text_delta', delta });
+          return;
+        }
+        if (isPiAssistantMessageEnd(event)) {
+          listener({ type: 'message_end' });
         }
       }),
   };

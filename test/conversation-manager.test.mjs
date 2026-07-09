@@ -277,6 +277,8 @@ test('conversation manager forwards agent text deltas to the caller callback', a
 });
 
 test('conversation manager keeps assistant message boundaries when the backend emits them', async () => {
+  const delivered = [];
+  let firstDeliveredBeforePromptFinished = false;
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     createSession: createSessionFactory(async () =>
@@ -289,6 +291,8 @@ test('conversation manager keeps assistant message boundaries when the backend e
           emit({
             type: 'message_end',
           });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          firstDeliveredBeforePromptFinished = delivered.includes('first');
           emit({
             type: 'text_delta',
             delta: 'second',
@@ -301,11 +305,17 @@ test('conversation manager keeps assistant message boundaries when the backend e
     ),
   });
 
-  const result = await manager.runTurn('thread-1', AGENT, 'hello');
+  const result = await manager.runTurn('thread-1', AGENT, 'hello', {
+    onMessage: async (message) => {
+      delivered.push(message);
+    },
+  });
 
   assert.equal(result.kind, 'ok');
   assert.equal(result.text, 'firstsecond');
   assert.deepEqual(result.messages, ['first', 'second']);
+  assert.deepEqual(delivered, ['first', 'second']);
+  assert.equal(firstDeliveredBeforePromptFinished, true);
 });
 
 test('conversation manager interrupts an active turn and lets the latest turn complete', async () => {

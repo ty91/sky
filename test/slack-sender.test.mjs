@@ -53,3 +53,23 @@ test('SlackSender rethrows after max retries', async () => {
   await assert.rejects(sender.sendReply('ok'), /permanent failure/);
   assert.equal(attempts, 4);
 });
+
+test('SlackSender times out hung sends and keeps retries bounded', async () => {
+  let attempts = 0;
+  const sender = new SlackSender({
+    say: async () => {
+      attempts += 1;
+      await new Promise(() => {});
+    },
+    computeDelayMs: () => 0,
+    sendTimeoutMs: 5,
+    sleep: async () => {},
+  });
+
+  await assert.rejects(sender.sendReply('ok'), (error) => {
+    assert.equal(error.name, 'TimeoutError');
+    assert.match(error.message, /Slack message send timed out after 5ms/);
+    return true;
+  });
+  assert.equal(attempts, 4);
+});

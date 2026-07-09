@@ -70,6 +70,14 @@ function createControllablePiSession(state, { sessionId, sessionFile }) {
             });
           }
         },
+        finishAssistantMessage: () => {
+          for (const listener of listeners) {
+            listener({
+              type: 'message_end',
+              message: { role: 'assistant' },
+            });
+          }
+        },
         finish: () => deferredTurn.resolve(),
         fail: (error) => deferredTurn.reject(error),
       };
@@ -399,6 +407,26 @@ function defineAgentSessionContract(name, createHarness) {
 defineAgentSessionContract('pi adapter with fake backend', createPiAdapterHarness);
 
 defineAgentSessionContract('claude agent sdk adapter with fake backend', createClaudeAdapterHarness);
+
+test('pi adapter maps assistant message_end events to the common session contract', async () => {
+  const { factory, state } = createPiAdapterHarness();
+  const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+  const events = [];
+  session.subscribe((event) => events.push(event));
+
+  const prompt = session.prompt('stream');
+  await waitFor(() => state.activeTurn?.text === 'stream', 'pi active turn');
+
+  state.activeTurn.emit('hello');
+  state.activeTurn.finishAssistantMessage();
+  state.activeTurn.finish();
+  await prompt;
+
+  assert.deepEqual(events, [
+    { type: 'text_delta', delta: 'hello' },
+    { type: 'message_end' },
+  ]);
+});
 
 test('pi adapter passes configured effort as thinking level', async () => {
   const { factory, state } = createPiAdapterHarness();

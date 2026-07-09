@@ -1,14 +1,16 @@
-import { computeBackoffMs, sleep } from '../runtime/retry.js';
+import { computeBackoffMs, sleep, withTimeout } from '../runtime/retry.js';
 
 export type SlackSayFn = (text: string) => Promise<unknown>;
 
 export type SlackSenderOptions = {
   say: SlackSayFn;
   computeDelayMs?: (attempt: number) => number;
+  sendTimeoutMs?: number;
   sleep?: (delayMs: number) => Promise<void>;
 };
 
 const MAX_SLACK_MESSAGE_LENGTH = 3500;
+const DEFAULT_SLACK_SEND_TIMEOUT_MS = 30_000;
 
 export class SlackSender {
   constructor(private readonly options: SlackSenderOptions) {}
@@ -28,7 +30,11 @@ export class SlackSender {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        await this.options.say(text);
+        await withTimeout(
+          this.options.say(text),
+          this.options.sendTimeoutMs ?? DEFAULT_SLACK_SEND_TIMEOUT_MS,
+          'Slack message send',
+        );
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

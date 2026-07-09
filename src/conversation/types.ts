@@ -29,6 +29,7 @@ export type ConversationTurnResult =
 
 export type ConversationTurnOptions = {
   onTextDelta?: (delta: string) => void | Promise<void>;
+  onMessage?: (message: string) => void | Promise<void>;
 };
 
 export type ConversationManagerOptions = {

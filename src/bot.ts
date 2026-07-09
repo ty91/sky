@@ -8,6 +8,7 @@ import { createConversationManager, type ConversationManager } from './conversat
 import { openConversationStore } from './conversation/store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
+import { withTimeout } from './runtime/retry.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import {
   createSlackFileUploader,
@@ -18,6 +19,7 @@ import { loadSettings } from './settings.js';
 
 /** Delay before we spawn the replacement daemon and exit ourselves. */
 const RESTART_DELAY_MS = 3_000;
+const SLACK_POST_RESTART_SEND_TIMEOUT_MS = 30_000;
 
 function safeRead(filePath: string): string {
   try {
@@ -179,12 +181,16 @@ export async function triggerPostRestartIfPending(
     const notice = buildPostRestartNotice(pending);
 
     const result = await conversationManager.runTurn(pending.sessionKey, mainAgent, notice, {
-      onTextDelta: async (msg) => {
-        await slackApp.client.chat.postMessage({
-          channel: pending.channelId,
-          thread_ts: pending.threadTs,
-          text: msg,
-        });
+      onMessage: async (msg) => {
+        await withTimeout(
+          slackApp.client.chat.postMessage({
+            channel: pending.channelId,
+            thread_ts: pending.threadTs,
+            text: msg,
+          }),
+          SLACK_POST_RESTART_SEND_TIMEOUT_MS,
+          'Slack post-restart message send',
+        );
       },
     });
 

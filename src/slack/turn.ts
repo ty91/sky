@@ -37,10 +37,16 @@ export async function executeSlackTurn({
   try {
     transcript.appendUser(text);
     let streamedText = '';
+    const sentMessages: string[] = [];
 
     const result = await conversationManager.runTurn(threadId, mainAgent, text, {
       onTextDelta: (delta) => {
         streamedText += delta;
+      },
+      onMessage: async (message) => {
+        sentMessages.push(message);
+        transcript.appendAssistant(message);
+        await reply.sendReply(message);
       },
     });
 
@@ -56,6 +62,9 @@ export async function executeSlackTurn({
     const assistantText = result.text || streamedText;
     const assistantMessages = result.messages.length > 0 ? result.messages : [assistantText];
     transcript.setSessionId(result.handle.sessionId);
+    if (sentMessages.length > 0) {
+      return;
+    }
     for (const message of assistantMessages) {
       transcript.appendAssistant(message);
       await reply.sendReply(message);

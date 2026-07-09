@@ -62,6 +62,7 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
         agent,
         text,
         hasStreamingCallback: typeof options?.onTextDelta === 'function',
+        hasMessageCallback: typeof options?.onMessage === 'function',
       });
       await options.onTextDelta('streamed ');
       await options.onTextDelta('reply');
@@ -91,6 +92,7 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
       agent: MAIN_AGENT,
       text: '작업 상태 알려줘',
       hasStreamingCallback: true,
+      hasMessageCallback: true,
     },
   ]);
   assert.deepEqual(replies.replies, ['streamed reply']);
@@ -112,12 +114,19 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
 test('executeSlackTurn sends each assistant message separately before marking complete', async () => {
   const events = [];
   const conversationManager = {
-    runTurn: async () => ({
-      kind: 'ok',
-      text: 'firstsecond',
-      messages: ['first', 'second'],
-      handle: { sessionId: 'pi-session-turn', sessionFile: '/tmp/pi-session-turn.jsonl' },
-    }),
+    runTurn: async (_key, _agent, _text, options) => {
+      events.push('turn:start');
+      await options.onMessage('first');
+      events.push('turn:after-first');
+      await options.onMessage('second');
+      events.push('turn:end');
+      return {
+        kind: 'ok',
+        text: 'firstsecond',
+        messages: ['first', 'second'],
+        handle: { sessionId: 'pi-session-turn', sessionFile: '/tmp/pi-session-turn.jsonl' },
+      };
+    },
   };
 
   await executeSlackTurn({
@@ -148,8 +157,11 @@ test('executeSlackTurn sends each assistant message separately before marking co
 
   assert.deepEqual(events, [
     'reaction:thought_balloon',
+    'turn:start',
     'reply:first',
+    'turn:after-first',
     'reply:second',
+    'turn:end',
     'remove:thought_balloon',
   ]);
 });

@@ -46,6 +46,8 @@ type ConversationEntry = {
   activeMessageText: string;
   activeMessages: string[];
   activeDeltaTasks: Promise<void>[];
+  activeMessageDelivery: Promise<void>;
+  activeMessageDeliveryError?: Error;
   activeOptions?: ConversationTurnOptions;
   pending?: PendingTurn;
   workerRunning: boolean;
@@ -139,8 +141,25 @@ function flushActiveMessage(entry: ConversationEntry): void {
   if (!entry.activeMessageText) {
     return;
   }
-  entry.activeMessages.push(entry.activeMessageText);
+  const message = entry.activeMessageText;
+  entry.activeMessages.push(message);
   entry.activeMessageText = '';
+
+  const onMessage = entry.activeOptions?.onMessage;
+  if (!onMessage) {
+    return;
+  }
+
+  entry.activeMessageDelivery = entry.activeMessageDelivery
+    .then(async () => {
+      if (entry.activeMessageDeliveryError || entry.activeTurnInterrupted || entry.closed) {
+        return;
+      }
+      await onMessage(message);
+    })
+    .catch((error) => {
+      entry.activeMessageDeliveryError = toError(error);
+    });
 }
 
 async function runWorker(
@@ -161,6 +180,8 @@ async function runWorker(
     entry.activeMessageText = '';
     entry.activeMessages = [];
     entry.activeDeltaTasks = [];
+    entry.activeMessageDelivery = Promise.resolve();
+    entry.activeMessageDeliveryError = undefined;
     entry.activeOptions = req.options;
 
     try {
@@ -170,6 +191,10 @@ async function runWorker(
       await session.prompt(req.text);
       flushActiveMessage(entry);
       await Promise.all(entry.activeDeltaTasks);
+      await entry.activeMessageDelivery;
+      if (entry.activeMessageDeliveryError) {
+        throw entry.activeMessageDeliveryError;
+      }
 
       if (entry.activeTurnInterrupted || entry.activeTurnId !== turnId || entry.closed) {
         req.deferred.resolve({ kind: 'interrupted' });
@@ -268,6 +293,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
           activeMessageText: '',
           activeMessages: [],
           activeDeltaTasks: [],
+          activeMessageDelivery: Promise.resolve(),
           workerRunning: false,
           closed: false,
         };
