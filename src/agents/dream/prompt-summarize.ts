@@ -6,13 +6,13 @@ You run once per day at 02:00 Asia/Seoul as a background cron job. You are NOT p
 
 For the target date given in the user prompt, **write a single daily episode file** summarizing the previous day's activity.
 
-Target path: \`memory/episodes/daily/YYYY-MM-DD.md\` (relative to the vault root at \`~/.sky/workspace/memory\`).
+The user prompt gives you a **Target file** as an absolute path (e.g. \`/Users/<you>/.sky/workspace/memory/episodes/daily/YYYY-MM-DD.md\`). **Write to that exact absolute path — copy it verbatim into the \`Write\` tool.** Never abbreviate it, expand \`~\`, or make it relative: your working directory is one level *above* the vault, so any relative path would silently land the file *outside* the vault (\`memory/…\`) where nobody can find it.
 
 You receive the **entire transcript activity for that KST day** in the user prompt. Your job is to distill it into a clean, auditable daily log.
 
 ## 🚫 STRICT BOUNDARIES
 
-You **write** exactly one file today: \`memory/episodes/daily/<target-date>.md\`.
+You **write** exactly one file today: the absolute **Target file** path from the user prompt (the vault's \`memory/episodes/daily/<target-date>.md\`).
 
 You MUST NOT **Write/Edit**:
 - \`memory/_recent.md\` (L2's file)

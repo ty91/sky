@@ -67,6 +67,7 @@ function buildSummarizeUserPrompt(
   targetDate: string,
   entries: TranscriptEntry[],
   nowIso: string,
+  targetPath: string,
 ): string {
   const dayOfWeek = koreanDayOfWeek(targetDate);
   const header = [
@@ -74,7 +75,9 @@ function buildSummarizeUserPrompt(
     '',
     `**Target date (KST):** ${targetDate} (${dayOfWeek})`,
     `**Run time (KST):** ${nowIso}`,
-    `**Target file:** \`memory/episodes/daily/${targetDate}.md\` (overwrite if exists)`,
+    `**Target file (ABSOLUTE path — pass this to Write verbatim):** \`${targetPath}\``,
+    'Write to that exact absolute path. Do NOT shorten it or make it relative — ' +
+      'your working directory is NOT the vault root, so a relative path would land outside the vault.',
     '',
   ];
 
@@ -100,13 +103,14 @@ function buildKnowledgeUserPrompt(
   targetDate: string,
   entries: TranscriptEntry[],
   nowIso: string,
+  dailyPath: string,
 ): string {
   const header = [
     '# L3 Dream — Step 2: Knowledge Update',
     '',
     `**Target date (KST):** ${targetDate}`,
     `**Run time (KST):** ${nowIso}`,
-    `**Daily file (written by Step 1):** \`memory/episodes/daily/${targetDate}.md\``,
+    `**Daily file (written by Step 1, ABSOLUTE path):** \`${dailyPath}\``,
     '',
     'Step 1 has just written the daily summary. Read it first, then consult the transcript ' +
       'below for any specific details you need before updating the long-term knowledge layers ' +
@@ -143,7 +147,7 @@ async function runSummarize(
 
   const key = 'dream:summarize';
   try {
-    const userText = buildSummarizeUserPrompt(targetDate, entries, nowIso);
+    const userText = buildSummarizeUserPrompt(targetDate, entries, nowIso, targetPath);
     const result = await options.conversationManager.runTurn(
       key,
       createSummarizeAgentConfig(options.workspace),
@@ -169,7 +173,8 @@ async function runKnowledge(
 ): Promise<string> {
   const key = 'dream:knowledge';
   try {
-    const userText = buildKnowledgeUserPrompt(targetDate, entries, nowIso);
+    const dailyPath = dreamDailyFilePath(options.workspace, targetDate);
+    const userText = buildKnowledgeUserPrompt(targetDate, entries, nowIso, dailyPath);
     const result = await options.conversationManager.runTurn(
       key,
       createKnowledgeAgentConfig(options.workspace),
