@@ -14,7 +14,9 @@ export const memoryCommand = new Command('memory')
   .action(async () => {
     const settings = loadSettings({ silent: true });
     console.log('[memory] starting L2 working memory agent...');
-    const createSession = resolveAgentSessionFactory(settings.agentBackend);
+    const createSession = resolveAgentSessionFactory(settings.agentBackend, {
+      claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
+    });
     const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,
       createSession,

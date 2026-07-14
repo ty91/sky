@@ -29,7 +29,9 @@ export const dreamCommand = new Command('dream')
 
     const settings = loadSettings({ silent: true });
     console.log('[dream] starting L3 dream agent…');
-    const createSession = resolveAgentSessionFactory(settings.agentBackend);
+    const createSession = resolveAgentSessionFactory(settings.agentBackend, {
+      claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
+    });
 
     const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,

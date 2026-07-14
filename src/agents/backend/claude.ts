@@ -424,15 +424,18 @@ class ClaudeAgentSdkSession implements AgentSession {
   }
 }
 
+const DEFAULT_SDK_DEPS: ClaudeAgentSdkDeps = {
+  query: sdkQuery,
+  createSdkMcpServer: sdkCreateSdkMcpServer,
+  tool: sdkTool,
+};
+
 export function createClaudeAgentSdkSessionFactory(
-  deps: ClaudeAgentSdkDeps = {
-    query: sdkQuery,
-    createSdkMcpServer: sdkCreateSdkMcpServer,
-    tool: sdkTool,
-  },
+  deps: Partial<ClaudeAgentSdkDeps> = {},
 ): AgentSessionFactory {
+  const resolvedDeps: ClaudeAgentSdkDeps = { ...DEFAULT_SDK_DEPS, ...deps };
   return Object.assign(
-    async (options: CreateAgentSessionOptions) => new ClaudeAgentSdkSession(options, deps),
+    async (options: CreateAgentSessionOptions) => new ClaudeAgentSdkSession(options, resolvedDeps),
     { backend: 'claude-agent-sdk' as const },
   );
 }

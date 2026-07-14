@@ -215,7 +215,9 @@ export async function startBot(): Promise<void> {
   console.log(`[startup] model: ${settings.model}`);
   console.log(`[startup] agent backend: ${settings.agentBackend}`);
   console.log(`[startup] workspace: ${settings.workspace}`);
-  const createSession = resolveAgentSessionFactory(settings.agentBackend);
+  const createSession = resolveAgentSessionFactory(settings.agentBackend, {
+    claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
+  });
 
   const scheduleRestart = makeRestartScheduler();
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);

@@ -12,11 +12,19 @@ const slackSettingsSchema = z.object({
   appToken: z.string(),
 });
 
+// Credentials for the `claude-agent-sdk` backend. Kept here (in addition to any
+// `CLAUDE_CODE_OAUTH_TOKEN` env var) so headless cron runs — which do NOT source
+// ~/.zshrc — can still authenticate. An explicit env var, when present, wins.
+const claudeAgentSdkSettingsSchema = z.object({
+  oauthToken: z.string().min(1),
+});
+
 const settingsSchema = z
   .object({
     slack: slackSettingsSchema,
     model: z.string().min(1),
     agentBackend: z.enum(['pi', 'claude-agent-sdk']).default('pi'),
+    claudeAgentSdk: claudeAgentSdkSettingsSchema.optional(),
     effort: z.enum(AGENT_EFFORT_LEVELS).optional(),
     workspace: z.string().default(path.join(os.homedir(), '.sky', 'workspace')),
   })
