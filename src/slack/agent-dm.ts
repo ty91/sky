@@ -1,5 +1,6 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
@@ -18,7 +19,7 @@ export type SlackAgentDmMessageEvent = {
   user?: string;
 };
 
-export type SlackAgentDmClient = {
+export type SlackAgentDmClient = AssistantStatusClient & {
   chat: {
     postMessage(params: { channel: string; text: string; thread_ts: string }): Promise<unknown>;
   };
@@ -97,6 +98,12 @@ export function createSlackAgentDmHandler({
 
       console.log(`[slack] agent DM root message in ${threadId}: ${JSON.stringify(userText)}`);
 
+      const indicator = createStatusIndicator({
+        client: slack,
+        channelId,
+        threadTs,
+      });
+
       await executeSlackTurn({
         threadId,
         channelId,
@@ -104,6 +111,7 @@ export function createSlackAgentDmHandler({
         text: userText,
         conversationManager,
         mainAgent,
+        indicator,
         reactionClient: slack,
         reply: sender,
       });

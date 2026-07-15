@@ -13,11 +13,20 @@ function createSlackClient() {
   const calls = {
     posts: [],
     reactions: [],
+    statuses: [],
   };
 
   return {
     calls,
     client: {
+      assistant: {
+        threads: {
+          setStatus: async (params) => {
+            calls.statuses.push(params);
+            return { ok: true };
+          },
+        },
+      },
       chat: {
         postMessage: async (params) => {
           calls.posts.push(params);
@@ -104,10 +113,17 @@ test('agent DM handler starts a thread from a root DM and replies in that thread
   assert.deepEqual(slack.calls.posts, [
     { channel: 'D123', text: '응답', thread_ts: '1777901000.000000' },
   ]);
+  // The "thinking" UI is now driven by assistant.threads.setStatus, not a reaction.
+  assert.deepEqual(slack.calls.reactions, []);
+  assert.ok(slack.calls.statuses.length >= 2, 'expected setStatus to be called');
   assert.deepEqual(
-    slack.calls.reactions.filter((call) => call.method === 'add').map((call) => call.name),
-    ['thought_balloon'],
+    slack.calls.statuses.map((call) => (call.status ? 'thinking' : 'clear')),
+    ['thinking', 'clear', 'clear'],
   );
+  for (const call of slack.calls.statuses) {
+    assert.equal(call.channel_id, 'D123');
+    assert.equal(call.thread_ts, '1777901000.000000');
+  }
 });
 
 test('agent DM handler ignores thread DMs and unsupported messages', async () => {

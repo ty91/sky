@@ -22,11 +22,20 @@ function createSlackClient({ history = [], historyError } = {}) {
     fetches: [],
     posts: [],
     reactions: [],
+    statuses: [],
   };
 
   return {
     calls,
     client: {
+      assistant: {
+        threads: {
+          setStatus: async (params) => {
+            calls.statuses.push(params);
+            return { ok: true };
+          },
+        },
+      },
       chat: {
         postMessage: async (params) => {
           calls.posts.push(params);

@@ -1,6 +1,7 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
@@ -76,6 +77,11 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
 
       const messageTs = message.ts;
       const sender = new SlackSender({ say });
+      const indicator = createStatusIndicator({
+        client: client as unknown as AssistantStatusClient,
+        channelId,
+        threadTs,
+      });
 
       await executeSlackTurn({
         threadId,
@@ -84,6 +90,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         text: userText,
         conversationManager,
         mainAgent,
+        indicator,
         reactionClient: client,
         reply: sender,
       });

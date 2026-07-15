@@ -35,6 +35,23 @@ function createReactionsClient() {
   };
 }
 
+function createIndicator(sink = []) {
+  return {
+    events: sink,
+    indicator: {
+      begin: async () => {
+        sink.push('indicator:begin');
+      },
+      pause: async () => {
+        sink.push('indicator:pause');
+      },
+      end: async () => {
+        sink.push('indicator:end');
+      },
+    },
+  };
+}
+
 function createReplyAdapter() {
   const replies = [];
   return {
@@ -53,6 +70,7 @@ test.after(() => {
 
 test('executeSlackTurn sends streamed fallback reply and records transcript after session id is known', async () => {
   const reactions = createReactionsClient();
+  const indicator = createIndicator();
   const replies = createReplyAdapter();
   const runTurnCalls = [];
   const conversationManager = {
@@ -80,6 +98,7 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
     conversationManager,
     mainAgent: MAIN_AGENT,
     messageTs: '1777901000.000000',
+    indicator: indicator.indicator,
     reactionClient: reactions.client,
     reply: replies.adapter,
     text: '작업 상태 알려줘',
@@ -96,10 +115,9 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
     },
   ]);
   assert.deepEqual(replies.replies, ['streamed reply']);
-  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'remove:thought_balloon',
-  ]);
+  // No thinking reaction is toggled anymore; the indicator drives the "thinking" UI.
+  assert.deepEqual(reactions.calls, []);
+  assert.deepEqual(indicator.events, ['indicator:begin', 'indicator:pause', 'indicator:end']);
 
   const transcript = fs.readFileSync(
     path.join(homeDir, '.sky', 'transcripts', 'C123:1777901000.000000', 'pi-session-turn.md'),
@@ -111,8 +129,9 @@ test('executeSlackTurn sends streamed fallback reply and records transcript afte
   assert.match(transcript, /streamed reply/);
 });
 
-test('executeSlackTurn sends each assistant message separately before marking complete', async () => {
+test('executeSlackTurn hides the indicator around each assistant message and resumes between them', async () => {
   const events = [];
+  const indicator = createIndicator(events);
   const conversationManager = {
     runTurn: async (_key, _agent, _text, options) => {
       events.push('turn:start');
@@ -134,18 +153,8 @@ test('executeSlackTurn sends each assistant message separately before marking co
     conversationManager,
     mainAgent: MAIN_AGENT,
     messageTs: '1777901000.000001',
-    reactionClient: {
-      reactions: {
-        add: async ({ name }) => {
-          events.push(`reaction:${name}`);
-          return { ok: true };
-        },
-        remove: async ({ name }) => {
-          events.push(`remove:${name}`);
-          return { ok: true };
-        },
-      },
-    },
+    indicator: indicator.indicator,
+    reactionClient: createReactionsClient().client,
     reply: {
       sendReply: async (text) => {
         events.push(`reply:${text}`);
@@ -156,18 +165,23 @@ test('executeSlackTurn sends each assistant message separately before marking co
   });
 
   assert.deepEqual(events, [
-    'reaction:thought_balloon',
+    'indicator:begin',
     'turn:start',
+    'indicator:pause',
     'reply:first',
+    'indicator:begin',
     'turn:after-first',
+    'indicator:pause',
     'reply:second',
+    'indicator:begin',
     'turn:end',
-    'remove:thought_balloon',
+    'indicator:end',
   ]);
 });
 
 test('executeSlackTurn marks interrupted turns without sending a reply', async () => {
   const reactions = createReactionsClient();
+  const indicator = createIndicator();
   const replies = createReplyAdapter();
   const conversationManager = {
     runTurn: async () => ({ kind: 'interrupted' }),
@@ -178,6 +192,7 @@ test('executeSlackTurn marks interrupted turns without sending a reply', async (
     conversationManager,
     mainAgent: MAIN_AGENT,
     messageTs: '1777901001.000000',
+    indicator: indicator.indicator,
     reactionClient: reactions.client,
     reply: replies.adapter,
     text: '중단될 작업',
@@ -185,11 +200,8 @@ test('executeSlackTurn marks interrupted turns without sending a reply', async (
   });
 
   assert.deepEqual(replies.replies, []);
-  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-    'add:thought_balloon',
-    'add:hand',
-    'remove:thought_balloon',
-  ]);
+  assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), ['add:hand']);
+  assert.deepEqual(indicator.events, ['indicator:begin', 'indicator:end']);
 });
 
 test('executeSlackTurn sends the common error reply for error results and thrown exceptions', async () => {
@@ -200,6 +212,7 @@ test('executeSlackTurn sends the common error reply for error results and thrown
     },
   ]) {
     const reactions = createReactionsClient();
+    const indicator = createIndicator();
     const replies = createReplyAdapter();
 
     await executeSlackTurn({
@@ -207,6 +220,7 @@ test('executeSlackTurn sends the common error reply for error results and thrown
       conversationManager: { runTurn },
       mainAgent: MAIN_AGENT,
       messageTs: '1777901002.000000',
+      indicator: indicator.indicator,
       reactionClient: reactions.client,
       reply: replies.adapter,
       text: '실패할 작업',
@@ -214,9 +228,7 @@ test('executeSlackTurn sends the common error reply for error results and thrown
     });
 
     assert.deepEqual(replies.replies, [SLACK_TURN_ERROR_REPLY]);
-    assert.deepEqual(reactions.calls.map((call) => `${call.method}:${call.name}`), [
-      'add:thought_balloon',
-      'remove:thought_balloon',
-    ]);
+    assert.deepEqual(reactions.calls, []);
+    assert.deepEqual(indicator.events, ['indicator:begin', 'indicator:end']);
   }
 });

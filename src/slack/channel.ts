@@ -1,5 +1,6 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
 import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
@@ -13,7 +14,7 @@ export type SlackChannelEvent = SlackChannelMessageEvent & {
   ts?: string;
 };
 
-export type SlackChannelClient = {
+export type SlackChannelClient = AssistantStatusClient & {
   chat: {
     postMessage(params: { channel: string; text: string; thread_ts: string }): Promise<unknown>;
   };
@@ -96,6 +97,12 @@ export function createSlackChannelHandler({
         userNameResolver,
       });
 
+      const indicator = createStatusIndicator({
+        client: slack,
+        channelId,
+        threadTs,
+      });
+
       await executeSlackTurn({
         threadId,
         channelId,
@@ -103,6 +110,7 @@ export function createSlackChannelHandler({
         text,
         conversationManager,
         mainAgent,
+        indicator,
         reactionClient: slack,
         reply: sender,
       });

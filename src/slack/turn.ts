@@ -1,7 +1,8 @@
 import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import { addReaction, removeReaction, type ReactionsClient } from './reactions.js';
+import type { TurnActivityIndicator } from './activity-indicator.js';
+import { addReaction, type ReactionsClient } from './reactions.js';
 
 export const SLACK_TURN_ERROR_REPLY = '오류가 났습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -16,6 +17,9 @@ export type ExecuteSlackTurnOptions = {
   text: string;
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
+  /** Shows the "thinking" state; hidden around each sent message. */
+  indicator: TurnActivityIndicator;
+  /** Used only for the `hand` marker on interrupted turns. */
   reactionClient: ReactionsClient;
   reply: SlackTurnReplyAdapter;
 };
@@ -27,12 +31,13 @@ export async function executeSlackTurn({
   text,
   conversationManager,
   mainAgent,
+  indicator,
   reactionClient,
   reply,
 }: ExecuteSlackTurnOptions): Promise<void> {
   const transcript = new TranscriptWriter(threadId);
 
-  await addReaction(reactionClient, channelId, messageTs, 'thought_balloon');
+  await indicator.begin();
 
   try {
     transcript.appendUser(text);
@@ -44,9 +49,12 @@ export async function executeSlackTurn({
         streamedText += delta;
       },
       onMessage: async (message) => {
+        await indicator.pause();
         sentMessages.push(message);
         transcript.appendAssistant(message);
         await reply.sendReply(message);
+        // Resume the indicator in case this isn't the final message.
+        await indicator.begin();
       },
     });
 
@@ -65,6 +73,7 @@ export async function executeSlackTurn({
     if (sentMessages.length > 0) {
       return;
     }
+    await indicator.pause();
     for (const message of assistantMessages) {
       transcript.appendAssistant(message);
       await reply.sendReply(message);
@@ -74,6 +83,6 @@ export async function executeSlackTurn({
     console.error(`[slack] error handling turn in ${threadId}: ${message}`);
     await reply.sendReply(SLACK_TURN_ERROR_REPLY);
   } finally {
-    await removeReaction(reactionClient, channelId, messageTs, 'thought_balloon');
+    await indicator.end();
   }
 }

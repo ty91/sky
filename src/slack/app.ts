@@ -52,6 +52,11 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
     slack: {
+      assistant: {
+        threads: {
+          setStatus: async (params) => app.client.assistant.threads.setStatus(params),
+        },
+      },
       chat: {
         postMessage: async (message) => app.client.chat.postMessage(message),
       },
@@ -73,6 +78,11 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
     slack: {
+      assistant: {
+        threads: {
+          setStatus: async (params) => app.client.assistant.threads.setStatus(params),
+        },
+      },
       chat: {
         postMessage: async (message) => app.client.chat.postMessage(message),
       },
