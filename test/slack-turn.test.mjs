@@ -116,6 +116,56 @@ test('executeSlackTurn delivers only the final message and records every assista
   assert.match(transcript, /final answer/);
 });
 
+test('executeSlackTurn logs interim messages as a truncated preview but not the final one', async () => {
+  const indicator = createIndicator();
+  const replies = createReplyAdapter();
+  const longInterim = 'a'.repeat(140);
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    logs.push(args.join(' '));
+  };
+
+  try {
+    const conversationManager = {
+      runTurn: async (_key, _agent, _text, options) => {
+        await options.onMessage(longInterim);
+        await options.onMessage('short interim');
+        await options.onMessage('final answer');
+        await options.onFinal('final answer');
+        return {
+          kind: 'ok',
+          text: 'final answer',
+          messages: [longInterim, 'short interim', 'final answer'],
+          handle: { sessionId: 'pi-session-log', sessionFile: '/tmp/pi-session-log.jsonl' },
+        };
+      },
+    };
+
+    await executeSlackTurn({
+      conversationManager,
+      mainAgent: MAIN_AGENT,
+      indicator: indicator.indicator,
+      reply: replies.adapter,
+      text: '중간 메시지 로깅',
+      threadId: 'C123:1777901000.000003',
+    });
+  } finally {
+    console.log = originalLog;
+  }
+
+  const interimLogs = logs.filter((line) => line.includes('interim message'));
+  const finalLogs = logs.filter((line) => line.includes('final message'));
+  // Both interim messages are logged as truncated previews.
+  assert.equal(interimLogs.length, 2);
+  assert.ok(interimLogs[0].endsWith(`${'a'.repeat(100)}…`));
+  assert.ok(interimLogs[1].endsWith('short interim'));
+  // The final message is logged too, labelled distinctly.
+  assert.equal(finalLogs.length, 1);
+  assert.ok(finalLogs[0].endsWith('final answer'));
+  assert.deepEqual(replies.replies, ['final answer']);
+});
+
 test('executeSlackTurn falls back to result.text when no final callback fires', async () => {
   const indicator = createIndicator();
   const replies = createReplyAdapter();

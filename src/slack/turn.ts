@@ -5,6 +5,15 @@ import type { TurnActivityIndicator } from './activity-indicator.js';
 
 export const SLACK_TURN_ERROR_REPLY = '오류가 났습니다. 잠시 뒤 다시 시도해 주세요.';
 
+const INTERIM_LOG_PREVIEW_LENGTH = 100;
+
+function previewForLog(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  return collapsed.length > INTERIM_LOG_PREVIEW_LENGTH
+    ? `${collapsed.slice(0, INTERIM_LOG_PREVIEW_LENGTH)}…`
+    : collapsed;
+}
+
 export type SlackTurnReplyAdapter = {
   sendReply(text: string): Promise<void>;
 };
@@ -34,16 +43,25 @@ export async function executeSlackTurn({
   try {
     transcript.appendUser(text);
     let finalSent = false;
+    // Holds the most recent assistant message. Once another message arrives it
+    // is confirmed to be an interim message and gets logged; the last message
+    // of the turn is the final one and is never logged here.
+    let pendingInterim: string | undefined;
 
     const result = await conversationManager.runTurn(threadId, mainAgent, text, {
       // Record every assistant message (interim + final) for memory, but do
       // not deliver interim messages to Slack.
       onMessage: (message) => {
         transcript.appendAssistant(message);
+        if (pendingInterim !== undefined) {
+          console.log(`[slack] interim message in ${threadId}: ${previewForLog(pendingInterim)}`);
+        }
+        pendingInterim = message;
       },
       // Only the final message is delivered to Slack.
       onFinal: async (finalText) => {
         finalSent = true;
+        console.log(`[slack] final message in ${threadId}: ${previewForLog(finalText)}`);
         await indicator.pause();
         await reply.sendReply(finalText);
         await indicator.begin();
@@ -63,6 +81,7 @@ export async function executeSlackTurn({
     // Fallback: if the run finished without a turn_end signal, still deliver
     // whatever final text the manager captured.
     if (!finalSent && result.text) {
+      console.log(`[slack] final message in ${threadId}: ${previewForLog(result.text)}`);
       await indicator.pause();
       await reply.sendReply(result.text);
     }
