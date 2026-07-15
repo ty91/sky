@@ -27,11 +27,21 @@ type PiBackendDeps = {
   SessionManager: typeof PiSessionManager;
 };
 
+type PiContentBlock = {
+  type?: unknown;
+  text?: unknown;
+};
+
+type PiMessage = {
+  role?: unknown;
+  content?: unknown;
+};
+
 type PiSessionEvent = {
   type: string;
-  message?: {
-    role?: unknown;
-  };
+  message?: PiMessage;
+  messages?: PiMessage[];
+  willRetry?: boolean;
   assistantMessageEvent?: {
     type: string;
     delta?: unknown;
@@ -109,8 +119,46 @@ function extractPiTextDelta(event: PiSessionEvent): string | undefined {
   return assistantEvent.delta;
 }
 
-function isPiAssistantMessageEnd(event: PiSessionEvent): boolean {
-  return event.type === 'message_end' && event.message?.role === 'assistant';
+function extractPiMessageText(message: PiMessage | undefined): string {
+  const content = message?.content;
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .map((block) => {
+      const b = block as PiContentBlock;
+      return b.type === 'text' && typeof b.text === 'string' ? b.text : '';
+    })
+    .join('');
+}
+
+function extractPiAssistantMessageText(event: PiSessionEvent): string | undefined {
+  if (event.type !== 'message_end' || event.message?.role !== 'assistant') {
+    return undefined;
+  }
+  const text = extractPiMessageText(event.message);
+  return text.length > 0 ? text : undefined;
+}
+
+/**
+ * The agent run finished. Pi's `agent_end` carries the full message list; the
+ * final answer is the last assistant message. `willRetry` means another
+ * `agent_end` will follow, so we only treat a non-retrying end as the turn end.
+ */
+function extractPiTurnEndText(event: PiSessionEvent): string | undefined {
+  if (event.type !== 'agent_end' || event.willRetry) {
+    return undefined;
+  }
+  const messages = event.messages;
+  if (!Array.isArray(messages)) {
+    return '';
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'assistant') {
+      return extractPiMessageText(messages[i]);
+    }
+  }
+  return '';
 }
 
 export function toPiToolDefinition(spec: AgentToolSpec): ToolDefinition {
@@ -147,8 +195,14 @@ function toAgentSession(session: PiSession): AgentSession {
           listener({ type: 'text_delta', delta });
           return;
         }
-        if (isPiAssistantMessageEnd(event)) {
-          listener({ type: 'message_end' });
+        const assistantText = extractPiAssistantMessageText(event);
+        if (assistantText !== undefined) {
+          listener({ type: 'assistant_message', text: assistantText });
+          return;
+        }
+        const turnEndText = extractPiTurnEndText(event);
+        if (turnEndText !== undefined) {
+          listener({ type: 'turn_end', text: turnEndText });
         }
       }),
   };

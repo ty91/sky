@@ -29,7 +29,10 @@ export type ConversationTurnResult =
 
 export type ConversationTurnOptions = {
   onTextDelta?: (delta: string) => void | Promise<void>;
+  /** Fired for every completed assistant message (interim + final). */
   onMessage?: (message: string) => void | Promise<void>;
+  /** Fired once with the final answer when the turn completes. */
+  onFinal?: (text: string) => void | Promise<void>;
 };
 
 export type ConversationManagerOptions = {

@@ -203,8 +203,23 @@ function extractClaudeTextDelta(message: SDKMessage): string | undefined {
   return undefined;
 }
 
-function isClaudeMessageEnd(message: SDKMessage): boolean {
-  return message.type === 'stream_event' && message.event.type === 'message_stop';
+function extractClaudeAssistantText(message: SDKMessage): string | undefined {
+  if (message.type !== 'assistant') {
+    return undefined;
+  }
+
+  const content = (message.message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const text = content
+    .map((block) => {
+      const b = block as { type?: unknown; text?: unknown };
+      return b.type === 'text' && typeof b.text === 'string' ? b.text : '';
+    })
+    .join('');
+  return text.length > 0 ? text : undefined;
 }
 
 function formatResultError(message: SDKMessage): Error | undefined {
@@ -322,15 +337,20 @@ class ClaudeAgentSdkSession implements AgentSession {
           continue;
         }
 
-        if (isClaudeMessageEnd(message)) {
-          this.emit({ type: 'message_end' });
+        const assistantText = extractClaudeAssistantText(message);
+        if (assistantText !== undefined) {
+          this.emit({ type: 'assistant_message', text: assistantText });
           continue;
         }
 
         if (message.type === 'result') {
           input.end();
-          if (!turn.interrupted) {
-            resultError = formatResultError(message);
+          if (turn.interrupted) {
+            continue;
+          }
+          resultError = formatResultError(message);
+          if (!resultError && message.subtype === 'success') {
+            this.emit({ type: 'turn_end', text: message.result });
           }
         }
       }

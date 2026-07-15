@@ -156,7 +156,7 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
     },
     conversationManager: createConversationManagerMock({
       runTurn: async (key, agent, text, options) => {
-        runTurnCalls.push({ key, agent, text, hasStreamingCallback: typeof options?.onTextDelta === 'function' });
+        runTurnCalls.push({ key, agent, text, hasFinalCallback: typeof options?.onFinal === 'function' });
         return {
           kind: 'ok',
           text: '좋아요',
@@ -178,7 +178,7 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
       key: 'C999:1888.55',
       agent: MAIN_AGENT,
       text: '태영(<@U123>): 작업 상태 알려줘',
-      hasStreamingCallback: true,
+      hasFinalCallback: true,
     },
   ]);
 });

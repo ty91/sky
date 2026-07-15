@@ -33,19 +33,19 @@ export async function executeSlackTurn({
 
   try {
     transcript.appendUser(text);
-    let streamedText = '';
-    const sentMessages: string[] = [];
+    let finalSent = false;
 
     const result = await conversationManager.runTurn(threadId, mainAgent, text, {
-      onTextDelta: (delta) => {
-        streamedText += delta;
-      },
-      onMessage: async (message) => {
-        await indicator.pause();
-        sentMessages.push(message);
+      // Record every assistant message (interim + final) for memory, but do
+      // not deliver interim messages to Slack.
+      onMessage: (message) => {
         transcript.appendAssistant(message);
-        await reply.sendReply(message);
-        // Resume the indicator in case this isn't the final message.
+      },
+      // Only the final message is delivered to Slack.
+      onFinal: async (finalText) => {
+        finalSent = true;
+        await indicator.pause();
+        await reply.sendReply(finalText);
         await indicator.begin();
       },
     });
@@ -58,16 +58,13 @@ export async function executeSlackTurn({
       throw result.error;
     }
 
-    const assistantText = result.text || streamedText;
-    const assistantMessages = result.messages.length > 0 ? result.messages : [assistantText];
     transcript.setSessionId(result.handle.sessionId);
-    if (sentMessages.length > 0) {
-      return;
-    }
-    await indicator.pause();
-    for (const message of assistantMessages) {
-      transcript.appendAssistant(message);
-      await reply.sendReply(message);
+
+    // Fallback: if the run finished without a turn_end signal, still deliver
+    // whatever final text the manager captured.
+    if (!finalSent && result.text) {
+      await indicator.pause();
+      await reply.sendReply(result.text);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

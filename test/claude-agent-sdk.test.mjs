@@ -47,22 +47,22 @@ function textDelta(sessionId, text) {
   };
 }
 
-function messageStop(sessionId) {
+function assistantMessage(sessionId, text) {
   return {
-    type: 'stream_event',
+    type: 'assistant',
     session_id: sessionId,
-    event: {
-      type: 'message_stop',
-    },
+    parent_tool_use_id: null,
+    message: { content: [{ type: 'text', text }] },
   };
 }
 
-function successResult(sessionId) {
+function successResult(sessionId, result = 'hello world') {
   return {
     type: 'result',
     subtype: 'success',
     session_id: sessionId,
     is_error: false,
+    result,
   };
 }
 
@@ -142,7 +142,7 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
         yield initMessage('claude-session-1');
         yield textDelta('claude-session-1', 'hello ');
         yield textDelta('claude-session-1', 'world');
-        yield messageStop('claude-session-1');
+        yield assistantMessage('claude-session-1', 'hello world');
         yield successResult('claude-session-1');
         inputEnded = (await input.next()).done;
       });
@@ -183,7 +183,8 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
   assert.deepEqual(events, [
     { type: 'text_delta', delta: 'hello ' },
     { type: 'text_delta', delta: 'world' },
-    { type: 'message_end' },
+    { type: 'assistant_message', text: 'hello world' },
+    { type: 'turn_end', text: 'hello world' },
   ]);
   assert.equal(inputEnded, true);
   assert.deepEqual(observedUserMessage, {

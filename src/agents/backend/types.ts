@@ -2,8 +2,15 @@ import type { AgentConfig } from '../types.js';
 import type { ZodRawShape } from 'zod';
 
 export type AgentSessionEvent =
+  // Token-level streaming of the in-progress assistant message.
   | { type: 'text_delta'; delta: string }
-  | { type: 'message_end' };
+  // A completed assistant message block. Emitted once per assistant message
+  // and may be an interim message (the agent will continue, e.g. before a
+  // tool call) or the last one of the run.
+  | { type: 'assistant_message'; text: string }
+  // The prompt() run has completed. `text` is the final/definitive answer and
+  // equals the text of the last `assistant_message`. Fires exactly once per run.
+  | { type: 'turn_end'; text: string };
 
 export type AgentSession = {
   readonly sessionId: string;

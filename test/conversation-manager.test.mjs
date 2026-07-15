@@ -34,6 +34,14 @@ function createFakeAgentSession({
           type: 'text_delta',
           delta: `reply to ${text}`,
         });
+        listener({
+          type: 'assistant_message',
+          text: `reply to ${text}`,
+        });
+        listener({
+          type: 'turn_end',
+          text: `reply to ${text}`,
+        });
       }
     },
     abort: async () => {
@@ -259,6 +267,14 @@ test('conversation manager forwards agent text deltas to the caller callback', a
             type: 'text_delta',
             delta: 'world',
           });
+          emit({
+            type: 'assistant_message',
+            text: 'hello world',
+          });
+          emit({
+            type: 'turn_end',
+            text: 'hello world',
+          });
         },
       }),
     ),
@@ -289,7 +305,8 @@ test('conversation manager keeps assistant message boundaries when the backend e
             delta: 'first',
           });
           emit({
-            type: 'message_end',
+            type: 'assistant_message',
+            text: 'first',
           });
           await new Promise((resolve) => setTimeout(resolve, 0));
           firstDeliveredBeforePromptFinished = delivered.includes('first');
@@ -298,7 +315,8 @@ test('conversation manager keeps assistant message boundaries when the backend e
             delta: 'second',
           });
           emit({
-            type: 'message_end',
+            type: 'assistant_message',
+            text: 'second',
           });
         },
       }),

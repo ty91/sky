@@ -418,7 +418,7 @@ const calls = { runTurn: [], posts: [] };
 const conversationManager = {
   runTurn: async (key, agent, text, options) => {
     calls.runTurn.push({ key, agentName: agent.name, text });
-    await options.onMessage('back online');
+    await options.onFinal('back online');
     return { kind: 'ok', text: 'back online', handle: { sessionId: 'pi-session' } };
   },
 };

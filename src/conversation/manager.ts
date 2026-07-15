@@ -43,7 +43,7 @@ type ConversationEntry = {
   activeTurnId?: number;
   activeTurnInterrupted: boolean;
   activeText: string;
-  activeMessageText: string;
+  activeFinalText: string;
   activeMessages: string[];
   activeDeltaTasks: Promise<void>[];
   activeMessageDelivery: Promise<void>;
@@ -121,41 +121,41 @@ function wireStreaming(entry: ConversationEntry, session: AgentSession): void {
       return;
     }
 
-    if (event.type === 'message_end') {
-      flushActiveMessage(entry);
-      return;
-    }
-
     if (event.type === 'text_delta') {
       entry.activeText += event.delta;
-      entry.activeMessageText += event.delta;
       const maybeTask = entry.activeOptions?.onTextDelta?.(event.delta);
       if (maybeTask) {
         entry.activeDeltaTasks.push(Promise.resolve(maybeTask));
+      }
+      return;
+    }
+
+    if (event.type === 'assistant_message') {
+      entry.activeMessages.push(event.text);
+      const onMessage = entry.activeOptions?.onMessage;
+      if (onMessage) {
+        enqueueDelivery(entry, () => onMessage(event.text));
+      }
+      return;
+    }
+
+    if (event.type === 'turn_end') {
+      entry.activeFinalText = event.text;
+      const onFinal = entry.activeOptions?.onFinal;
+      if (onFinal) {
+        enqueueDelivery(entry, () => onFinal(event.text));
       }
     }
   });
 }
 
-function flushActiveMessage(entry: ConversationEntry): void {
-  if (!entry.activeMessageText) {
-    return;
-  }
-  const message = entry.activeMessageText;
-  entry.activeMessages.push(message);
-  entry.activeMessageText = '';
-
-  const onMessage = entry.activeOptions?.onMessage;
-  if (!onMessage) {
-    return;
-  }
-
+function enqueueDelivery(entry: ConversationEntry, deliver: () => void | Promise<void>): void {
   entry.activeMessageDelivery = entry.activeMessageDelivery
     .then(async () => {
       if (entry.activeMessageDeliveryError || entry.activeTurnInterrupted || entry.closed) {
         return;
       }
-      await onMessage(message);
+      await deliver();
     })
     .catch((error) => {
       entry.activeMessageDeliveryError = toError(error);
@@ -177,7 +177,7 @@ async function runWorker(
     entry.activeTurnId = turnId;
     entry.activeTurnInterrupted = false;
     entry.activeText = '';
-    entry.activeMessageText = '';
+    entry.activeFinalText = '';
     entry.activeMessages = [];
     entry.activeDeltaTasks = [];
     entry.activeMessageDelivery = Promise.resolve();
@@ -189,7 +189,6 @@ async function runWorker(
       wireStreaming(entry, session);
 
       await session.prompt(req.text);
-      flushActiveMessage(entry);
       await Promise.all(entry.activeDeltaTasks);
       await entry.activeMessageDelivery;
       if (entry.activeMessageDeliveryError) {
@@ -204,7 +203,7 @@ async function runWorker(
         persistConversation(entry, session);
         req.deferred.resolve({
           kind: 'ok',
-          text: entry.activeText,
+          text: entry.activeFinalText || entry.activeText,
           messages: entry.activeMessages,
           handle,
         });
@@ -290,7 +289,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
           turnCounter: 0,
           activeTurnInterrupted: false,
           activeText: '',
-          activeMessageText: '',
+          activeFinalText: '',
           activeMessages: [],
           activeDeltaTasks: [],
           activeMessageDelivery: Promise.resolve(),

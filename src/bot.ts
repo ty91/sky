@@ -181,12 +181,12 @@ export async function triggerPostRestartIfPending(
     const notice = buildPostRestartNotice(pending);
 
     const result = await conversationManager.runTurn(pending.sessionKey, mainAgent, notice, {
-      onMessage: async (msg) => {
+      onFinal: async (finalText) => {
         await withTimeout(
           slackApp.client.chat.postMessage({
             channel: pending.channelId,
             thread_ts: pending.threadTs,
-            text: msg,
+            text: finalText,
           }),
           SLACK_POST_RESTART_SEND_TIMEOUT_MS,
           'Slack post-restart message send',

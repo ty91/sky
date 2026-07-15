@@ -70,11 +70,20 @@ function createControllablePiSession(state, { sessionId, sessionFile }) {
             });
           }
         },
-        finishAssistantMessage: () => {
+        finishAssistantMessage: (assistantText = 'hello') => {
           for (const listener of listeners) {
             listener({
               type: 'message_end',
-              message: { role: 'assistant' },
+              message: { role: 'assistant', content: [{ type: 'text', text: assistantText }] },
+            });
+          }
+        },
+        endRun: (finalText = 'hello') => {
+          for (const listener of listeners) {
+            listener({
+              type: 'agent_end',
+              willRetry: false,
+              messages: [{ role: 'assistant', content: [{ type: 'text', text: finalText }] }],
             });
           }
         },
@@ -258,6 +267,16 @@ function resultMessage(sessionId, subtype = 'success') {
     subtype,
     session_id: sessionId,
     is_error: subtype !== 'success',
+    ...(subtype === 'success' ? { result: 'final answer' } : {}),
+  };
+}
+
+function assistantMessage(sessionId, text) {
+  return {
+    type: 'assistant',
+    session_id: sessionId,
+    parent_tool_use_id: null,
+    message: { content: [{ type: 'text', text }] },
   };
 }
 
@@ -344,7 +363,11 @@ function defineAgentSessionContract(name, createHarness) {
     const { factory, state } = createHarness();
     const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
     const deltas = [];
-    session.subscribe((event) => deltas.push(event.delta));
+    session.subscribe((event) => {
+      if (event.type === 'text_delta') {
+        deltas.push(event.delta);
+      }
+    });
 
     const prompt = session.prompt('stream');
     await waitFor(() => state.activeTurn?.text === 'stream', `${name} streaming turn`);
@@ -408,7 +431,7 @@ defineAgentSessionContract('pi adapter with fake backend', createPiAdapterHarnes
 
 defineAgentSessionContract('claude agent sdk adapter with fake backend', createClaudeAdapterHarness);
 
-test('pi adapter maps assistant message_end events to the common session contract', async () => {
+test('pi adapter maps assistant messages and run end to the common session contract', async () => {
   const { factory, state } = createPiAdapterHarness();
   const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
   const events = [];
@@ -418,13 +441,15 @@ test('pi adapter maps assistant message_end events to the common session contrac
   await waitFor(() => state.activeTurn?.text === 'stream', 'pi active turn');
 
   state.activeTurn.emit('hello');
-  state.activeTurn.finishAssistantMessage();
+  state.activeTurn.finishAssistantMessage('hello');
+  state.activeTurn.endRun('hello');
   state.activeTurn.finish();
   await prompt;
 
   assert.deepEqual(events, [
     { type: 'text_delta', delta: 'hello' },
-    { type: 'message_end' },
+    { type: 'assistant_message', text: 'hello' },
+    { type: 'turn_end', text: 'hello' },
   ]);
 });
 
