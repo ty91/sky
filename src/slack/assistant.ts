@@ -85,13 +85,10 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
 
       await executeSlackTurn({
         threadId,
-        channelId,
-        messageTs,
         text: userText,
         conversationManager,
         mainAgent,
         indicator,
-        reactionClient: client,
         reply: sender,
       });
     },

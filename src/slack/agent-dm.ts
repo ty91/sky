@@ -106,13 +106,10 @@ export function createSlackAgentDmHandler({
 
       await executeSlackTurn({
         threadId,
-        channelId,
-        messageTs,
         text: userText,
         conversationManager,
         mainAgent,
         indicator,
-        reactionClient: slack,
         reply: sender,
       });
 

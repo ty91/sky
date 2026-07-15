@@ -2,7 +2,6 @@ import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { TurnActivityIndicator } from './activity-indicator.js';
-import { addReaction, type ReactionsClient } from './reactions.js';
 
 export const SLACK_TURN_ERROR_REPLY = '오류가 났습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -12,27 +11,20 @@ export type SlackTurnReplyAdapter = {
 
 export type ExecuteSlackTurnOptions = {
   threadId: string;
-  channelId: string;
-  messageTs: string;
   text: string;
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
   /** Shows the "thinking" state; hidden around each sent message. */
   indicator: TurnActivityIndicator;
-  /** Used only for the `hand` marker on interrupted turns. */
-  reactionClient: ReactionsClient;
   reply: SlackTurnReplyAdapter;
 };
 
 export async function executeSlackTurn({
   threadId,
-  channelId,
-  messageTs,
   text,
   conversationManager,
   mainAgent,
   indicator,
-  reactionClient,
   reply,
 }: ExecuteSlackTurnOptions): Promise<void> {
   const transcript = new TranscriptWriter(threadId);
@@ -59,7 +51,6 @@ export async function executeSlackTurn({
     });
 
     if (result.kind === 'interrupted') {
-      await addReaction(reactionClient, channelId, messageTs, 'hand');
       return;
     }
 
