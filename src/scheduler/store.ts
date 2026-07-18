@@ -134,7 +134,7 @@ export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): Schedul
     skipOverdueStmt: db.prepare(`
       UPDATE scheduled_jobs
       SET status = 'done'
-      WHERE status = 'pending' AND next_run_at < ?
+      WHERE status = 'pending' AND kind = 'once' AND next_run_at < ?
     `),
     failRunningBeforeStmt: db.prepare(`
       UPDATE scheduled_jobs
