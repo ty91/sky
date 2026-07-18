@@ -21,6 +21,7 @@ import {
   type SlackFileUploader,
   type SlackUploadV2Client,
 } from './slack/files.js';
+import { runProactiveAgentTurn } from './slack/proactive-turn.js';
 import { loadSettings } from './settings.js';
 
 /** Delay before we spawn the replacement daemon and exit ourselves. */
@@ -186,8 +187,12 @@ export async function triggerPostRestartIfPending(
   try {
     const notice = buildPostRestartNotice(pending);
 
-    const result = await conversationManager.runTurn(pending.sessionKey, mainAgent, notice, {
-      onFinal: async (finalText) => {
+    const result = await runProactiveAgentTurn({
+      conversationManager,
+      mainAgent,
+      sessionKey: pending.sessionKey,
+      prompt: notice,
+      deliverFinal: async (finalText) => {
         await withTimeout(
           slackApp.client.chat.postMessage({
             channel: pending.channelId,
