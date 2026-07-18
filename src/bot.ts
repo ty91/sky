@@ -9,12 +9,19 @@ import { openConversationStore } from './conversation/store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { withTimeout } from './runtime/retry.js';
+import { createScheduledJobDispatcher } from './scheduler/dispatcher.js';
+import {
+  createScheduledJobScheduler,
+  type ScheduledJobScheduler,
+} from './scheduler/loop.js';
+import { openScheduledJobStore } from './scheduler/store.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import {
   createSlackFileUploader,
   type SlackFileUploader,
   type SlackUploadV2Client,
 } from './slack/files.js';
+import { runProactiveAgentTurn } from './slack/proactive-turn.js';
 import { loadSettings } from './settings.js';
 
 /** Delay before we spawn the replacement daemon and exit ourselves. */
@@ -180,8 +187,12 @@ export async function triggerPostRestartIfPending(
   try {
     const notice = buildPostRestartNotice(pending);
 
-    const result = await conversationManager.runTurn(pending.sessionKey, mainAgent, notice, {
-      onFinal: async (finalText) => {
+    const result = await runProactiveAgentTurn({
+      conversationManager,
+      mainAgent,
+      sessionKey: pending.sessionKey,
+      prompt: notice,
+      deliverFinal: async (finalText) => {
         await withTimeout(
           slackApp.client.chat.postMessage({
             channel: pending.channelId,
@@ -221,7 +232,9 @@ export async function startBot(): Promise<void> {
 
   const scheduleRestart = makeRestartScheduler();
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
+  const scheduledJobStore = openScheduledJobStore();
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
+  let scheduledJobScheduler: ScheduledJobScheduler | undefined;
 
   // `initialPrompt` is the static fallback for resumed sessions that have no
   // stored snapshot. `loadPrompt` runs again on new sessions so prompt file
@@ -232,6 +245,7 @@ export async function startBot(): Promise<void> {
     model: settings.model,
     effort: settings.effort,
     slackFileUploaderProvider: createSlackFileUploaderProvider(() => slackApp),
+    scheduledJobStore,
   });
 
   const conversationStore = openConversationStore();
@@ -251,6 +265,17 @@ export async function startBot(): Promise<void> {
       mainAgent,
     });
 
+    const scheduledJobDispatcher = createScheduledJobDispatcher({
+      conversationManager,
+      mainAgent,
+      postMessage: (message) => slackApp!.client.chat.postMessage(message),
+    });
+    scheduledJobScheduler = createScheduledJobScheduler({
+      store: scheduledJobStore,
+      dispatcher: scheduledJobDispatcher,
+    });
+    await scheduledJobScheduler.start();
+
     // Fire the post-restart trigger *after* transports are up but *before* we
     // start waiting for shutdown.
     await triggerPostRestartIfPending(slackApp, conversationManager, mainAgent);
@@ -258,11 +283,13 @@ export async function startBot(): Promise<void> {
     await waitForShutdownSignal();
   } finally {
     unregisterRestartSignalHandler();
+    await scheduledJobScheduler?.stop();
     await conversationManager.closeAll();
     if (slackApp) {
       await stopSlackApp(slackApp);
     }
     conversationStore.close();
+    scheduledJobStore.close();
   }
 }
 
