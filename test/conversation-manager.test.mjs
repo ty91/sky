@@ -248,6 +248,79 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   ]);
 });
 
+test('conversation manager re-keys an in-memory conversation and moves the persisted pointer', async () => {
+  const { store, data, calls } = createMockConversationStore();
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: createSessionFactory(async () =>
+      createFakeAgentSession({
+        sessionId: 'agent-session-rekey',
+        resumeRef: '/tmp/pi-session-rekey.jsonl',
+      }),
+    ),
+  });
+
+  const first = await manager.runTurn('scheduled:job-1', AGENT, 'hello');
+  assert.equal(first.kind, 'ok');
+  assert.equal(manager.has('scheduled:job-1', AGENT), true);
+
+  manager.rekey('scheduled:job-1', 'D123:1799971200.000100');
+
+  // In-memory index moved.
+  assert.equal(manager.has('scheduled:job-1', AGENT), false);
+  assert.equal(manager.has('D123:1799971200.000100', AGENT), true);
+  assert.deepEqual(manager.getHandle('D123:1799971200.000100', AGENT), {
+    sessionId: 'agent-session-rekey',
+    sessionFile: '/tmp/pi-session-rekey.jsonl',
+  });
+
+  // Persisted pointer moved (put at new key, removed at old key).
+  assert.equal(data.has('scheduled:job-1:pi'), false);
+  assert.equal(data.has('D123:1799971200.000100:pi'), true);
+  assert.deepEqual(calls.remove.at(-1), { key: 'scheduled:job-1', backend: 'pi' });
+
+  // The re-keyed session keeps the same backend history: the follow-up reply
+  // resumes it rather than creating a new session.
+  const created = [];
+  const managerAfterRestart = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: createSessionFactory(async (config) => {
+      created.push(config);
+      return createFakeAgentSession({
+        sessionId: 'agent-session-rekey',
+        resumeRef: '/tmp/pi-session-rekey.jsonl',
+      });
+    }),
+  });
+  const reply = await managerAfterRestart.runTurn('D123:1799971200.000100', AGENT, 'reply');
+  assert.equal(reply.kind, 'ok');
+  assert.deepEqual(created[0].resume, {
+    sessionId: 'agent-session-rekey',
+    resumeRef: '/tmp/pi-session-rekey.jsonl',
+  });
+
+  await manager.closeAll();
+  await managerAfterRestart.closeAll();
+});
+
+test('conversation manager rekey is a no-op for equal keys and unknown sources', () => {
+  const { store, calls } = createMockConversationStore();
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: createSessionFactory(async () => createFakeAgentSession()),
+  });
+
+  manager.rekey('same', 'same');
+  manager.rekey('missing', 'target');
+
+  assert.deepEqual(calls.put, []);
+  assert.deepEqual(calls.remove, []);
+  assert.equal(manager.has('target', AGENT), false);
+});
+
 test('conversation manager forwards agent text deltas to the caller callback', async () => {
   const deltas = [];
   const manager = createConversationManager({

@@ -2,9 +2,22 @@ import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import { withTimeout } from '../runtime/retry.js';
 import { runProactiveAgentTurn } from '../slack/proactive-turn.js';
+import { toThreadId } from '../slack/thread-id.js';
 import type { ScheduledJob } from './types.js';
 
 const SLACK_SCHEDULED_SEND_TIMEOUT_MS = 30_000;
+
+function scheduledSessionKey(job: ScheduledJob): string {
+  return `scheduled:${job.id}`;
+}
+
+function readPostedTs(response: unknown): string | undefined {
+  if (typeof response !== 'object' || response === null) {
+    return undefined;
+  }
+  const ts = (response as { ts?: unknown }).ts;
+  return typeof ts === 'string' && ts.length > 0 ? ts : undefined;
+}
 
 export type ScheduledSlackMessage = {
   channel: string;
@@ -17,7 +30,7 @@ export type ScheduledJobDispatcher = {
 };
 
 export type ScheduledJobDispatcherOptions = {
-  conversationManager: Pick<ConversationManager, 'runTurn'>;
+  conversationManager: Pick<ConversationManager, 'runTurn' | 'rekey'>;
   mainAgent: AgentConfig;
   postMessage(message: ScheduledSlackMessage): Promise<unknown>;
   sendTimeoutMs?: number;
@@ -43,18 +56,24 @@ export function createScheduledJobDispatcher(
 
   return {
     async dispatch(job: ScheduledJob): Promise<void> {
+      const sessionKey = scheduledSessionKey(job);
+      let postedTs: string | undefined;
+
       const sendFinal = async (text: string): Promise<void> => {
-        await withTimeout(
+        const response = await withTimeout(
           options.postMessage({ channel: job.targetChannel, text }),
           sendTimeoutMs,
           'Slack scheduled reminder send',
         );
+        // The reminder lands as a new root message; its ts becomes the thread_ts
+        // of any reply. Capture it so we can re-key the session below.
+        postedTs = readPostedTs(response) ?? postedTs;
       };
 
       const result = await runProactiveAgentTurn({
         conversationManager: options.conversationManager,
         mainAgent: options.mainAgent,
-        sessionKey: `scheduled:${job.id}`,
+        sessionKey,
         prompt: buildScheduledJobNotice(job),
         deliverFinal: sendFinal,
       });
@@ -64,6 +83,13 @@ export function createScheduledJobDispatcher(
       }
       if (result.kind === 'error') {
         throw result.error;
+      }
+
+      // Move the just-completed proactive session onto the Slack thread key so a
+      // reply in the reminder's thread resumes this conversation instead of
+      // starting a fresh one. Without a delivered ts there's no thread to bind.
+      if (postedTs) {
+        options.conversationManager.rekey(sessionKey, toThreadId(job.targetChannel, postedTs));
       }
     },
 
