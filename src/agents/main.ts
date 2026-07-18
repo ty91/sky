@@ -6,10 +6,17 @@ import {
   createSlackAttachFilesToolSpec,
   SLACK_ATTACH_FILES_TOOL_NAME,
 } from './tools/slack-attach-files.js';
+import {
+  CANCEL_SCHEDULED_TOOL_NAME,
+  createScheduledToolSpecs,
+  LIST_SCHEDULED_TOOL_NAME,
+  SCHEDULE_REMINDER_TOOL_NAME,
+} from './tools/schedule.js';
 import type { AgentToolSpec } from './backend/types.js';
 import type { AgentEffort } from './effort.js';
 import type { AgentConfig } from './types.js';
 import type { SlackFileUploader } from '../slack/files.js';
+import type { ScheduledJobStore } from '../scheduler/types.js';
 
 const MAIN_AGENT_TOOLS = [
   'Bash',
@@ -26,6 +33,9 @@ const MAIN_AGENT_TOOLS = [
   'WebSearch',
   RESTART_HARNESS_TOOL_NAME,
   SLACK_ATTACH_FILES_TOOL_NAME,
+  SCHEDULE_REMINDER_TOOL_NAME,
+  LIST_SCHEDULED_TOOL_NAME,
+  CANCEL_SCHEDULED_TOOL_NAME,
 ] as const;
 
 export type MainAgentConfigOptions = {
@@ -39,6 +49,9 @@ export type MainAgentConfigOptions = {
   restartSignalParent?: (pid: number, signal: NodeJS.Signals) => void;
   /** Lazily resolves a Slack uploader for Slack-bound sessions. */
   slackFileUploaderProvider?: () => SlackFileUploader | undefined;
+  scheduledJobStore?: ScheduledJobStore;
+  schedulerClock?: () => number;
+  schedulerIdFactory?: () => string;
 };
 
 function parseSessionKey(sessionKey: string): { channelId: string; threadTs: string } {
@@ -93,6 +106,17 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
               },
             },
           ),
+        );
+      }
+
+      if (options.scheduledJobStore) {
+        tools.push(
+          ...createScheduledToolSpecs({
+            store: options.scheduledJobStore,
+            channelId,
+            now: options.schedulerClock,
+            createId: options.schedulerIdFactory,
+          }),
         );
       }
 

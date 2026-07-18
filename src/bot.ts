@@ -9,6 +9,7 @@ import { openConversationStore } from './conversation/store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { withTimeout } from './runtime/retry.js';
+import { openScheduledJobStore } from './scheduler/store.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import {
   createSlackFileUploader,
@@ -221,6 +222,7 @@ export async function startBot(): Promise<void> {
 
   const scheduleRestart = makeRestartScheduler();
   const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
+  const scheduledJobStore = openScheduledJobStore();
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
 
   // `initialPrompt` is the static fallback for resumed sessions that have no
@@ -232,6 +234,7 @@ export async function startBot(): Promise<void> {
     model: settings.model,
     effort: settings.effort,
     slackFileUploaderProvider: createSlackFileUploaderProvider(() => slackApp),
+    scheduledJobStore,
   });
 
   const conversationStore = openConversationStore();
@@ -263,6 +266,7 @@ export async function startBot(): Promise<void> {
       await stopSlackApp(slackApp);
     }
     conversationStore.close();
+    scheduledJobStore.close();
   }
 }
 
