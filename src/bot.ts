@@ -269,7 +269,7 @@ export async function startBot(): Promise<void> {
       store: scheduledJobStore,
       dispatcher: scheduledJobDispatcher,
     });
-    scheduledJobScheduler.start();
+    await scheduledJobScheduler.start();
 
     // Fire the post-restart trigger *after* transports are up but *before* we
     // start waiting for shutdown.

@@ -4,11 +4,12 @@ import type { ScheduledJobStore } from './types.js';
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 60_000;
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
+const DEFAULT_RUNNING_TIMEOUT_MS = 60 * 60 * 1_000;
 
 type IntervalHandle = unknown;
 
 export type ScheduledJobScheduler = {
-  start(): void;
+  start(): Promise<void>;
   stop(): Promise<void>;
   tick(): Promise<void>;
 };
@@ -20,6 +21,7 @@ export type ScheduledJobSchedulerOptions = {
   maxAttempts?: number;
   retryDelayMs?: number;
   tickIntervalMs?: number;
+  runningTimeoutMs?: number;
   setInterval?: (callback: () => void, milliseconds: number) => IntervalHandle;
   clearInterval?: (handle: IntervalHandle) => void;
 };
@@ -31,6 +33,7 @@ export function createScheduledJobScheduler(
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS;
+  const runningTimeoutMs = options.runningTimeoutMs ?? DEFAULT_RUNNING_TIMEOUT_MS;
   const setSchedulerInterval =
     options.setInterval ?? ((callback, milliseconds) => setInterval(callback, milliseconds));
   const clearSchedulerInterval =
@@ -38,8 +41,29 @@ export function createScheduledJobScheduler(
   let activeTick: Promise<void> | undefined;
   let intervalHandle: IntervalHandle | undefined;
 
+  async function recoverStaleJobs(currentTime: number): Promise<void> {
+    const restartError = new Error(
+      'Reminder execution became stale after a Sky restart or crash and was not retried to avoid duplicate delivery.',
+    );
+    const interrupted = options.store.failRunningBefore(
+      currentTime - runningTimeoutMs,
+      restartError.message,
+    );
+    for (const job of interrupted) {
+      try {
+        await options.dispatcher.notifyFailure(job, restartError, job.runCount);
+      } catch (notificationError) {
+        const message =
+          notificationError instanceof Error ? notificationError.message : String(notificationError);
+        console.error(`[scheduler] failed to report interrupted job=${job.id}: ${message}`);
+      }
+    }
+  }
+
   async function runTick(): Promise<void> {
-    const jobs = options.store.claimDue(now());
+    const currentTime = now();
+    await recoverStaleJobs(currentTime);
+    const jobs = options.store.claimDue(currentTime);
     for (const job of jobs) {
       try {
         await options.dispatcher.dispatch(job);
@@ -68,11 +92,13 @@ export function createScheduledJobScheduler(
   }
 
   const scheduler: ScheduledJobScheduler = {
-    start(): void {
+    async start(): Promise<void> {
       if (intervalHandle !== undefined) {
         return;
       }
-      const skipped = options.store.skipOverdue(now());
+      const currentTime = now();
+      await recoverStaleJobs(currentTime);
+      const skipped = options.store.skipOverdue(currentTime);
       if (skipped > 0) {
         console.log(`[scheduler] skipped ${skipped} overdue job(s) at startup`);
       }

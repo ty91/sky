@@ -42,5 +42,6 @@ export interface ScheduledJobStore {
     maxAttempts: number,
   ): ScheduledJobFailureOutcome | undefined;
   skipOverdue(before: number): number;
+  failRunningBefore(before: number, error: string): ScheduledJob[];
   close(): void;
 }

@@ -139,7 +139,7 @@ test('scheduler start skips reminders missed while offline and starts a 30 secon
     clearInterval: (handle) => cleared.push(handle),
   });
 
-  scheduler.start();
+  await scheduler.start();
 
   assert.equal(store.list()[0].status, 'done');
   assert.equal(store.list()[0].runCount, 0);
@@ -155,5 +155,39 @@ test('scheduler start skips reminders missed while offline and starts a 30 secon
   assert.deepEqual(posts, [{ channel: 'D123', text: '새 리마인더' }]);
   assert.deepEqual(cleared, [intervals[0]]);
 
+  store.close();
+});
+
+test('scheduler start fails a stale interrupted reminder without redelivery', async () => {
+  const store = openScheduledJobStore(':memory:');
+  createJob(store);
+  store.claimDue(1_000);
+  const posts = [];
+  const dispatcher = createScheduledJobDispatcher({
+    mainAgent: { name: 'main', systemPrompt: 'system' },
+    conversationManager: {
+      runTurn: async () => {
+        throw new Error('must not redeliver');
+      },
+    },
+    postMessage: async (message) => posts.push(message),
+  });
+  const scheduler = createScheduledJobScheduler({
+    store,
+    dispatcher,
+    now: () => 3_602_000,
+    setInterval: () => ({ id: 'timer' }),
+    clearInterval: () => undefined,
+  });
+
+  await scheduler.start();
+
+  assert.equal(store.list()[0].status, 'failed');
+  assert.match(store.list()[0].lastError, /restart/i);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].channel, 'D123');
+  assert.match(posts[0].text, /여권 챙기기/);
+
+  await scheduler.stop();
   store.close();
 });

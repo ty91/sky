@@ -38,6 +38,7 @@ type StoreHandles = {
   markDoneStmt: StatementSync;
   recordFailureStmt: StatementSync;
   skipOverdueStmt: StatementSync;
+  failRunningBeforeStmt: StatementSync;
 };
 
 function ensureSchema(db: DatabaseSync): void {
@@ -113,7 +114,7 @@ export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): Schedul
       WHERE id IN (
         SELECT id
         FROM scheduled_jobs
-        WHERE status = 'pending' AND next_run_at <= ?
+        WHERE status = 'pending' AND kind = 'once' AND next_run_at <= ?
         ORDER BY next_run_at, created_at, id
       )
       RETURNING *
@@ -134,6 +135,12 @@ export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): Schedul
       UPDATE scheduled_jobs
       SET status = 'done'
       WHERE status = 'pending' AND next_run_at < ?
+    `),
+    failRunningBeforeStmt: db.prepare(`
+      UPDATE scheduled_jobs
+      SET status = 'failed', last_error = ?
+      WHERE status = 'running' AND last_run_at < ?
+      RETURNING *
     `),
   };
 
@@ -206,6 +213,12 @@ export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): Schedul
 
     skipOverdue(before: number): number {
       return Number(handles.skipOverdueStmt.run(before).changes);
+    },
+
+    failRunningBefore(before: number, error: string): ScheduledJob[] {
+      return (handles.failRunningBeforeStmt.all(error, before) as ScheduledJobRow[]).map(
+        toScheduledJob,
+      );
     },
 
     close(): void {

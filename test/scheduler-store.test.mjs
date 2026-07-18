@@ -65,14 +65,15 @@ test('scheduled job store cancels a pending reminder once', () => {
 
 test('scheduled job store atomically claims each due reminder once', () => {
   const store = openScheduledJobStore(':memory:');
-  for (const [id, nextRunAt] of [
-    ['due', 1_000],
-    ['future', 1_001],
+  for (const [id, kind, nextRunAt] of [
+    ['due', 'once', 1_000],
+    ['future', 'once', 1_001],
+    ['cron', 'cron', 1_000],
   ]) {
     store.create({
       id,
       title: id,
-      kind: 'once',
+      kind,
       nextRunAt,
       timezone: 'Asia/Seoul',
       targetChannel: 'D123',
@@ -104,6 +105,7 @@ test('scheduled job store atomically claims each due reminder once', () => {
   ]);
   assert.deepEqual(store.claimDue(1_000), []);
   assert.equal(store.list().find((job) => job.id === 'future').status, 'pending');
+  assert.equal(store.list().find((job) => job.id === 'cron').status, 'pending');
 
   store.close();
 });
