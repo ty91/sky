@@ -355,6 +355,32 @@ export function createConversationManager(options: ConversationManagerOptions): 
       return persisted ? toPersistedHandle(persisted) : undefined;
     },
 
+    rekey(oldKey, newKey) {
+      if (oldKey === newKey) {
+        return;
+      }
+
+      // Relocate the in-memory entry. The session state itself (backend handle,
+      // streaming subscription) rides along untouched — only its lookup key
+      // changes. Assumes the conversation is idle; an active/pending turn would
+      // still be resolved against the moved entry, but the scheduler only
+      // re-keys after its turn settles.
+      const entry = sessions.get(oldKey);
+      if (entry) {
+        entry.key = newKey;
+        sessions.delete(oldKey);
+        sessions.set(newKey, entry);
+      }
+
+      // Relocate the persisted pointer so a cold reply (after restart, with no
+      // in-memory entry) still resumes the same backend session.
+      const persisted = options.store?.get(oldKey, agentBackend);
+      if (persisted) {
+        options.store?.put(newKey, persisted);
+        options.store?.remove(oldKey, agentBackend);
+      }
+    },
+
     async close(key) {
       const entry = sessions.get(key);
       if (!entry) {

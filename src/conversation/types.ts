@@ -50,6 +50,16 @@ export type ConversationManager = {
   ): Promise<ConversationTurnResult>;
   has(key: string, agent?: AgentConfig): boolean;
   getHandle(key: string, agent?: AgentConfig): ConversationHandle | undefined;
+  /**
+   * Move an existing conversation from `oldKey` to `newKey` without touching the
+   * underlying backend session (history lives in the backend, keyed by
+   * `sessionId`/`resumeRef`). Only the in-memory index and the persisted store
+   * pointer are relocated. Intended to be called while the conversation is idle
+   * (no active or pending turn), e.g. right after a proactive scheduler turn so
+   * the user's reply thread resumes the same session. No-op when `oldKey` has no
+   * session or when the keys are equal.
+   */
+  rekey(oldKey: string, newKey: string): void;
   close(key: string): Promise<void>;
   purge(key: string): Promise<void>;
   closeAll(): Promise<void>;
