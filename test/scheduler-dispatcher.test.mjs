@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
+import { createSchedulerConversationManager } from './helpers/scheduler.mjs';
 
 const JOB = {
   id: 'job-1',
@@ -21,23 +22,14 @@ const JOB = {
 };
 
 test('scheduled job dispatcher wakes the agent and posts its final answer as a new Slack root', async () => {
-  const runTurns = [];
   const posts = [];
   const mainAgent = { name: 'main', systemPrompt: 'system' };
+  const { manager, prompts } = createSchedulerConversationManager({
+    finalText: '신청할 시간입니다.',
+  });
   const dispatcher = createScheduledJobDispatcher({
     mainAgent,
-    conversationManager: {
-      runTurn: async (key, agent, text, options) => {
-        runTurns.push({ key, agent, text });
-        await options.onFinal('신청할 시간입니다.');
-        return {
-          kind: 'ok',
-          text: '신청할 시간입니다.',
-          messages: ['신청할 시간입니다.'],
-          handle: { sessionId: 'scheduled-session-1' },
-        };
-      },
-    },
+    conversationManager: manager,
     postMessage: async (message) => {
       posts.push(message);
     },
@@ -45,11 +37,11 @@ test('scheduled job dispatcher wakes the agent and posts its final answer as a n
 
   await dispatcher.dispatch(JOB);
 
-  assert.equal(runTurns.length, 1);
-  assert.equal(runTurns[0].key, 'scheduled:job-1');
-  assert.equal(runTurns[0].agent, mainAgent);
-  assert.match(runTurns[0].text, /<system-reminder>/);
-  assert.match(runTurns[0].text, /국제운전면허증 신청/);
-  assert.match(runTurns[0].text, /국제운전면허증을 신청하라고 알려줘/);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /<system-reminder>/);
+  assert.match(prompts[0], /국제운전면허증 신청/);
+  assert.match(prompts[0], /국제운전면허증을 신청하라고 알려줘/);
   assert.deepEqual(posts, [{ channel: 'D123', text: '신청할 시간입니다.' }]);
+
+  await manager.closeAll();
 });

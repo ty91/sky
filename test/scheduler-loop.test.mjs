@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
 import { createScheduledJobScheduler } from '../dist/scheduler/loop.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
+import { createSchedulerConversationManager } from './helpers/scheduler.mjs';
 
 function createJob(store, overrides = {}) {
   return store.create({
@@ -20,24 +21,24 @@ function createJob(store, overrides = {}) {
   });
 }
 
+function createDispatcher(posts, agentResult) {
+  const { manager } = createSchedulerConversationManager(agentResult);
+  return {
+    manager,
+    dispatcher: createScheduledJobDispatcher({
+      mainAgent: { name: 'main', systemPrompt: 'system' },
+      conversationManager: manager,
+      postMessage: async (message) => posts.push(message),
+    }),
+  };
+}
+
 test('scheduler tick dispatches a due reminder once and marks it done', async () => {
   const store = openScheduledJobStore(':memory:');
   createJob(store);
   const posts = [];
-  const dispatcher = createScheduledJobDispatcher({
-    mainAgent: { name: 'main', systemPrompt: 'system' },
-    conversationManager: {
-      runTurn: async (_key, _agent, _text, options) => {
-        await options.onFinal('여권을 챙기세요.');
-        return {
-          kind: 'ok',
-          text: '여권을 챙기세요.',
-          messages: ['여권을 챙기세요.'],
-          handle: { sessionId: 'scheduled-session-1' },
-        };
-      },
-    },
-    postMessage: async (message) => posts.push(message),
+  const { dispatcher, manager } = createDispatcher(posts, {
+    finalText: '여권을 챙기세요.',
   });
   const scheduler = createScheduledJobScheduler({ store, dispatcher, now: () => 1_000 });
 
@@ -53,6 +54,7 @@ test('scheduler tick dispatches a due reminder once and marks it done', async ()
     { status: 'done', runCount: 1, lastRunAt: 1_000 },
   ]);
 
+  await manager.closeAll();
   store.close();
 });
 
@@ -60,12 +62,8 @@ test('scheduler retries a failed reminder three times before reporting failure',
   const store = openScheduledJobStore(':memory:');
   createJob(store);
   const posts = [];
-  const dispatcher = createScheduledJobDispatcher({
-    mainAgent: { name: 'main', systemPrompt: 'system' },
-    conversationManager: {
-      runTurn: async () => ({ kind: 'error', error: new Error('agent unavailable') }),
-    },
-    postMessage: async (message) => posts.push(message),
+  const { dispatcher, manager } = createDispatcher(posts, {
+    error: new Error('agent unavailable'),
   });
   let currentTime = 1_000;
   const scheduler = createScheduledJobScheduler({
@@ -102,35 +100,44 @@ test('scheduler retries a failed reminder three times before reporting failure',
   assert.match(posts[0].text, /여권 챙기기/);
   assert.match(posts[0].text, /3회/);
 
+  await manager.closeAll();
   store.close();
 });
 
-test('scheduler start skips reminders missed while offline and starts a 30 second ticker', async () => {
+test('scheduler start skips reminders missed while offline', async () => {
   const store = openScheduledJobStore(':memory:');
   createJob(store, { id: 'missed', nextRunAt: 999 });
   const posts = [];
-  const dispatcher = createScheduledJobDispatcher({
-    mainAgent: { name: 'main', systemPrompt: 'system' },
-    conversationManager: {
-      runTurn: async (_key, _agent, _text, options) => {
-        await options.onFinal('새 리마인더');
-        return {
-          kind: 'ok',
-          text: '새 리마인더',
-          messages: ['새 리마인더'],
-          handle: { sessionId: 'scheduled-session-2' },
-        };
-      },
-    },
-    postMessage: async (message) => posts.push(message),
+  const { dispatcher, manager } = createDispatcher(posts, { finalText: '새 리마인더' });
+  const scheduler = createScheduledJobScheduler({
+    store,
+    dispatcher,
+    now: () => 1_000,
+    setInterval: () => ({ id: 'timer' }),
+    clearInterval: () => undefined,
   });
-  let currentTime = 1_000;
+
+  await scheduler.start();
+
+  assert.equal(store.list()[0].status, 'done');
+  assert.equal(store.list()[0].runCount, 0);
+  assert.deepEqual(posts, []);
+  await scheduler.stop();
+
+  await manager.closeAll();
+  store.close();
+});
+
+test('scheduler start and stop manage a 30 second ticker', async () => {
+  const store = openScheduledJobStore(':memory:');
+  const posts = [];
+  const { dispatcher, manager } = createDispatcher(posts, { finalText: 'unused' });
   const intervals = [];
   const cleared = [];
   const scheduler = createScheduledJobScheduler({
     store,
     dispatcher,
-    now: () => currentTime,
+    now: () => 1_000,
     setInterval: (callback, milliseconds) => {
       const handle = { callback, milliseconds };
       intervals.push(handle);
@@ -140,21 +147,13 @@ test('scheduler start skips reminders missed while offline and starts a 30 secon
   });
 
   await scheduler.start();
-
-  assert.equal(store.list()[0].status, 'done');
-  assert.equal(store.list()[0].runCount, 0);
-  assert.deepEqual(posts, []);
-  assert.equal(intervals.length, 1);
-  assert.equal(intervals[0].milliseconds, 30_000);
-
-  createJob(store, { id: 'new', nextRunAt: 1_100 });
-  currentTime = 1_100;
-  await scheduler.tick();
   await scheduler.stop();
 
-  assert.deepEqual(posts, [{ channel: 'D123', text: '새 리마인더' }]);
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].milliseconds, 30_000);
   assert.deepEqual(cleared, [intervals[0]]);
 
+  await manager.closeAll();
   store.close();
 });
 
@@ -163,14 +162,8 @@ test('scheduler start fails a stale interrupted reminder without redelivery', as
   createJob(store);
   store.claimDue(1_000);
   const posts = [];
-  const dispatcher = createScheduledJobDispatcher({
-    mainAgent: { name: 'main', systemPrompt: 'system' },
-    conversationManager: {
-      runTurn: async () => {
-        throw new Error('must not redeliver');
-      },
-    },
-    postMessage: async (message) => posts.push(message),
+  const { dispatcher, manager } = createDispatcher(posts, {
+    error: new Error('must not redeliver'),
   });
   const scheduler = createScheduledJobScheduler({
     store,
@@ -189,5 +182,6 @@ test('scheduler start fails a stale interrupted reminder without redelivery', as
   assert.match(posts[0].text, /여권 챙기기/);
 
   await scheduler.stop();
+  await manager.closeAll();
   store.close();
 });

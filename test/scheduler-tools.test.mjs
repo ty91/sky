@@ -29,25 +29,19 @@ test('main agent can schedule a reminder for the current Slack channel', async (
     timezone: 'Asia/Seoul',
     channelId: 'D123',
   });
-  assert.deepEqual(store.list(), [
-    {
-      id: 'job-1',
-      title: '국제운전면허증 신청',
-      kind: 'once',
-      nextRunAt: 1_799_971_200_000,
-      cronExpr: null,
-      timezone: 'Asia/Seoul',
-      targetChannel: 'D123',
-      threadStrategy: 'new-root',
-      deliveryMode: 'agent',
-      prompt: '국제운전면허증을 신청하라고 알려줘',
-      status: 'pending',
-      createdAt: 1_700_000_000_000,
-      lastRunAt: null,
-      runCount: 0,
-      lastError: null,
-    },
-  ]);
+  const list = tools.find((tool) => tool.name === 'list_scheduled');
+  assert.deepEqual((await list.execute({})).details, {
+    jobs: [
+      {
+        id: 'job-1',
+        title: '국제운전면허증 신청',
+        when: '2027-01-15T00:00:00.000Z',
+        timezone: 'Asia/Seoul',
+        channelId: 'D123',
+        status: 'pending',
+      },
+    ],
+  });
 
   store.close();
 });
@@ -109,13 +103,16 @@ test('main agent can cancel a pending reminder', async () => {
   const cancel = agent
     .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
     .find((tool) => tool.name === 'cancel_scheduled');
+  const list = agent
+    .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
+    .find((tool) => tool.name === 'list_scheduled');
 
   const result = await cancel.execute({ id: 'job-1' });
 
   assert.equal(result.isError, undefined);
   assert.match(result.content[0].text, /job-1/);
   assert.deepEqual(result.details, { id: 'job-1', cancelled: true });
-  assert.equal(store.list()[0].status, 'cancelled');
+  assert.deepEqual((await list.execute({})).details, { jobs: [] });
 
   const repeated = await cancel.execute({ id: 'job-1' });
   assert.equal(repeated.isError, true);

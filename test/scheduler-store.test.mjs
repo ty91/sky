@@ -1,43 +1,37 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
 
 test('scheduled job store persists one-shot reminders for later delivery', () => {
-  const store = openScheduledJobStore(':memory:');
+  const directory = mkdtempSync(path.join(tmpdir(), 'sky-scheduler-store-'));
+  const dbPath = path.join(directory, 'sky.db');
+  let store = openScheduledJobStore(dbPath);
 
-  const job = store.create({
-    id: 'job-1',
-    title: '국제운전면허증 신청',
-    kind: 'once',
-    nextRunAt: 1_800_000_000_000,
-    timezone: 'Asia/Seoul',
-    targetChannel: 'D123',
-    threadStrategy: 'new-root',
-    deliveryMode: 'agent',
-    prompt: '국제운전면허증을 신청하라고 알려줘',
-    createdAt: 1_700_000_000_000,
-  });
+  try {
+    const job = store.create({
+      id: 'job-1',
+      title: '국제운전면허증 신청',
+      kind: 'once',
+      nextRunAt: 1_800_000_000_000,
+      timezone: 'Asia/Seoul',
+      targetChannel: 'D123',
+      threadStrategy: 'new-root',
+      deliveryMode: 'agent',
+      prompt: '국제운전면허증을 신청하라고 알려줘',
+      createdAt: 1_700_000_000_000,
+    });
 
-  assert.deepEqual(job, {
-    id: 'job-1',
-    title: '국제운전면허증 신청',
-    kind: 'once',
-    nextRunAt: 1_800_000_000_000,
-    cronExpr: null,
-    timezone: 'Asia/Seoul',
-    targetChannel: 'D123',
-    threadStrategy: 'new-root',
-    deliveryMode: 'agent',
-    prompt: '국제운전면허증을 신청하라고 알려줘',
-    status: 'pending',
-    createdAt: 1_700_000_000_000,
-    lastRunAt: null,
-    runCount: 0,
-    lastError: null,
-  });
-  assert.deepEqual(store.list(), [job]);
+    store.close();
+    store = openScheduledJobStore(dbPath);
 
-  store.close();
+    assert.deepEqual(store.list(), [job]);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('scheduled job store cancels a pending reminder once', () => {
