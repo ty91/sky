@@ -2,7 +2,12 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { SKY_DIR } from '../settings.js';
-import type { NewScheduledJob, ScheduledJob, ScheduledJobStore } from './types.js';
+import type {
+  NewScheduledJob,
+  ScheduledJob,
+  ScheduledJobFailureOutcome,
+  ScheduledJobStore,
+} from './types.js';
 
 const DEFAULT_DB_PATH = path.join(SKY_DIR, 'sky.db');
 
@@ -29,6 +34,10 @@ type StoreHandles = {
   createStmt: StatementSync;
   listStmt: StatementSync;
   cancelStmt: StatementSync;
+  claimDueStmt: StatementSync;
+  markDoneStmt: StatementSync;
+  recordFailureStmt: StatementSync;
+  skipOverdueStmt: StatementSync;
 };
 
 function ensureSchema(db: DatabaseSync): void {
@@ -98,6 +107,34 @@ export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): Schedul
     cancelStmt: db.prepare(
       "UPDATE scheduled_jobs SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
     ),
+    claimDueStmt: db.prepare(`
+      UPDATE scheduled_jobs
+      SET status = 'running', last_run_at = ?, run_count = run_count + 1
+      WHERE id IN (
+        SELECT id
+        FROM scheduled_jobs
+        WHERE status = 'pending' AND next_run_at <= ?
+        ORDER BY next_run_at, created_at, id
+      )
+      RETURNING *
+    `),
+    markDoneStmt: db.prepare(
+      "UPDATE scheduled_jobs SET status = 'done', last_error = NULL WHERE id = ? AND status = 'running'",
+    ),
+    recordFailureStmt: db.prepare(`
+      UPDATE scheduled_jobs
+      SET
+        status = CASE WHEN run_count >= ? THEN 'failed' ELSE 'pending' END,
+        next_run_at = CASE WHEN run_count >= ? THEN next_run_at ELSE ? END,
+        last_error = ?
+      WHERE id = ? AND status = 'running'
+      RETURNING status
+    `),
+    skipOverdueStmt: db.prepare(`
+      UPDATE scheduled_jobs
+      SET status = 'done'
+      WHERE status = 'pending' AND next_run_at < ?
+    `),
   };
 
   return {
@@ -132,6 +169,43 @@ export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): Schedul
 
     cancel(id: string): boolean {
       return handles.cancelStmt.run(id).changes === 1;
+    },
+
+    claimDue(now: number): ScheduledJob[] {
+      return (handles.claimDueStmt.all(now, now) as ScheduledJobRow[])
+        .map(toScheduledJob)
+        .sort((left, right) =>
+          left.nextRunAt - right.nextRunAt ||
+          left.createdAt - right.createdAt ||
+          left.id.localeCompare(right.id),
+        );
+    },
+
+    markDone(id: string): boolean {
+      return handles.markDoneStmt.run(id).changes === 1;
+    },
+
+    recordFailure(
+      id: string,
+      error: string,
+      retryAt: number,
+      maxAttempts: number,
+    ): ScheduledJobFailureOutcome | undefined {
+      const row = handles.recordFailureStmt.get(
+        maxAttempts,
+        maxAttempts,
+        retryAt,
+        error,
+        id,
+      ) as { status: 'pending' | 'failed' } | undefined;
+      if (!row) {
+        return undefined;
+      }
+      return row.status === 'failed' ? 'failed' : 'retrying';
+    },
+
+    skipOverdue(before: number): number {
+      return Number(handles.skipOverdueStmt.run(before).changes);
     },
 
     close(): void {

@@ -12,7 +12,8 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, model, agent backend, workspace를 보여줍니다.
-- 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`로 제한되어 있습니다.
+- 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
+- main agent는 `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 one-shot 리마인더를 관리하고 예정 시각에 먼저 Slack DM을 보낼 수 있습니다.
 - 에이전트 작업 디렉토리(`cwd`)는 기본적으로 `~/.sky/workspace`로 고정됩니다.
 
 ## 준비물
@@ -131,6 +132,9 @@ sky run
   - 설정 파일을 읽을 수 있는 경우 model, agent backend, workspace
 - 데몬 PID/log 파일은 기본적으로 `~/.sky/` 아래에 저장됩니다.
 - Conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.
+- 예약된 리마인더도 같은 `~/.sky/sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
+- 리마인더 실행이 실패하면 60초 간격으로 최대 3회 시도한 뒤 실패 알림을 보냅니다.
+- 봇이 꺼져 있는 동안 예정 시각이 지난 리마인더는 재시작 후 catch-up하지 않고 건너뜁니다.
 - 저장 record에는 backend, session id, resume reference, agent 이름, model이 들어갑니다.
 - backend를 바꾸면 기존 record는 삭제하지 않고 새 backend record를 따로 만듭니다. 다시 이전 backend로 롤백하면 이전 Slack thread의 conversation을 복원할 수 있습니다.
 

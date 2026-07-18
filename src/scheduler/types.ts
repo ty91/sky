@@ -2,6 +2,7 @@ export type ScheduledJobKind = 'once' | 'cron';
 export type ScheduledJobStatus = 'pending' | 'running' | 'done' | 'cancelled' | 'failed';
 export type ScheduledJobThreadStrategy = 'new-root';
 export type ScheduledJobDeliveryMode = 'agent';
+export type ScheduledJobFailureOutcome = 'retrying' | 'failed';
 
 export type ScheduledJob = {
   id: string;
@@ -32,5 +33,14 @@ export interface ScheduledJobStore {
   create(job: NewScheduledJob): ScheduledJob;
   list(): ScheduledJob[];
   cancel(id: string): boolean;
+  claimDue(now: number): ScheduledJob[];
+  markDone(id: string): boolean;
+  recordFailure(
+    id: string,
+    error: string,
+    retryAt: number,
+    maxAttempts: number,
+  ): ScheduledJobFailureOutcome | undefined;
+  skipOverdue(before: number): number;
   close(): void;
 }

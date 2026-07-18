@@ -62,3 +62,48 @@ test('scheduled job store cancels a pending reminder once', () => {
 
   store.close();
 });
+
+test('scheduled job store atomically claims each due reminder once', () => {
+  const store = openScheduledJobStore(':memory:');
+  for (const [id, nextRunAt] of [
+    ['due', 1_000],
+    ['future', 1_001],
+  ]) {
+    store.create({
+      id,
+      title: id,
+      kind: 'once',
+      nextRunAt,
+      timezone: 'Asia/Seoul',
+      targetChannel: 'D123',
+      threadStrategy: 'new-root',
+      deliveryMode: 'agent',
+      prompt: id,
+      createdAt: 500,
+    });
+  }
+
+  assert.deepEqual(store.claimDue(1_000), [
+    {
+      id: 'due',
+      title: 'due',
+      kind: 'once',
+      nextRunAt: 1_000,
+      cronExpr: null,
+      timezone: 'Asia/Seoul',
+      targetChannel: 'D123',
+      threadStrategy: 'new-root',
+      deliveryMode: 'agent',
+      prompt: 'due',
+      status: 'running',
+      createdAt: 500,
+      lastRunAt: 1_000,
+      runCount: 1,
+      lastError: null,
+    },
+  ]);
+  assert.deepEqual(store.claimDue(1_000), []);
+  assert.equal(store.list().find((job) => job.id === 'future').status, 'pending');
+
+  store.close();
+});
