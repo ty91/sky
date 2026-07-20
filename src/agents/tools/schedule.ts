@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { isValidCronExpr, nextCronRun } from '../../scheduler/cron.js';
 import type { ScheduledJobStore } from '../../scheduler/types.js';
 import type { AgentToolSpec } from '../backend/types.js';
+
+const REMINDER_TIMEZONE = 'Asia/Seoul';
 
 export const SCHEDULE_REMINDER_TOOL_NAME = 'schedule_reminder';
 export const LIST_SCHEDULED_TOOL_NAME = 'list_scheduled';
@@ -15,7 +18,8 @@ export type ScheduledToolDependencies = {
 };
 
 type ScheduleReminderInput = {
-  when: string;
+  when?: string;
+  cron?: string;
   prompt: string;
   title?: string;
   channelId?: string;
@@ -24,7 +28,17 @@ type ScheduleReminderInput = {
 const SCHEDULE_REMINDER_INPUT_SCHEMA = {
   when: z
     .string()
-    .describe('ISO8601 timestamp with an explicit UTC offset, calculated before calling this tool.'),
+    .optional()
+    .describe(
+      'For a one-shot reminder: ISO8601 timestamp with an explicit UTC offset, calculated before calling this tool. Provide either `when` or `cron`, not both.',
+    ),
+  cron: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'For a recurring reminder: a standard 5-field cron expression (minute hour day-of-month month day-of-week), evaluated in Asia/Seoul. Example: "30 8 * * *" runs every day at 08:30 KST. Provide either `when` or `cron`, not both.',
+    ),
   prompt: z.string().min(1).describe('Instruction for the agent turn that will produce the reminder.'),
   title: z.string().min(1).optional().describe('Short human-readable reminder title.'),
   channelId: z
@@ -51,21 +65,24 @@ export function createScheduledToolSpecs(deps: ScheduledToolDependencies): Agent
       name: SCHEDULE_REMINDER_TOOL_NAME,
       label: 'Schedule reminder',
       description: [
-        'Schedule a one-shot reminder that wakes the main agent and sends a new Slack root message.',
-        'Convert natural-language times to an absolute ISO8601 timestamp before calling this tool.',
-        'The timestamp must be in the future and include an explicit UTC offset.',
+        'Schedule a reminder that wakes the main agent and sends a new Slack root message.',
+        'For a one-shot reminder, pass `when` as an absolute future ISO8601 timestamp with an explicit UTC offset.',
+        'For a recurring reminder, pass `cron` as a standard 5-field cron expression (evaluated in Asia/Seoul).',
+        'Provide exactly one of `when` or `cron`.',
       ].join(' '),
       inputSchema: SCHEDULE_REMINDER_INPUT_SCHEMA,
       async execute(rawInput) {
         const input = rawInput as ScheduleReminderInput;
-        const nextRunAt = parseWhen(input.when);
         const currentTime = now();
-        if (nextRunAt === undefined || nextRunAt <= currentTime) {
+        const cronExpr = input.cron?.trim();
+        const whenValue = input.when?.trim();
+
+        if (cronExpr && whenValue) {
           return {
             content: [
               {
                 type: 'text',
-                text: 'Reminder was not scheduled: when must be a future ISO8601 timestamp with an explicit UTC offset.',
+                text: 'Reminder was not scheduled: provide either `when` (one-shot) or `cron` (recurring), not both.',
               },
             ],
             isError: true,
@@ -74,12 +91,72 @@ export function createScheduledToolSpecs(deps: ScheduledToolDependencies): Agent
 
         const targetChannel = input.channelId?.trim() || deps.channelId;
         const title = input.title?.trim() || '리마인더';
+
+        if (cronExpr) {
+          if (!isValidCronExpr(cronExpr)) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Reminder was not scheduled: "${cronExpr}" is not a valid cron expression.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const nextRunAt = nextCronRun(cronExpr, REMINDER_TIMEZONE, currentTime);
+          const job = deps.store.create({
+            id: createId(),
+            title,
+            kind: 'cron',
+            nextRunAt,
+            cronExpr,
+            timezone: REMINDER_TIMEZONE,
+            targetChannel,
+            threadStrategy: 'new-root',
+            deliveryMode: 'agent',
+            prompt: input.prompt,
+            createdAt: currentTime,
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Scheduled recurring reminder "${job.title}" (cron "${cronExpr}"), next run ${new Date(job.nextRunAt).toISOString()}.`,
+              },
+            ],
+            details: {
+              id: job.id,
+              title: job.title,
+              cron: cronExpr,
+              nextRun: new Date(job.nextRunAt).toISOString(),
+              timezone: job.timezone,
+              channelId: job.targetChannel,
+            },
+          };
+        }
+
+        const nextRunAt = whenValue ? parseWhen(whenValue) : undefined;
+        if (nextRunAt === undefined || nextRunAt <= currentTime) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Reminder was not scheduled: `when` must be a future ISO8601 timestamp with an explicit UTC offset, or provide a `cron` expression.',
+              },
+            ],
+            isError: true,
+          };
+        }
+
         const job = deps.store.create({
           id: createId(),
           title,
           kind: 'once',
           nextRunAt,
-          timezone: 'Asia/Seoul',
+          timezone: REMINDER_TIMEZONE,
           targetChannel,
           threadStrategy: 'new-root',
           deliveryMode: 'agent',
@@ -122,10 +199,15 @@ export function createScheduledToolSpecs(deps: ScheduledToolDependencies): Agent
           status: job.status,
         }));
         const text =
-          summaries.length === 0
+          jobs.length === 0
             ? 'No scheduled reminders.'
-            : summaries
-                .map((job) => `${job.id}: ${job.title} at ${job.when} (${job.timezone})`)
+            : jobs
+                .map((job) => {
+                  const when = new Date(job.nextRunAt).toISOString();
+                  return job.kind === 'cron'
+                    ? `${job.id}: ${job.title} [cron "${job.cronExpr}"] next ${when} (${job.timezone})`
+                    : `${job.id}: ${job.title} at ${when} (${job.timezone})`;
+                })
                 .join('\n');
         return {
           content: [{ type: 'text', text }],

@@ -1,3 +1,4 @@
+import { nextCronRun } from './cron.js';
 import type { ScheduledJobDispatcher } from './dispatcher.js';
 import type { ScheduledJobStore } from './types.js';
 
@@ -87,6 +88,39 @@ export function createScheduledJobScheduler(
             console.error(`[scheduler] failed to send failure notice for job=${job.id}: ${message}`);
           }
         }
+      }
+    }
+
+    const cronJobs = options.store.claimDueCron(currentTime);
+    for (const job of cronJobs) {
+      let lastError: string | null = null;
+      try {
+        await options.dispatcher.dispatch(job);
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        lastError = error.message;
+        console.error(`[scheduler] cron job=${job.id} dispatch failed: ${error.message}`);
+        try {
+          await options.dispatcher.notifyFailure(job, error, job.runCount);
+        } catch (notificationError) {
+          const message =
+            notificationError instanceof Error
+              ? notificationError.message
+              : String(notificationError);
+          console.error(`[scheduler] failed to send cron failure notice for job=${job.id}: ${message}`);
+        }
+      }
+      // Re-arm for the next occurrence regardless of success so a single failed
+      // run never kills the recurring schedule.
+      try {
+        const nextRunAt = nextCronRun(job.cronExpr ?? '', job.timezone, now());
+        options.store.rearmCron(job.id, nextRunAt, lastError);
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        // An unparseable cron expression cannot be rescheduled; fail it so it
+        // stops occupying a running slot.
+        options.store.recordFailure(job.id, `cron re-arm failed: ${error.message}`, now(), 0);
+        console.error(`[scheduler] cron job=${job.id} re-arm failed: ${error.message}`);
       }
     }
   }
