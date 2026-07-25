@@ -14,7 +14,7 @@ import { DREAM_SUMMARIZE_SYSTEM_PROMPT } from './prompt-summarize.js';
 import { DREAM_KNOWLEDGE_SYSTEM_PROMPT } from './prompt-knowledge.js';
 
 // L3 Dream Agent — see docs/plans/active/2026-04-20-memory-v2-phase3-dream.md
-const DREAM_MODEL = 'anthropic/claude-opus-4-8';
+const DREAM_MODEL = 'anthropic/claude-opus-5';
 // Step 1 gets Read/Glob/Grep for vault-context exploration even though the
 // transcript itself is already injected into the user prompt. The overwrite
 // policy is enforced at the runtime layer via preflight unlink, not via

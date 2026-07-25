@@ -5,7 +5,7 @@ import type { ConversationManager } from '../../conversation/manager.js';
 
 // L2 Working Memory Agent — see docs/plans/active/2026-04-20-memory-v2.md
 // Fast, 5-minute cadence. Sonnet is sufficient for single-file rolling summary.
-const MEMORY_AGENT_MODEL = 'anthropic/claude-sonnet-4-6';
+const MEMORY_AGENT_MODEL = 'anthropic/claude-sonnet-5';
 
 const MEMORY_AGENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 
