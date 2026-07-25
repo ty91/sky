@@ -34,6 +34,8 @@ export interface ScheduledJobStore {
   list(): ScheduledJob[];
   cancel(id: string): boolean;
   claimDue(now: number): ScheduledJob[];
+  claimDueCron(now: number): ScheduledJob[];
+  rearmCron(id: string, nextRunAt: number, lastError?: string | null): boolean;
   markDone(id: string): boolean;
   recordFailure(
     id: string,
