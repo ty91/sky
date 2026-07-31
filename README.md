@@ -155,3 +155,18 @@ sky run
 - public/private 채널에서는 루트 메시지 또는 thread reply에서 Sky를 멘션하면 해당 Slack thread에 답변합니다.
 - Conversation이 `~/.sky/sky.db`에 저장된 채널 thread는 멘션 없는 후속 reply도 같은 session으로 처리합니다.
 - 채널 thread에서 처음 Sky를 멘션한 요청에는 해당 멘션 이전의 Slack thread history가 함께 전달됩니다.
+
+### 채팅 명령어
+
+`!`로 시작하는 한 줄짜리 메시지는 에이전트 턴 대신 하네스가 직접 처리합니다.
+
+| 명령어 | 설명 |
+| --- | --- |
+| `!model <fable\|opus\|sonnet>` | 해당 thread의 모델을 지정합니다. thread의 **첫 메시지에서만** 가능합니다. |
+| `!help` | 사용 가능한 명령어를 보여줍니다. |
+
+- 예: `!model fable` → `모델이 claude-fable-5로 설정되었습니다.` 이후 같은 thread의 모든 턴이 해당 모델로 실행됩니다.
+- 대화가 이미 시작된 thread에서는 backend session의 모델을 바꿀 수 없으므로 `!model`이 거부됩니다.
+- 채널에서는 멘션이 필요하므로 `@sky !model fable` 형태로 보냅니다.
+- 알 수 없는 명령어(`!foo`)는 에이전트로 전달되지 않고 usage 안내로 응답합니다.
+- thread별 모델은 `~/.sky/sky.db`의 `thread_models` 테이블에 저장되며, 재시작 이후의 예약 리마인더/후속 턴에도 동일하게 적용됩니다.

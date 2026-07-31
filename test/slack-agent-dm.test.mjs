@@ -73,10 +73,25 @@ function createConversationManagerMock({ reply = '응답' } = {}) {
   };
 }
 
+function createThreadModelStoreMock(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    store: {
+      get: (key) => data.get(key),
+      set: (key, model) => data.set(key, model),
+      remove: (key) => data.delete(key),
+      close: () => {},
+    },
+  };
+}
+
 function createHandler() {
   const slack = createSlackClient();
   const conversations = createConversationManagerMock();
+  const models = createThreadModelStoreMock();
   const handler = createSlackAgentDmHandler({
+    threadModelStore: models.store,
     botUserId: 'U999',
     mainAgent: MAIN_AGENT,
     conversationManager: conversations.manager,
@@ -86,7 +101,7 @@ function createHandler() {
     },
   });
 
-  return { conversations, handler, slack };
+  return { conversations, handler, models, slack };
 }
 
 test('agent DM handler starts a thread from a root DM and replies in that thread', async () => {
@@ -193,4 +208,43 @@ test('isAgentRootDmMessage accepts root file_share DMs', () => {
     }, 'U999'),
     false,
   );
+});
+
+test('agent DM handler answers chat commands without running a turn', async () => {
+  const { conversations, handler, models, slack } = createHandler();
+
+  const handled = await handler.handleMessage({
+    message: {
+      channel: 'D123',
+      channel_type: 'im',
+      text: '!model opus',
+      ts: '1777901000.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(conversations.calls.runTurn, []);
+  assert.deepEqual(slack.calls.posts, [
+    {
+      channel: 'D123',
+      text: '모델이 claude-opus-5로 설정되었습니다.',
+      thread_ts: '1777901000.000000',
+    },
+  ]);
+  assert.equal(models.data.get('D123:1777901000.000000'), 'anthropic/claude-opus-5');
+
+  const unknown = await handler.handleMessage({
+    message: {
+      channel: 'D124',
+      channel_type: 'im',
+      text: '!wat',
+      ts: '1777901000.000001',
+      user: 'U123',
+    },
+  });
+
+  assert.equal(unknown, true);
+  assert.deepEqual(conversations.calls.runTurn, []);
+  assert.match(slack.calls.posts[1].text, /알 수 없는 명령어입니다: `!wat`/);
 });

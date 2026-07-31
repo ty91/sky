@@ -15,6 +15,17 @@ export type PersistedConversation = {
   systemPrompt?: string;
 };
 
+/**
+ * Read side of the per-thread model override. Consulted on every turn so that
+ * *all* entry points (Slack turns, scheduled reminders, post-restart triggers)
+ * resolve to the same model for a given thread. Without this, a proactive turn
+ * would run the default model, fail the `isConversationOwnedBy` check, and
+ * silently fork a fresh session.
+ */
+export interface ThreadModelReader {
+  get(key: string): string | undefined;
+}
+
 export interface ConversationStore {
   get(key: string, backend: string): PersistedConversation | undefined;
   put(key: string, conversation: PersistedConversation): void;
@@ -39,6 +50,8 @@ export type ConversationManagerOptions = {
   defaultCwd: string;
   createSession?: AgentSessionFactory;
   store?: ConversationStore;
+  /** Optional per-thread model override, applied to every agent config. */
+  threadModelStore?: ThreadModelReader;
 };
 
 export type ConversationManager = {

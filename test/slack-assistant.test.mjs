@@ -45,6 +45,19 @@ function createConversationManagerMock(overrides = {}) {
   };
 }
 
+function createThreadModelStoreMock(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    store: {
+      get: (key) => data.get(key),
+      set: (key, model) => data.set(key, model),
+      remove: (key) => data.delete(key),
+      close: () => {},
+    },
+  };
+}
+
 function createReactionsClient() {
   const calls = [];
   return {
@@ -71,6 +84,7 @@ test('threadStarted sends greeting, prompts, and saves thread context', async ()
     saves: 0,
   };
   const config = createSlackAssistantConfig({
+    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock(),
   });
@@ -100,6 +114,7 @@ test('threadStarted sends greeting, prompts, and saves thread context', async ()
 
 test('threadContextChanged saves thread context', async () => {
   const config = createSlackAssistantConfig({
+    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock(),
   });
@@ -119,6 +134,7 @@ test('userMessage rejects empty text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
+    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock({
       runTurn: async () => {
@@ -150,6 +166,7 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
   const runTurnCalls = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
+    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     userNameResolver: {
       getDisplayName: async () => '태영',
@@ -189,6 +206,7 @@ test('userMessage includes downloaded file attachments in the final prompt', asy
   const runTurnCalls = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
+    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     userNameResolver: {
       getDisplayName: async () => '태영',
@@ -241,6 +259,7 @@ test('userMessage sends common turn error reply text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
+    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock({
       runTurn: async () => ({ kind: 'error', error: new Error('boom') }),
