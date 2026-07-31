@@ -1,7 +1,9 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
+import { maybeHandleChatCommand } from './commands.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
@@ -11,6 +13,7 @@ import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 export type SlackAssistantOptions = {
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
+  threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
 };
 
@@ -21,7 +24,7 @@ export const DEFAULT_SUGGESTED_PROMPTS = [
 ] as const;
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
-  const { conversationManager, mainAgent, userNameResolver } = options;
+  const { conversationManager, mainAgent, threadModelStore, userNameResolver } = options;
 
   return {
     threadStarted: async ({ say, setSuggestedPrompts, saveThreadContext, event }) => {
@@ -49,6 +52,20 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         ? message.thread_ts
         : message.ts;
       const threadId = toThreadId(channelId, threadTs);
+      const sender = new SlackSender({ say });
+
+      // Chat commands are matched against the raw text, before attachment
+      // lines and the `<@user>:` prefix are added.
+      const handledCommand = await maybeHandleChatCommand({
+        threadId,
+        rawText,
+        conversationManager,
+        threadModelStore,
+        reply: sender,
+      });
+      if (handledCommand) {
+        return;
+      }
 
       // Handle file attachments
       const files = 'files' in message && Array.isArray(message.files) ? message.files as SlackFile[] : [];
@@ -75,8 +92,6 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
 
       console.log(`[slack] user message in ${threadId}: ${JSON.stringify(userText)}`);
 
-      const messageTs = message.ts;
-      const sender = new SlackSender({ say });
       const indicator = createStatusIndicator({
         client: client as unknown as AssistantStatusClient,
         channelId,

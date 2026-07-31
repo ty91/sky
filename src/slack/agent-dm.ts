@@ -1,6 +1,8 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
+import { maybeHandleChatCommand } from './commands.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
@@ -35,6 +37,7 @@ export type SlackAgentDmHandlerOptions = {
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
   slack: SlackAgentDmClient;
+  threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
 };
 
@@ -47,6 +50,7 @@ export function createSlackAgentDmHandler({
   conversationManager,
   mainAgent,
   slack,
+  threadModelStore,
   userNameResolver,
 }: SlackAgentDmHandlerOptions): SlackAgentDmHandler {
   return {
@@ -64,6 +68,30 @@ export function createSlackAgentDmHandler({
       const threadTs = messageTs;
       const threadId = toThreadId(channelId, threadTs);
       const rawText = readNonEmptyString(message.text) ?? '';
+
+      const sender = new SlackSender({
+        say: async (replyText) => {
+          await slack.chat.postMessage({
+            channel: channelId,
+            text: replyText,
+            thread_ts: threadTs,
+          });
+        },
+      });
+
+      // Chat commands are matched against the raw text, before attachment
+      // lines and the `<@user>:` prefix are added.
+      const handledCommand = await maybeHandleChatCommand({
+        threadId,
+        rawText,
+        conversationManager,
+        threadModelStore,
+        reply: sender,
+      });
+      if (handledCommand) {
+        return true;
+      }
+
       const files = Array.isArray(message.files) ? message.files as SlackFile[] : [];
       let attachmentsLine = '';
 
@@ -76,16 +104,6 @@ export function createSlackAgentDmHandler({
       const text = attachmentsLine
         ? [rawText, attachmentsLine].filter(Boolean).join('\n\n')
         : rawText;
-
-      const sender = new SlackSender({
-        say: async (replyText) => {
-          await slack.chat.postMessage({
-            channel: channelId,
-            text: replyText,
-            thread_ts: threadTs,
-          });
-        },
-      });
 
       if (!text) {
         await sender.sendReply('빈 메시지는 처리할 수 없습니다.');

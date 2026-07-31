@@ -8,6 +8,7 @@ import type {
   ConversationTurnOptions,
   ConversationTurnResult,
   PersistedConversation,
+  ThreadModelReader,
 } from './types.js';
 
 export type {
@@ -18,6 +19,7 @@ export type {
   ConversationTurnOptions,
   ConversationTurnResult,
   PersistedConversation,
+  ThreadModelReader,
 } from './types.js';
 
 type Deferred<T> = {
@@ -68,6 +70,22 @@ function toError(error: unknown): Error {
 
 function resolveAgentModel(agent: AgentConfig): string {
   return agent.model ?? '';
+}
+
+/**
+ * Applies a per-thread model override. Returns the same object when there is
+ * nothing to change so identity-based comparisons in tests stay stable.
+ */
+function withThreadModel(
+  agent: AgentConfig,
+  threadModelStore: ThreadModelReader | undefined,
+  key: string,
+): AgentConfig {
+  const model = threadModelStore?.get(key);
+  if (!model || model === agent.model) {
+    return agent;
+  }
+  return { ...agent, model };
 }
 
 function isConversationOwnedBy(
@@ -236,6 +254,10 @@ export function createConversationManager(options: ConversationManagerOptions): 
   const agentBackend = createSession.backend;
   const sessions = new Map<string, ConversationEntry>();
 
+  function resolveAgent<T extends AgentConfig | undefined>(key: string, agent: T): T {
+    return (agent ? (withThreadModel(agent, options.threadModelStore, key) as T) : agent);
+  }
+
   function getPersistedConversation(
     key: string,
     agent?: AgentConfig,
@@ -269,7 +291,10 @@ export function createConversationManager(options: ConversationManagerOptions): 
   }
 
   const manager: ConversationManager = {
-    async runTurn(key, agent, text, turnOptions) {
+    async runTurn(key, rawAgent, text, turnOptions) {
+      // Resolved once per turn so Slack turns, scheduled reminders, and
+      // post-restart triggers all land on the thread's chosen model.
+      const agent = resolveAgent(key, rawAgent);
       let entry = sessions.get(key);
       if (!entry) {
         const cwd = agent.cwd ?? options.defaultCwd;
@@ -324,7 +349,8 @@ export function createConversationManager(options: ConversationManagerOptions): 
       return deferred.promise;
     },
 
-    has(key, agent) {
+    has(key, rawAgent) {
+      const agent = resolveAgent(key, rawAgent);
       const entry = sessions.get(key);
       if (entry) {
         return (
@@ -337,7 +363,8 @@ export function createConversationManager(options: ConversationManagerOptions): 
       return getPersistedConversation(key, agent) !== undefined;
     },
 
-    getHandle(key, agent) {
+    getHandle(key, rawAgent) {
+      const agent = resolveAgent(key, rawAgent);
       const entry = sessions.get(key);
       if (entry) {
         if (

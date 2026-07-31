@@ -6,6 +6,7 @@ import { createMainAgentConfig } from './agents/main.js';
 import type { AgentConfig } from './agents/types.js';
 import { createConversationManager, type ConversationManager } from './conversation/manager.js';
 import { openConversationStore } from './conversation/store.js';
+import { openThreadModelStore } from './conversation/thread-model-store.js';
 import { spawnDetachedRestart } from './daemon.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { withTimeout } from './runtime/retry.js';
@@ -249,10 +250,12 @@ export async function startBot(): Promise<void> {
   });
 
   const conversationStore = openConversationStore();
+  const threadModelStore = openThreadModelStore();
 
   const conversationManager: ConversationManager = createConversationManager({
     defaultCwd: settings.workspace,
     store: conversationStore,
+    threadModelStore,
     createSession,
   });
 
@@ -263,6 +266,7 @@ export async function startBot(): Promise<void> {
       appToken: settings.slack.appToken,
       conversationManager,
       mainAgent,
+      threadModelStore,
     });
 
     const scheduledJobDispatcher = createScheduledJobDispatcher({
@@ -289,6 +293,7 @@ export async function startBot(): Promise<void> {
       await stopSlackApp(slackApp);
     }
     conversationStore.close();
+    threadModelStore.close();
     scheduledJobStore.close();
   }
 }

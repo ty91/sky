@@ -92,10 +92,25 @@ function createConversationManagerMock({ has = false, runTurnResult, reply = '�
   };
 }
 
+function createThreadModelStoreMock(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    store: {
+      get: (key) => data.get(key),
+      set: (key, model) => data.set(key, model),
+      remove: (key) => data.delete(key),
+      close: () => {},
+    },
+  };
+}
+
 function createHandler({ has, history, historyError, sendResult, reply, userNames = { U123: '태영', U456: '하늘' } } = {}) {
   const slack = createSlackClient({ history, historyError });
   const conversations = createConversationManagerMock({ has, reply, runTurnResult: sendResult });
+  const models = createThreadModelStoreMock();
   const handler = createSlackChannelHandler({
+    threadModelStore: models.store,
     botUserId: 'U999',
     mainAgent: MAIN_AGENT,
     conversationManager: conversations.manager,
@@ -105,7 +120,7 @@ function createHandler({ has, history, historyError, sendResult, reply, userName
     },
   });
 
-  return { conversations, handler, slack };
+  return { conversations, handler, models, slack };
 }
 
 test('normalizeSlackMessage replaces bot mentions with a readable label', () => {
@@ -336,6 +351,7 @@ test('channel ingress processes duplicate app_mention and message mention events
     },
   };
   const channelHandler = createSlackChannelHandler({
+    threadModelStore: createThreadModelStoreMock().store,
     botUserId: 'U999',
     conversationManager,
     mainAgent: MAIN_AGENT,
@@ -460,4 +476,29 @@ test('channel handler prepends history only for new conversations and falls back
   assert.deepEqual(existing.slack.calls.fetches, []);
   assert.deepEqual(existing.conversations.calls.runTurn.map((call) => call.text), ['태영(<@U123>): 후속 질문']);
   assert.deepEqual(failedHistory.conversations.calls.runTurn.map((call) => call.text), ['태영(<@U123>): @sky 실패해도 보내줘']);
+});
+
+test('channel handler answers a !model command without running a turn', async () => {
+  const { conversations, handler, models, slack } = createHandler();
+
+  await handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> !model fable',
+      ts: '1777901000.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.deepEqual(conversations.calls.runTurn, []);
+  assert.deepEqual(slack.calls.posts, [
+    {
+      channel: 'C123',
+      text: '모델이 claude-fable-5로 설정되었습니다.',
+      thread_ts: '1777901000.000000',
+    },
+  ]);
+  assert.equal(models.data.get('C123:1777901000.000000'), 'anthropic/claude-fable-5');
+  // No thread history fetch either — commands never reach the agent path.
+  assert.deepEqual(slack.calls.fetches, []);
 });

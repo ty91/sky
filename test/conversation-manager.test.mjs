@@ -518,3 +518,72 @@ test('conversation manager persists the injected session factory backend', async
     },
   ]);
 });
+
+test('conversation manager applies the per-thread model override to every entry point', async () => {
+  const { store, calls } = createMockConversationStore();
+  const threadModelStore = {
+    get: (key) => (key === 'thread-fable' ? 'anthropic/claude-fable-5' : undefined),
+  };
+  const created = [];
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    threadModelStore,
+    createSession: createSessionFactory(async (config) => {
+      created.push(config);
+      return createFakeAgentSession({ sessionId: `session-${config.key}` });
+    }),
+  });
+
+  const overridden = await manager.runTurn('thread-fable', AGENT, 'hello');
+  const untouched = await manager.runTurn('thread-default', AGENT, 'hello');
+
+  assert.equal(overridden.kind, 'ok');
+  assert.equal(untouched.kind, 'ok');
+  assert.equal(created[0].agent.model, 'anthropic/claude-fable-5');
+  // The override is a copy; the shared agent config is never mutated.
+  assert.equal(AGENT.model, 'anthropic/claude-opus-4-7');
+  assert.equal(created[1].agent, AGENT);
+
+  assert.equal(calls.put[0].conversation.model, 'anthropic/claude-fable-5');
+  assert.equal(calls.put[1].conversation.model, 'anthropic/claude-opus-4-7');
+
+  // `has`/`getHandle` resolve the same override, so an ownership check made
+  // with the default agent config still finds the overridden conversation.
+  assert.equal(manager.has('thread-fable', AGENT), true);
+  assert.equal(manager.getHandle('thread-fable', AGENT).sessionId, 'session-thread-fable');
+});
+
+test('conversation manager resumes an overridden thread instead of forking a new session', async () => {
+  // Mirrors a proactive turn (scheduled reminder / post-restart trigger) that
+  // runs with the default agent config after a restart: the persisted record
+  // holds the thread's chosen model, so without the override the ownership
+  // check would fail and silently start a fresh session.
+  const { store } = createMockConversationStore({
+    'thread-fable': {
+      sessionId: 'session-existing',
+      backend: 'pi',
+      resumeRef: '/tmp/pi-session-existing.jsonl',
+      model: 'anthropic/claude-fable-5',
+      agentName: 'main',
+    },
+  });
+  const created = [];
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    threadModelStore: { get: () => 'anthropic/claude-fable-5' },
+    createSession: createSessionFactory(async (config) => {
+      created.push(config);
+      return createFakeAgentSession({ sessionId: 'session-existing' });
+    }),
+  });
+
+  const result = await manager.runTurn('thread-fable', AGENT, 'hello');
+
+  assert.equal(result.kind, 'ok');
+  assert.deepEqual(created[0].resume, {
+    sessionId: 'session-existing',
+    resumeRef: '/tmp/pi-session-existing.jsonl',
+  });
+});

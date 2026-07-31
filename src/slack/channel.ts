@@ -1,6 +1,8 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
+import { maybeHandleChatCommand, stripLeadingMentionLabel } from './commands.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
 import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
@@ -35,6 +37,7 @@ export type SlackChannelHandlerOptions = {
   mainAgent: AgentConfig;
   mentionLabel?: string;
   slack: SlackChannelClient;
+  threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
 };
 
@@ -48,6 +51,7 @@ export function createSlackChannelHandler({
   mainAgent,
   mentionLabel = '@sky',
   slack,
+  threadModelStore,
   userNameResolver,
 }: SlackChannelHandlerOptions): SlackChannelHandler {
   return {
@@ -73,10 +77,6 @@ export function createSlackChannelHandler({
         return;
       }
 
-      const userId = readNonEmptyString(event.user);
-      const displayName = userId ? await userNameResolver?.getDisplayName(userId) : undefined;
-      const currentContent = prefixSlackUserMessage(normalized.text, userId, displayName);
-
       const sender = new SlackSender({
         say: async (text) => {
           await slack.chat.postMessage({
@@ -86,6 +86,23 @@ export function createSlackChannelHandler({
           });
         },
       });
+
+      // Chat commands are matched against the mention-stripped text, before the
+      // `<@user>:` prefix and any thread history are added.
+      const handledCommand = await maybeHandleChatCommand({
+        threadId,
+        rawText: stripLeadingMentionLabel(normalized.text, mentionLabel),
+        conversationManager,
+        threadModelStore,
+        reply: sender,
+      });
+      if (handledCommand) {
+        return;
+      }
+
+      const userId = readNonEmptyString(event.user);
+      const displayName = userId ? await userNameResolver?.getDisplayName(userId) : undefined;
+      const currentContent = prefixSlackUserMessage(normalized.text, userId, displayName);
 
       const text = await maybePrependThreadHistory({
         channelId,

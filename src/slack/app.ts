@@ -1,6 +1,7 @@
 import { App } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
+import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import {
   createSlackAgentDmHandler,
   type SlackAgentDmMessageEvent,
@@ -27,6 +28,7 @@ export type SlackAppOptions = {
   appToken: string;
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
+  threadModelStore: ThreadModelStore;
 };
 
 export async function startSlackApp(options: SlackAppOptions): Promise<App> {
@@ -40,6 +42,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
   const assistant = createSlackAssistant({
     conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
+    threadModelStore: options.threadModelStore,
     userNameResolver,
   });
 
@@ -51,6 +54,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     botUserId,
     conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
+    threadModelStore: options.threadModelStore,
     slack: {
       assistant: {
         threads: {
@@ -77,6 +81,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     botUserId,
     conversationManager: options.conversationManager,
     mainAgent: options.mainAgent,
+    threadModelStore: options.threadModelStore,
     slack: {
       assistant: {
         threads: {
