@@ -73,6 +73,7 @@ export type ConversationManager = {
    * session or when the keys are equal.
    */
   rekey(oldKey: string, newKey: string): void;
+  activeWorkCount(): number;
   close(key: string): Promise<void>;
   purge(key: string): Promise<void>;
   closeAll(): Promise<void>;

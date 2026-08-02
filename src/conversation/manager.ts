@@ -408,6 +408,16 @@ export function createConversationManager(options: ConversationManagerOptions): 
       }
     },
 
+    activeWorkCount() {
+      let count = 0;
+      for (const entry of sessions.values()) {
+        if (entry.activeTurnId !== undefined || entry.pending) {
+          count += 1;
+        }
+      }
+      return count;
+    },
+
     async close(key) {
       const entry = sessions.get(key);
       if (!entry) {

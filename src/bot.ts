@@ -23,11 +23,23 @@ import {
   type SlackUploadV2Client,
 } from './slack/files.js';
 import { runProactiveAgentTurn } from './slack/proactive-turn.js';
-import { loadSettings } from './settings.js';
+import { loadSettings, type Settings } from './settings.js';
 
 /** Delay before we spawn the replacement daemon and exit ourselves. */
 const RESTART_DELAY_MS = 3_000;
 const SLACK_POST_RESTART_SEND_TIMEOUT_MS = 30_000;
+
+export class SlackStartupError extends Error {
+  constructor(cause: unknown) {
+    super('Slack runtime failed to start.', { cause });
+    this.name = 'SlackStartupError';
+  }
+}
+
+export type BotRuntime = {
+  activeWorkCount(): number;
+  close(): Promise<void>;
+};
 
 function safeRead(filePath: string): string {
   try {
@@ -219,9 +231,7 @@ export async function triggerPostRestartIfPending(
   }
 }
 
-export async function startBot(): Promise<void> {
-  console.log('[startup] loading settings...');
-  const settings = loadSettings();
+export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
   console.log(`[startup] model: ${settings.model}`);
@@ -259,15 +269,35 @@ export async function startBot(): Promise<void> {
     createSession,
   });
 
+  let closePromise: Promise<void> | undefined;
+  const close = () => {
+    closePromise ??= (async () => {
+      unregisterRestartSignalHandler();
+      await scheduledJobScheduler?.stop();
+      await conversationManager.closeAll();
+      if (slackApp) {
+        await stopSlackApp(slackApp);
+      }
+      conversationStore.close();
+      threadModelStore.close();
+      scheduledJobStore.close();
+    })();
+    return closePromise;
+  };
+
   try {
     console.log('[startup] starting slack app...');
-    slackApp = await startSlackApp({
-      botToken: settings.slack.botToken,
-      appToken: settings.slack.appToken,
-      conversationManager,
-      mainAgent,
-      threadModelStore,
-    });
+    try {
+      slackApp = await startSlackApp({
+        botToken: settings.slack.botToken,
+        appToken: settings.slack.appToken,
+        conversationManager,
+        mainAgent,
+        threadModelStore,
+      });
+    } catch (error) {
+      throw new SlackStartupError(error);
+    }
 
     const scheduledJobDispatcher = createScheduledJobDispatcher({
       conversationManager,
@@ -284,17 +314,25 @@ export async function startBot(): Promise<void> {
     // start waiting for shutdown.
     await triggerPostRestartIfPending(slackApp, conversationManager, mainAgent);
 
+    return {
+      activeWorkCount: () => conversationManager.activeWorkCount(),
+      close,
+    };
+  } catch (error) {
+    await close();
+    throw error;
+  }
+}
+
+export async function startBot(): Promise<void> {
+  console.log('[startup] loading settings...');
+  const settings = loadSettings();
+  const runtime = await startBotRuntime(settings);
+
+  try {
     await waitForShutdownSignal();
   } finally {
-    unregisterRestartSignalHandler();
-    await scheduledJobScheduler?.stop();
-    await conversationManager.closeAll();
-    if (slackApp) {
-      await stopSlackApp(slackApp);
-    }
-    conversationStore.close();
-    threadModelStore.close();
-    scheduledJobStore.close();
+    await runtime.close();
   }
 }
 

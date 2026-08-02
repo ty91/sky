@@ -12,6 +12,8 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, model, agent backend, workspace를 보여줍니다.
+- `skyd`는 foreground daemon으로 실행되며 `~/.sky/run/skyd.sock`의 HTTP/JSON control interface를 제공합니다.
+- `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
 - main agent는 `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 one-shot 리마인더를 관리하고 예정 시각에 먼저 Slack DM을 보낼 수 있습니다.
 - 에이전트 작업 디렉토리(`cwd`)는 기본적으로 `~/.sky/workspace`로 고정됩니다.
@@ -74,7 +76,7 @@ mise exec -- pnpm install --frozen-lockfile
 Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend를 선택합니다.
 
 - `pi`: 기본값입니다. Pi coding agent SDK를 직접 사용하며, 모델 인증과 provider 선택은 Pi model registry와 AuthStorage를 따릅니다.
-- `claude-agent-sdk`: Claude Agent SDK를 사용합니다. 데몬 환경에 `CLAUDE_CODE_OAUTH_TOKEN`을 주입해야 합니다. Sky는 SDK 호출 환경에서 `ANTHROPIC_API_KEY`를 제거하고 OAuth token을 전달합니다.
+- `claude-agent-sdk`: Claude Agent SDK를 사용합니다. `claudeAgentSdk.oauthToken`을 설정하거나 daemon 환경에 `CLAUDE_CODE_OAUTH_TOKEN`을 주입합니다. 명시적인 환경변수가 있으면 우선합니다. Sky는 SDK 호출 환경에서 `ANTHROPIC_API_KEY`를 제거하고 OAuth token을 전달합니다.
 
 `~/.sky/settings.json`의 `model` 값은 `<provider>/<model>` 형식이어야 합니다. 예를 들어 `anthropic/claude-opus-4-7`처럼 provider와 model id를 함께 지정합니다. Pi backend는 이 값을 Pi model registry에서 찾고, Claude Agent SDK backend는 `anthropic/` provider를 제거한 model id를 SDK에 전달합니다.
 
@@ -92,6 +94,9 @@ Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend�
   },
   "model": "anthropic/claude-opus-4-7",
   "agentBackend": "pi",
+  "claudeAgentSdk": {
+    "oauthToken": "your-claude-code-oauth-token"
+  },
   "effort": "xhigh",
   "workspace": "/Users/taeyoung/.sky/workspace"
 }
@@ -101,6 +106,7 @@ Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend�
 - `slack.appToken`: Socket Mode용 app token.
 - `model`: 필수. `<provider>/<model>` 형식입니다.
 - `agentBackend`: 선택. 기본값 `pi`. `pi` 또는 `claude-agent-sdk`를 지정합니다.
+- `claudeAgentSdk.oauthToken`: `claude-agent-sdk` backend용 선택 credential입니다. status와 structured log에는 노출되지 않습니다.
 - `effort`: 선택. `medium`, `high`, `xhigh` 중 하나입니다. 생략하면 backend 기본값을 사용합니다.
 - `workspace`: 선택. 기본값 `~/.sky/workspace`. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
 - `slack` 설정은 필수입니다.
@@ -163,9 +169,18 @@ sky logs
 sky run
 ```
 
+새 daemon composition root와 local control interface를 직접 실행하려면 `skyd`를 사용합니다. `skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 현재 `sky start/stop/restart`의 launchd 전환은 후속 작업입니다.
+
+```bash
+skyd
+curl --unix-socket ~/.sky/run/skyd.sock http://localhost/status
+```
+
+설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.
+
 ## Package 검증과 release
 
-`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky --help`와 `sky --version`을 실행합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다.
+`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다.
 
 ```bash
 pnpm test:package
@@ -192,6 +207,8 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
   - Slack 설정 여부
   - 설정 파일을 읽을 수 있는 경우 model, agent backend, workspace
 - 데몬 PID/log 파일은 기본적으로 `~/.sky/` 아래에 저장됩니다.
+- `skyd` structured app log는 `~/.sky/logs/skyd.jsonl`에 기록되며 10 MiB 단위, archive 5개로 rotation됩니다.
+- `~/.sky`, `~/.sky/run`, `~/.sky/logs`는 `0700`, control socket과 settings/log 파일은 `0600` 권한을 사용합니다.
 - Conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.
 - 예약된 리마인더도 같은 `~/.sky/sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
 - 리마인더 실행이 실패하면 60초 간격으로 최대 3회 시도한 뒤 실패 알림을 보냅니다.

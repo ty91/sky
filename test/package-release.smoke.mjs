@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -16,7 +16,7 @@ function run(command, args, options = {}) {
   });
 }
 
-test('the release package installs globally and exposes only the sky CLI', { timeout: 180_000 }, async () => {
+test('the release package installs globally and exposes the sky and skyd CLIs', { timeout: 180_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sky-package-release-'));
   const packDir = path.join(tempDir, 'pack');
   const pnpmHome = path.join(tempDir, 'pnpm-home');
@@ -46,7 +46,7 @@ test('the release package installs globally and exposes only the sky CLI', { tim
     assert.equal(packedManifest.name, '@ty91/sky');
     assert.equal(packedManifest.version, repositoryManifest.version);
     assert.equal(packedManifest.private, undefined);
-    assert.deepEqual(packedManifest.bin, { sky: 'dist/index.js' });
+    assert.deepEqual(packedManifest.bin, { sky: 'dist/index.js', skyd: 'dist/skyd.js' });
     assert.equal(packedManifest.engines.node, '>=24.16.0 <25');
     assert.equal(packedManifest.publishConfig.registry, 'https://npm.pkg.github.com');
     assert.equal(packedManifest.repository.url, 'git+https://github.com/ty91/sky.git');
@@ -56,6 +56,7 @@ test('the release package installs globally and exposes only the sky CLI', { tim
     }
 
     assert.ok(packedPaths.includes('dist/index.js'));
+    assert.ok(packedPaths.includes('dist/skyd.js'));
     assert.ok(!packedPaths.includes('dist/stale-package-output.js'));
     assert.ok(
       packedPaths.every(
@@ -85,8 +86,10 @@ test('the release package installs globally and exposes only the sky CLI', { tim
       .at(-1);
     assert.ok(globalBinDir);
     const sky = path.join(globalBinDir, 'sky');
+    const skyd = path.join(globalBinDir, 'skyd');
     assert.equal(run(sky, ['--version'], { env: isolatedEnv }).trim(), repositoryManifest.version);
     assert.match(run(sky, ['--help'], { env: isolatedEnv }), /Usage: sky/);
+    assert.equal((await lstat(skyd)).mode & 0o111, 0o111);
   } finally {
     await rm(staleOutput, { force: true });
     await rm(tempDir, { recursive: true, force: true });
