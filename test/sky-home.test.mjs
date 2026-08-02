@@ -17,6 +17,7 @@ import {
   SkyHomeConfigurationError,
   UnsafeSkyPathError,
   createSkyHome,
+  ensurePrivateFile,
   prepareSkyHome,
 } from '../dist/sky-home.js';
 import { startSkyd } from '../dist/skyd/app.js';
@@ -221,6 +222,30 @@ test('SkyHome refuses a symlink root without modifying the target directory', ()
       (error) => error instanceof UnsafeSkyPathError && error.code === 'unsafe_sky_path',
     );
     assert.equal(permissions(target), 0o755);
+  });
+});
+
+test('SkyHome refuses a managed file owned by a different user identity', (t) => {
+  if (!process.getuid) {
+    t.skip('POSIX ownership is unavailable');
+    return;
+  }
+
+  withTempRoot((_rootDir, tempDir) => {
+    const managedFile = path.join(tempDir, 'foreign-owned.json');
+    writeFileSync(managedFile, '{}', { mode: 0o644 });
+    chmodSync(managedFile, 0o644);
+    const getuid = process.getuid;
+    process.getuid = () => getuid() + 1;
+    try {
+      assert.throws(
+        () => ensurePrivateFile(managedFile),
+        (error) => error instanceof UnsafeSkyPathError && error.code === 'unsafe_sky_path',
+      );
+      assert.equal(permissions(managedFile), 0o644);
+    } finally {
+      process.getuid = getuid;
+    }
   });
 });
 
