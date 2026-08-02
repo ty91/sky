@@ -141,7 +141,7 @@ test('the skyd entrypoint stays foreground with invalid settings and shuts down 
     await writeFile(settingsFile, '{ invalid json', { mode: 0o644 });
 
     const entrypoint = fileURLToPath(new URL('../dist/skyd.js', import.meta.url));
-    const child = spawn(process.execPath, [entrypoint], {
+    const child = spawn(process.execPath, [entrypoint, '--foreground'], {
       env: { ...process.env, HOME: homeDir },
       stdio: 'ignore',
     });

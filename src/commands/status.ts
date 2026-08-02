@@ -1,44 +1,15 @@
 import { Command } from 'commander';
-import { isRunning, LOG_FILE, readPid, removePidFile } from '../daemon.js';
-import { loadSettings, type Settings } from '../settings.js';
-
-function tryLoadSettings(): Settings | undefined {
-  try {
-    return loadSettings({ silent: true });
-  } catch {
-    return undefined;
-  }
-}
-
-function printSettings(settings: Settings | undefined): void {
-  if (!settings) return;
-
-  console.log('slack app: configured');
-  console.log(`model: ${settings.model}`);
-  console.log(`agent backend: ${settings.agentBackend}`);
-  if (settings.effort) {
-    console.log(`effort: ${settings.effort}`);
-  }
-  console.log(`workspace: ${settings.workspace}`);
-}
+import { getServiceStatus } from '../service/launch-agent.js';
+import { reportLifecycleError, reportStatusResult } from './service-output.js';
 
 export const statusCommand = new Command('status')
-  .description('Show daemon status')
-  .action(() => {
-    const settings = tryLoadSettings();
-    const pid = readPid();
-    if (isRunning(pid)) {
-      console.log(`sky is running (pid: ${pid})`);
-      console.log(`log: ${LOG_FILE}`);
-      printSettings(settings);
-      return;
+  .description('Show combined launchd and daemon status')
+  .option('--json', 'Print stable JSON output')
+  .action(async (options: { json?: boolean }) => {
+    const json = options.json === true;
+    try {
+      reportStatusResult(await getServiceStatus(), json);
+    } catch (error) {
+      reportLifecycleError(error, json);
     }
-
-    if (pid) {
-      removePidFile();
-    }
-
-    console.log('sky is stopped');
-    console.log(`log: ${LOG_FILE}`);
-    printSettings(settings);
   });

@@ -11,7 +11,7 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - 채널 thread 중간에서 Sky를 처음 멘션하면 이전 thread 메시지가 첫 요청 앞에 포함됩니다.
 - `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
-- `sky status`는 데몬 프로세스 상태, 로그 파일, Slack 설정, model, agent backend, workspace를 보여줍니다.
+- `sky status`는 macOS LaunchAgent 상태와 daemon control 상태를 함께 보여주며 자동화를 위한 `--json`을 제공합니다.
 - `skyd`는 foreground daemon으로 실행되며 `~/.sky/run/skyd.sock`의 HTTP/JSON control interface를 제공합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
@@ -60,6 +60,7 @@ token을 현재 install 명령에만 주입해 package를 전역 설치합니다
 ```bash
 NODE_AUTH_TOKEN=<github-pat-classic> mise exec -- pnpm add --global @ty91/sky
 mise exec -- sky --version
+mise exec -- sky service install
 ```
 
 ### 개발 checkout
@@ -156,23 +157,26 @@ pnpm link --global
 이후 아래 커맨드를 쓸 수 있습니다:
 
 ```bash
+sky service install
 sky start
 sky stop
-sky restart
 sky status
 sky logs
+sky service uninstall
 ```
 
-포그라운드 실행이 필요하면:
+`sky service install`은 `~/Library/LaunchAgents/com.ty91.skyd.plist`를 생성하거나 현재 package wrapper에 맞게 reconcile하고 즉시 시작합니다. plist가 이미 같다면 실행 중인 daemon을 재시작하지 않습니다. `sky stop`은 등록을 보존한 채 job만 내리고, `sky service uninstall`은 plist만 제거하므로 settings, DB, transcript와 logs는 유지됩니다.
+
+포그라운드 실행이 필요하면 `skyd`를 명시적으로 사용합니다:
 
 ```bash
-sky run
+skyd --foreground
 ```
 
-새 daemon composition root와 local control interface를 직접 실행하려면 `skyd`를 사용합니다. `skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 현재 `sky start/stop/restart`의 launchd 전환은 후속 작업입니다.
+`skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. Graceful restart는 후속 lifecycle 작업에서 제공되며, 그 전까지 `sky restart`는 기존 detached daemon을 만들지 않고 명시적인 오류로 종료합니다.
 
 ```bash
-skyd
+skyd --foreground
 curl --unix-socket ~/.sky/run/skyd.sock http://localhost/status
 ```
 
@@ -203,10 +207,13 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
 ## 운영 메모
 
 - `sky status`는 다음 정보를 보여줍니다.
-  - 프로세스 상태와 로그 파일 경로
-  - Slack 설정 여부
-  - 설정 파일을 읽을 수 있는 경우 model, agent backend, workspace
-- 데몬 PID/log 파일은 기본적으로 `~/.sky/` 아래에 저장됩니다.
+  - LaunchAgent 설치/load 상태, launchd process state와 PID
+  - control socket 도달 여부와 daemon runtime/Slack 상태
+  - daemon이 보고하는 product version, model과 agent backend
+- `sky start`, `sky stop`, `sky status`, `sky service install`, `sky service uninstall`은 안정적인 JSON 결과를 위한 `--json`을 지원합니다.
+- LaunchAgent plist에는 `HOME`과 Node wrapper 실행에 필요한 최소 `PATH`만 들어가며 Slack/Claude/provider credential은 복사하지 않습니다.
+- 이전 PID 기반 daemon이 발견되면 `sky service install`은 command가 실제 `@ty91/sky`의 `dist/bot.js`인지 확인한 뒤에만 `SIGTERM`을 보냅니다. 20초 안에 끝나지 않아도 자동으로 `SIGKILL`하지 않습니다.
+- 기존 `~/.sky/sky.log`는 migration 시 `~/.sky/logs/legacy-sky.log`로 한 번만 이동됩니다.
 - `skyd` structured app log는 `~/.sky/logs/skyd.jsonl`에 기록되며 10 MiB 단위, archive 5개로 rotation됩니다.
 - `~/.sky`, `~/.sky/run`, `~/.sky/logs`는 `0700`, control socket과 settings/log 파일은 `0600` 권한을 사용합니다.
 - Conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.

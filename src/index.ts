@@ -5,10 +5,10 @@ import { startCommand } from './commands/start.js';
 import { stopCommand } from './commands/stop.js';
 import { restartCommand } from './commands/restart.js';
 import { statusCommand } from './commands/status.js';
-import { runCommand } from './commands/run.js';
 import { logsCommand } from './commands/logs.js';
 import { memoryCommand } from './commands/memory.js';
 import { dreamCommand } from './commands/dream.js';
+import { serviceCommand } from './commands/service.js';
 
 const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -23,9 +23,12 @@ program.addCommand(startCommand);
 program.addCommand(stopCommand);
 program.addCommand(restartCommand);
 program.addCommand(statusCommand);
-program.addCommand(runCommand);
+program.addCommand(serviceCommand);
 program.addCommand(logsCommand);
 program.addCommand(memoryCommand);
 program.addCommand(dreamCommand);
 
-program.parse();
+program.parseAsync().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

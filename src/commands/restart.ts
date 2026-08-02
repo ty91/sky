@@ -1,9 +1,10 @@
 import { Command } from 'commander';
-import { startDaemon, stopDaemon } from '../daemon.js';
 
 export const restartCommand = new Command('restart')
-  .description('Restart the daemon')
-  .action(async () => {
-    await stopDaemon();
-    startDaemon();
+  .description('Restart the daemon (available after graceful restart support lands)')
+  .action(() => {
+    console.error(
+      'sky restart is temporarily unavailable while graceful launchd restart support is implemented. Use `sky stop` followed by `sky start` if an explicit non-graceful restart is acceptable.',
+    );
+    process.exitCode = 1;
   });

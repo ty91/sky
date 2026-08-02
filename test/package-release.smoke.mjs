@@ -89,6 +89,8 @@ test('the release package installs globally and exposes the sky and skyd CLIs', 
     const skyd = path.join(globalBinDir, 'skyd');
     assert.equal(run(sky, ['--version'], { env: isolatedEnv }).trim(), repositoryManifest.version);
     assert.match(run(sky, ['--help'], { env: isolatedEnv }), /Usage: sky/);
+    assert.equal(run(skyd, ['--version'], { env: isolatedEnv }).trim(), repositoryManifest.version);
+    assert.match(run(skyd, ['--help'], { env: isolatedEnv }), /Usage: skyd/);
     assert.equal((await lstat(skyd)).mode & 0o111, 0o111);
   } finally {
     await rm(staleOutput, { force: true });

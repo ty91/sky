@@ -20,7 +20,7 @@
     "stop": "node dist/index.js stop",
     "restart": "node dist/index.js restart",
     "status": "node dist/index.js status",
-    "run": "node dist/index.js run",
+    "foreground": "node dist/skyd.js --foreground",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test test/*.test.mjs",
     "test:package": "node --test test/package-release.smoke.mjs",
