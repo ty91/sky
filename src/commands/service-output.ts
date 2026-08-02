@@ -26,6 +26,7 @@ export function printStatus(status: ServiceStatus): void {
   }
 
   console.log(`daemon: ${daemon.runtime.state}`);
+  console.log(`supervision: ${daemon.supervision?.mode ?? 'unknown'}`);
   console.log(`Slack: ${daemon.slack.state}`);
   console.log(`version: ${daemon.productVersion}`);
   if (daemon.agent.backend) console.log(`agent backend: ${daemon.agent.backend}`);

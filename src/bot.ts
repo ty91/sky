@@ -7,7 +7,7 @@ import type { AgentConfig } from './agents/types.js';
 import { createConversationManager, type ConversationManager } from './conversation/manager.js';
 import { openConversationStore } from './conversation/store.js';
 import { openThreadModelStore } from './conversation/thread-model-store.js';
-import { spawnDetachedRestart } from './daemon.js';
+import type { RuntimeController } from './runtime/controller.js';
 import { consumePendingRestart, type PendingRestart } from './runtime/pending-restart.js';
 import { withTimeout } from './runtime/retry.js';
 import { createScheduledJobDispatcher } from './scheduler/dispatcher.js';
@@ -23,10 +23,8 @@ import {
   type SlackUploadV2Client,
 } from './slack/files.js';
 import { runProactiveAgentTurn } from './slack/proactive-turn.js';
-import { loadSettings, type Settings } from './settings.js';
+import type { Settings } from './settings.js';
 
-/** Delay before we spawn the replacement daemon and exit ourselves. */
-const RESTART_DELAY_MS = 3_000;
 const SLACK_POST_RESTART_SEND_TIMEOUT_MS = 30_000;
 
 export class SlackStartupError extends Error {
@@ -37,7 +35,6 @@ export class SlackStartupError extends Error {
 }
 
 export type BotRuntime = {
-  activeWorkCount(): number;
   close(): Promise<void>;
 };
 
@@ -73,73 +70,6 @@ export function loadSystemPrompt(workspace: string): string {
   const combinedPrompt = promptParts.join('\n\n');
   console.log(`[startup] system prompt length: ${combinedPrompt.length} chars`);
   return combinedPrompt;
-}
-
-function waitForShutdownSignal(): Promise<void> {
-  return new Promise((resolve) => {
-    const handlers = new Map<NodeJS.Signals, () => void>();
-
-    const cleanup = () => {
-      for (const [signal, handler] of handlers.entries()) {
-        process.removeListener(signal, handler);
-      }
-      handlers.clear();
-    };
-
-    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-      const handler = () => {
-        console.log(`[shutdown] received ${signal.toLowerCase()}`);
-        cleanup();
-        resolve();
-      };
-
-      handlers.set(signal, handler);
-      process.once(signal, handler);
-    }
-  });
-}
-
-/**
- * Schedule the self-restart. Called by the `restart_harness` tool after it
- * writes the pending-restart payload.
- *
- * We delay a few seconds so the current assistant turn has time to:
- *   1. receive the tool result
- *   2. generate its brief "restarting" reply
- *   3. flush that reply to Slack
- *
- * At `RESTART_DELAY_MS` we spawn the replacement daemon (detached) and send
- * ourselves SIGTERM, which drops into the existing shutdown path
- * (`waitForShutdownSignal` resolves → `finally` block runs → process exits).
- */
-export function makeRestartScheduler(): () => void {
-  let scheduled = false;
-  return () => {
-    if (scheduled) return;
-    scheduled = true;
-    console.log(`[restart] scheduled in ${RESTART_DELAY_MS}ms`);
-    setTimeout(() => {
-      try {
-        spawnDetachedRestart();
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`[restart] failed to spawn replacement: ${msg}`);
-      }
-      console.log('[restart] sending SIGTERM to self');
-      process.kill(process.pid, 'SIGTERM');
-    }, RESTART_DELAY_MS).unref();
-  };
-}
-
-export function registerRestartSignalHandler(scheduleRestart: () => void): () => void {
-  const handler = () => {
-    console.log('[restart] received restart signal from restart harness tool');
-    scheduleRestart();
-  };
-  process.on('SIGUSR2', handler);
-  return () => {
-    process.removeListener('SIGUSR2', handler);
-  };
 }
 
 export function createSlackFileUploaderProvider(
@@ -231,7 +161,10 @@ export async function triggerPostRestartIfPending(
   }
 }
 
-export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
+export async function startBotRuntime(
+  settings: Settings,
+  runtimeController: RuntimeController,
+): Promise<BotRuntime> {
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
   console.log(`[startup] model: ${settings.model}`);
@@ -241,8 +174,6 @@ export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
     claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
   });
 
-  const scheduleRestart = makeRestartScheduler();
-  const unregisterRestartSignalHandler = registerRestartSignalHandler(scheduleRestart);
   const scheduledJobStore = openScheduledJobStore();
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
   let scheduledJobScheduler: ScheduledJobScheduler | undefined;
@@ -257,6 +188,7 @@ export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
     effort: settings.effort,
     slackFileUploaderProvider: createSlackFileUploaderProvider(() => slackApp),
     scheduledJobStore,
+    runtimeController,
   });
 
   const conversationStore = openConversationStore();
@@ -272,9 +204,9 @@ export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
   let closePromise: Promise<void> | undefined;
   const close = () => {
     closePromise ??= (async () => {
-      unregisterRestartSignalHandler();
-      await scheduledJobScheduler?.stop();
+      const schedulerStopped = scheduledJobScheduler?.stop();
       await conversationManager.closeAll();
+      await schedulerStopped;
       if (slackApp) {
         await stopSlackApp(slackApp);
       }
@@ -294,6 +226,7 @@ export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
         conversationManager,
         mainAgent,
         threadModelStore,
+        runtimeController,
       });
     } catch (error) {
       throw new SlackStartupError(error);
@@ -307,6 +240,7 @@ export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
     scheduledJobScheduler = createScheduledJobScheduler({
       store: scheduledJobStore,
       dispatcher: scheduledJobDispatcher,
+      runtimeController,
     });
     await scheduledJobScheduler.start();
 
@@ -315,30 +249,10 @@ export async function startBotRuntime(settings: Settings): Promise<BotRuntime> {
     await triggerPostRestartIfPending(slackApp, conversationManager, mainAgent);
 
     return {
-      activeWorkCount: () => conversationManager.activeWorkCount(),
       close,
     };
   } catch (error) {
     await close();
     throw error;
   }
-}
-
-export async function startBot(): Promise<void> {
-  console.log('[startup] loading settings...');
-  const settings = loadSettings();
-  const runtime = await startBotRuntime(settings);
-
-  try {
-    await waitForShutdownSignal();
-  } finally {
-    await runtime.close();
-  }
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  startBot().catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
 }

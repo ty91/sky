@@ -2,6 +2,7 @@ import { App } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
+import type { RuntimeController } from '../runtime/controller.js';
 import {
   createSlackAgentDmHandler,
   type SlackAgentDmMessageEvent,
@@ -29,6 +30,7 @@ export type SlackAppOptions = {
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
   threadModelStore: ThreadModelStore;
+  runtimeController: Pick<RuntimeController, 'isAccepting' | 'lease'>;
 };
 
 export async function startSlackApp(options: SlackAppOptions): Promise<App> {
@@ -44,6 +46,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     mainAgent: options.mainAgent,
     threadModelStore: options.threadModelStore,
     userNameResolver,
+    runtimeController: options.runtimeController,
   });
 
   app.assistant(assistant);
@@ -72,6 +75,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
       },
     },
     userNameResolver,
+    runtimeController: options.runtimeController,
   });
   const channelIngress = createSlackChannelIngress({
     botUserId,
@@ -98,6 +102,7 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
       token: options.botToken,
     },
     userNameResolver,
+    runtimeController: options.runtimeController,
   });
 
   app.event('app_mention', async ({ event }) => {

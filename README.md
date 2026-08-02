@@ -160,6 +160,7 @@ pnpm link --global
 sky service install
 sky start
 sky stop
+sky restart
 sky status
 sky logs
 sky service uninstall
@@ -173,7 +174,7 @@ sky service uninstall
 skyd --foreground
 ```
 
-`skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. Graceful restart는 후속 lifecycle 작업에서 제공되며, 그 전까지 `sky restart`는 기존 detached daemon을 만들지 않고 명시적인 오류로 종료합니다.
+`skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. `sky restart`는 진행 중인 Slack turn과 scheduler dispatch를 최대 120초 drain한 뒤 종료하고, launchd가 시작한 새 daemon이 startup 상태에 도달할 때까지 기다립니다. daemon이 응답하지 않을 때는 자동으로 강제 교체하지 않으며, 사용자가 `sky restart --force`를 명시한 경우에만 `launchctl kickstart -k`를 사용합니다.
 
 ```bash
 skyd --foreground
@@ -181,6 +182,8 @@ curl --unix-socket ~/.sky/run/skyd.sock http://localhost/status
 ```
 
 설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.
+
+`skyd --foreground`는 supervisor가 없으므로 control restart와 `restart_harness`를 거부합니다. `sky status`의 `supervision` 항목에서 현재 daemon이 `launchd` 또는 `foreground`로 실행 중인지 확인할 수 있습니다.
 
 ## Package 검증과 release
 

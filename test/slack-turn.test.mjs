@@ -14,7 +14,8 @@ const MAIN_AGENT = {
 const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-turn-'));
 process.env.HOME = homeDir;
 
-const { SLACK_TURN_ERROR_REPLY, executeSlackTurn } = await import('../dist/slack/turn.js');
+const { SLACK_DRAINING_REPLY, SLACK_TURN_ERROR_REPLY, executeSlackTurn } = await import('../dist/slack/turn.js');
+const { createRuntimeController } = await import('../dist/runtime/controller.js');
 
 function createIndicator(sink = []) {
   return {
@@ -47,6 +48,85 @@ function createReplyAdapter() {
 
 test.after(() => {
   fs.rmSync(homeDir, { recursive: true, force: true });
+});
+
+test('executeSlackTurn rejects new ingress during drain without creating a turn or transcript', async () => {
+  const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
+  assert.equal(runtimeController.requestRestart().ok, true);
+  const replies = createReplyAdapter();
+  const indicator = createIndicator();
+  let runTurnCalled = false;
+
+  await executeSlackTurn({
+    threadId: 'C123:draining',
+    text: '새 요청',
+    conversationManager: {
+      runTurn: async () => {
+        runTurnCalled = true;
+      },
+    },
+    mainAgent: MAIN_AGENT,
+    indicator: indicator.indicator,
+    reply: replies.adapter,
+    runtimeController,
+  });
+
+  assert.equal(runTurnCalled, false);
+  assert.deepEqual(indicator.events, []);
+  assert.deepEqual(replies.replies, [SLACK_DRAINING_REPLY]);
+});
+
+test('restart drain keeps the calling Slack turn active through final delivery', async () => {
+  const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
+  let allowDelivery;
+  const deliveryGate = new Promise((resolve) => {
+    allowDelivery = resolve;
+  });
+  let markDeliveryStarted;
+  const deliveryStarted = new Promise((resolve) => {
+    markDeliveryStarted = resolve;
+  });
+
+  const turn = executeSlackTurn({
+    threadId: 'C123:restart',
+    text: '재시작해줘',
+    conversationManager: {
+      runTurn: async (_key, _agent, _text, options) => {
+        assert.equal(runtimeController.requestRestart().ok, true);
+        await options.onFinal('재시작할게요.');
+        return {
+          kind: 'ok',
+          text: '재시작할게요.',
+          messages: ['재시작할게요.'],
+          handle: { sessionId: 'restart-session' },
+        };
+      },
+    },
+    mainAgent: MAIN_AGENT,
+    indicator: createIndicator().indicator,
+    reply: {
+      sendReply: async () => {
+        markDeliveryStarted();
+        await deliveryGate;
+      },
+    },
+    runtimeController,
+  });
+
+  await deliveryStarted;
+  let drained = false;
+  const drain = runtimeController.drain().then((result) => {
+    drained = true;
+    return result;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtimeController.activeCount(), 1);
+  assert.equal(drained, false);
+
+  allowDelivery();
+  await turn;
+  assert.deepEqual(await drain, { timedOut: false });
+  assert.equal(runtimeController.activeCount(), 0);
 });
 
 test('executeSlackTurn delivers only the final message and records every assistant message', async () => {

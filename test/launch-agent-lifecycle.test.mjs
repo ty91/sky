@@ -143,7 +143,11 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
       'Umask',
     ]);
     assert.equal(plist.Label, 'com.ty91.skyd');
-    assert.deepEqual(plist.ProgramArguments, [path.join(context.binDir, 'skyd'), '--foreground']);
+    assert.deepEqual(plist.ProgramArguments, [
+      path.join(context.binDir, 'skyd'),
+      '--foreground',
+      '--supervised',
+    ]);
     assert.equal(plist.KeepAlive, true);
     assert.equal(plist.ProcessType, 'Standard');
     assert.equal(plist.Umask, 0o77);
@@ -164,14 +168,41 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
     assert.equal(status.code, 0, status.stderr || status.stdout);
     assert.equal(JSON.parse(status.stdout).status.launchd.pid, firstState.pid);
 
+    const restarted = await runCli(['restart', '--json'], context.env);
+    assert.equal(restarted.code, 0, restarted.stderr || restarted.stdout);
+    const restartedState = await readState(context.stateFile);
+    assert.notEqual(restartedState.pid, firstState.pid);
+    assert.equal(restartedState.kickstartCount, 0);
+    assert.notEqual(
+      JSON.parse(restarted.stdout).status.control.status.instanceId,
+      installedJson.status.control.status.instanceId,
+    );
+
     const stopped = await runCli(['stop', '--json'], context.env);
     assert.equal(stopped.code, 0, stopped.stderr || stopped.stdout);
     assert.equal((await readState(context.stateFile)).loaded, false);
     assert.equal((await stat(context.plistFile)).isFile(), true);
 
+    const restartWhileStopped = await runCli(['restart', '--json'], context.env);
+    assert.equal(restartWhileStopped.code, 1);
+    assert.equal(JSON.parse(restartWhileStopped.stdout).error.code, 'service_not_loaded');
+    assert.equal((await readState(context.stateFile)).bootstrapCount, 1);
+
     const started = await runCli(['start', '--json'], context.env);
     assert.equal(started.code, 0, started.stderr || started.stdout);
     assert.equal((await readState(context.stateFile)).bootstrapCount, 2);
+
+    const runningState = await readState(context.stateFile);
+    process.kill(runningState.pid, 'SIGTERM');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const unresponsive = await runCli(['restart', '--json'], context.env);
+    assert.equal(unresponsive.code, 1);
+    assert.equal(JSON.parse(unresponsive.stdout).error.code, 'daemon_unresponsive');
+    assert.equal((await readState(context.stateFile)).kickstartCount, 0);
+
+    const forced = await runCli(['restart', '--force', '--json'], context.env);
+    assert.equal(forced.code, 0, forced.stderr || forced.stdout);
+    assert.equal((await readState(context.stateFile)).kickstartCount, 1);
 
     const uninstalled = await runCli(['service', 'uninstall', '--json'], context.env);
     assert.equal(uninstalled.code, 0, uninstalled.stderr || uninstalled.stdout);
@@ -285,6 +316,33 @@ test('a reused legacy PID is ignored and never signaled', { timeout: 30_000 }, a
     process.kill(unrelated.pid, 0);
   } finally {
     unrelated.kill('SIGTERM');
+    await cleanup(context);
+  }
+});
+
+test('restart distinguishes an unmanaged foreground daemon', { timeout: 30_000 }, async () => {
+  const context = await setup();
+  const foreground = spawn(process.execPath, [fakeSkyd], {
+    env: context.env,
+    stdio: 'ignore',
+  });
+  try {
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      try {
+        await readFile(context.readyFile, 'utf8');
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+
+    const result = await runCli(['restart', '--json'], context.env);
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'foreground_daemon');
+  } finally {
+    foreground.kill('SIGTERM');
+    await once(foreground, 'exit');
     await cleanup(context);
   }
 });

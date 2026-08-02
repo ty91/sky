@@ -15,7 +15,11 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { getDaemonStatus } from '../skyd/control.js';
+import {
+  ControlRequestError,
+  getDaemonStatus,
+  requestDaemonRestart,
+} from '../skyd/control.js';
 import type { DaemonStatus, RuntimeState } from '../skyd/types.js';
 
 const execFileAsync = promisify(execFile);
@@ -23,6 +27,7 @@ const execFileAsync = promisify(execFile);
 export const LAUNCH_AGENT_LABEL = 'com.ty91.skyd';
 const STARTUP_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 35_000;
+const RESTART_TIMEOUT_MS = 155_000;
 const LEGACY_STOP_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 250;
 
@@ -218,6 +223,7 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
   <array>
     <string>${xml(skydWrapper)}</string>
     <string>--foreground</string>
+    <string>--supervised</string>
   </array>
   <key>KeepAlive</key>
   <true/>
@@ -345,6 +351,35 @@ async function waitForStartup(paths: LaunchAgentPaths): Promise<ServiceStatus> {
   throw new ServiceLifecycleError(
     'startup_timeout',
     `skyd did not reach a startup state within ${STARTUP_TIMEOUT_MS / 1000} seconds.`,
+    { status: lastStatus },
+  );
+}
+
+async function waitForReplacement(
+  paths: LaunchAgentPaths,
+  previousInstanceId: string | undefined,
+): Promise<ServiceStatus> {
+  const deadline = Date.now() + RESTART_TIMEOUT_MS;
+  let lastStatus: ServiceStatus | null = null;
+  while (Date.now() < deadline) {
+    const [launchd, control] = await Promise.all([
+      launchdStatus(paths),
+      controlStatus(paths.socketFile),
+    ]);
+    lastStatus = { launchd, control };
+    const daemon = control.status;
+    if (
+      daemon &&
+      daemon.instanceId !== previousInstanceId &&
+      isStartupState(daemon.runtime.state)
+    ) {
+      return lastStatus;
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new ServiceLifecycleError(
+    'restart_timeout',
+    `skyd was not replaced and started within ${RESTART_TIMEOUT_MS / 1000} seconds.`,
     { status: lastStatus },
   );
 }
@@ -638,4 +673,62 @@ export async function stopLaunchAgent(): Promise<ServiceStatus> {
   }
   await bootout(paths);
   return getServiceStatus();
+}
+
+export async function restartLaunchAgent(options: { force?: boolean } = {}): Promise<ServiceStatus> {
+  assertMacOS();
+  const paths = launchAgentPaths();
+  const [launchd, control] = await Promise.all([
+    launchdStatus(paths),
+    controlStatus(paths.socketFile),
+  ]);
+  const current = { launchd, control };
+
+  if (!launchd.loaded) {
+    if (control.reachable) {
+      throw new ServiceLifecycleError(
+        'foreground_daemon',
+        'The reachable skyd is not supervised by the LaunchAgent and cannot be restarted.',
+        { status: current },
+      );
+    }
+    throw new ServiceLifecycleError(
+      'service_not_loaded',
+      'The Sky LaunchAgent is stopped or unloaded. Run `sky start` instead.',
+      { status: current },
+    );
+  }
+
+  const previousInstanceId = control.status?.instanceId;
+  if (options.force) {
+    await run('launchctl', ['kickstart', '-k', serviceTarget()]);
+    return waitForReplacement(paths, previousInstanceId);
+  }
+
+  if (!control.reachable) {
+    throw new ServiceLifecycleError(
+      'daemon_unresponsive',
+      'The daemon control socket is unreachable. Retry or use `sky restart --force`.',
+      { status: current },
+    );
+  }
+
+  try {
+    await requestDaemonRestart(paths.socketFile);
+  } catch (error) {
+    if (error instanceof ControlRequestError) {
+      throw new ServiceLifecycleError(
+        error.code,
+        `The daemon refused restart: ${error.code}.`,
+        { cause: error, status: current },
+      );
+    }
+    throw new ServiceLifecycleError(
+      'daemon_unresponsive',
+      'The daemon stopped responding before it could accept restart. Retry or use `sky restart --force`.',
+      { cause: error, status: current },
+    );
+  }
+
+  return waitForReplacement(paths, previousInstanceId);
 }

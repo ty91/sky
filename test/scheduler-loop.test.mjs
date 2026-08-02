@@ -4,6 +4,7 @@ import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
 import { createScheduledJobScheduler } from '../dist/scheduler/loop.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
 import { createSchedulerConversationManager } from './helpers/scheduler.mjs';
+import { createRuntimeController } from '../dist/runtime/controller.js';
 
 function createJob(store, overrides = {}) {
   return store.create({
@@ -32,6 +33,28 @@ function createDispatcher(posts, agentResult) {
     }),
   };
 }
+
+test('scheduler does not claim or dispatch jobs after drain begins', async () => {
+  const store = openScheduledJobStore(':memory:');
+  createJob(store);
+  const posts = [];
+  const { dispatcher, manager } = createDispatcher(posts, { finalText: '보내지 않음' });
+  const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
+  assert.equal(runtimeController.requestRestart().ok, true);
+  const scheduler = createScheduledJobScheduler({
+    store,
+    dispatcher,
+    now: () => 1_000,
+    runtimeController,
+  });
+
+  await scheduler.tick();
+
+  assert.deepEqual(posts, []);
+  assert.equal(store.list()[0].status, 'pending');
+  await manager.closeAll();
+  store.close();
+});
 
 test('scheduler tick dispatches a due reminder once and marks it done', async () => {
   const store = openScheduledJobStore(':memory:');

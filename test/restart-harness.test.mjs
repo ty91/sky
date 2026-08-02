@@ -4,37 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { contextFromEnv } from '../dist/mcp/restart-harness-server.js';
 
-test('contextFromEnv validates MCP server context', () => {
-  assert.deepEqual(
-    contextFromEnv({
-      SKY_SESSION_KEY: 'C123:111.22',
-      SKY_SLACK_CHANNEL_ID: 'C123',
-      SKY_SLACK_THREAD_TS: '111.22',
-      SKY_PARENT_PID: '12345',
-    }),
-    {
-      sessionKey: 'C123:111.22',
-      channelId: 'C123',
-      threadTs: '111.22',
-      parentPid: 12345,
-    },
-  );
-
-  assert.throws(
-    () =>
-      contextFromEnv({
-        SKY_SESSION_KEY: 'C123:111.22',
-        SKY_SLACK_CHANNEL_ID: 'C123',
-        SKY_SLACK_THREAD_TS: '111.22',
-        SKY_PARENT_PID: 'nope',
-      }),
-    /Invalid SKY_PARENT_PID/,
-  );
-});
-
-test('restart harness records pending restart, signals parent, and rate limits repeats', () => {
+test('restart harness records pending restart through the runtime controller and rate limits repeats', () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-restart-'));
 
   try {
@@ -46,33 +17,31 @@ test('restart harness records pending restart, signals parent, and rate limits r
         `
 import assert from 'node:assert/strict';
 import { runRestartHarnessTool } from './dist/agents/tools/restart-harness.js';
+import { createRuntimeController } from './dist/runtime/controller.js';
 import { _resetRestartStateForTests, isRestartPending } from './dist/runtime/pending-restart.js';
 
 _resetRestartStateForTests();
-const signals = [];
+const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
 const ctx = {
   sessionKey: 'C123:111.22',
   channelId: 'C123',
   threadTs: '111.22',
-  parentPid: 4242,
+  runtimeController,
 };
 
-const first = runRestartHarnessTool(ctx, { reason: 'reload' }, (pid, signal) => {
-  signals.push({ pid, signal });
-});
+const first = runRestartHarnessTool(ctx, { reason: 'reload' });
 
 assert.equal(first.isError, undefined);
 assert.match(first.content[0].text, /Restart scheduled/);
-assert.deepEqual(signals, [{ pid: 4242, signal: 'SIGUSR2' }]);
 assert.equal(isRestartPending(), true);
+assert.equal(runtimeController.isAccepting(), false);
 
-const second = runRestartHarnessTool(ctx, {}, (pid, signal) => {
-  signals.push({ pid, signal });
-});
+const nextRuntimeController = createRuntimeController({ supervisionMode: 'launchd' });
+const second = runRestartHarnessTool({ ...ctx, runtimeController: nextRuntimeController }, {});
 
 assert.equal(second.isError, true);
-assert.match(second.content[0].text, /rate-limited/);
-assert.deepEqual(signals, [{ pid: 4242, signal: 'SIGUSR2' }]);
+assert.match(second.content[0].text, /rate limited/i);
+assert.equal(nextRuntimeController.isAccepting(), true);
 console.log('restart-harness-ok');
         `,
       ],
@@ -101,6 +70,7 @@ test('main agent exposes restart_harness as a backend-neutral tool spec bound to
         `
 import assert from 'node:assert/strict';
 import { createMainAgentConfig } from './dist/agents/main.js';
+import { createRuntimeController } from './dist/runtime/controller.js';
 import { _resetRestartStateForTests, consumePendingRestart } from './dist/runtime/pending-restart.js';
 
 _resetRestartStateForTests();
@@ -109,12 +79,12 @@ const agent = createMainAgentConfig({ systemPrompt: 'system' });
 assert.ok(agent.tools.includes('restart_harness'));
 assert.equal(typeof agent.customToolsFactory, 'function');
 
-const signals = [];
-const agentWithFakeSignal = createMainAgentConfig({
+const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
+const agentWithController = createMainAgentConfig({
   systemPrompt: 'system',
-  restartSignalParent: (pid, signal) => signals.push({ pid, signal }),
+  runtimeController,
 });
-const tools = agentWithFakeSignal.customToolsFactory({ sessionKey: 'C123:111.22' });
+const tools = agentWithController.customToolsFactory({ sessionKey: 'C123:111.22' });
 assert.equal(tools.length, 1);
 assert.equal(tools[0].name, 'restart_harness');
 
@@ -132,7 +102,7 @@ assert.equal(pending.sessionKey, 'C123:111.22');
 assert.equal(pending.channelId, 'C123');
 assert.equal(pending.threadTs, '111.22');
 assert.equal(pending.reason, 'reload');
-assert.deepEqual(signals, [{ pid: process.pid, signal: 'SIGUSR2' }]);
+assert.equal(runtimeController.isAccepting(), false);
 console.log('restart-tool-spec-ok');
         `,
       ],
@@ -454,23 +424,4 @@ console.log('post-restart-conversation-ok');
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }
-});
-
-
-test('restart signal handler invokes the scheduler and can be unregistered', async () => {
-  let count = 0;
-  const { registerRestartSignalHandler } = await import('../dist/bot.js');
-  const before = new Set(process.listeners('SIGUSR2'));
-  const unregister = registerRestartSignalHandler(() => {
-    count++;
-  });
-  const handler = process.listeners('SIGUSR2').find((listener) => !before.has(listener));
-  assert.equal(typeof handler, 'function');
-
-  handler();
-  assert.equal(count, 1);
-
-  unregister();
-  assert.equal(process.listeners('SIGUSR2').includes(handler), false);
-  assert.equal(count, 1);
 });

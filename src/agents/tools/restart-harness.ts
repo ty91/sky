@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { AgentToolSpec } from '../backend/types.js';
-import { requestRestart, type PendingRestart } from '../../runtime/pending-restart.js';
+import type { RuntimeController } from '../../runtime/controller.js';
+import {
+  requestRestart as recordPendingRestart,
+  type PendingRestart,
+} from '../../runtime/pending-restart.js';
 
 /**
  * MCP tool name suffix. The full name exposed to the allowlist is
@@ -17,8 +21,7 @@ export type RestartHarnessContext = {
   channelId: string;
   /** Slack thread ts for post-restart delivery. */
   threadTs: string;
-  /** Parent bot process to signal after a restart request is accepted. */
-  parentPid?: number;
+  runtimeController: Pick<RuntimeController, 'requestRestart'>;
 };
 
 export type RestartHarnessInput = {
@@ -42,17 +45,16 @@ export const RESTART_HARNESS_DESCRIPTION = [
   'Use ONLY when the user explicitly tells you the harness code has been',
   'rebuilt and must be reloaded. Do NOT call this on your own initiative.',
   '',
-  'Calling this tool kills your current process a few seconds after it',
-  'returns. The next turn you experience will be a synthetic post-restart',
-  'trigger (delivered as a `<system-reminder>`) confirming the restart',
-  'completed. Keep your user-facing reply brief — one sentence acknowledging',
-  'the restart — then stop.',
+  'Calling this tool starts a graceful drain after the current Slack reply is',
+  'delivered. The supervisor starts the replacement process, and the next turn',
+  'you experience will be a synthetic post-restart trigger (delivered as a',
+  '`<system-reminder>`) confirming the restart completed. Keep your user-facing',
+  'reply brief — one sentence acknowledging the restart — then stop.',
 ].join('\n');
 
 export function runRestartHarnessTool(
   ctx: RestartHarnessContext,
   input: RestartHarnessInput,
-  signalParent: (pid: number, signal: NodeJS.Signals) => void = process.kill,
 ): RestartHarnessToolResult {
   const info: PendingRestart = {
     sessionKey: ctx.sessionKey,
@@ -62,21 +64,24 @@ export function runRestartHarnessTool(
     requestedAt: Date.now(),
   };
 
-  const result = requestRestart(info);
+  const result = ctx.runtimeController.requestRestart(() => {
+    const pending = recordPendingRestart(info);
+    if (pending.ok) return undefined;
+    return {
+      code: 'restart_rate_limited',
+      message: `Restart rate limited; retry in ${Math.ceil(pending.remainingMs / 1000)}s.`,
+    };
+  });
   if (!result.ok) {
     return {
       content: [
         {
           type: 'text',
-          text: `Restart refused: ${result.reason} (retry in ${Math.ceil(result.remainingMs / 1000)}s).`,
+          text: `Restart refused: ${result.message}`,
         },
       ],
       isError: true,
     };
-  }
-
-  if (ctx.parentPid !== undefined) {
-    signalParent(ctx.parentPid, 'SIGUSR2');
   }
 
   return {
@@ -96,17 +101,14 @@ const RESTART_HARNESS_INPUT_SCHEMA = {
     .optional(),
 };
 
-export function createRestartHarnessToolSpec(
-  ctx: RestartHarnessContext,
-  signalParent: (pid: number, signal: NodeJS.Signals) => void = process.kill,
-): AgentToolSpec {
+export function createRestartHarnessToolSpec(ctx: RestartHarnessContext): AgentToolSpec {
   return {
     name: RESTART_HARNESS_TOOL_NAME,
     label: 'Restart harness',
     description: RESTART_HARNESS_DESCRIPTION,
     inputSchema: RESTART_HARNESS_INPUT_SCHEMA,
     async execute(input) {
-      const result = runRestartHarnessTool(ctx, input as RestartHarnessInput, signalParent);
+      const result = runRestartHarnessTool(ctx, input as RestartHarnessInput);
       if (result.isError) {
         return result;
       }

@@ -1,12 +1,13 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
+import type { RuntimeController } from '../runtime/controller.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { maybeHandleChatCommand } from './commands.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
-import { executeSlackTurn } from './turn.js';
+import { executeSlackTurn, SLACK_DRAINING_REPLY } from './turn.js';
 import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
 export type SlackAgentDmMessageEvent = {
@@ -39,6 +40,7 @@ export type SlackAgentDmHandlerOptions = {
   slack: SlackAgentDmClient;
   threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
+  runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
 };
 
 export type SlackAgentDmHandler = {
@@ -52,6 +54,7 @@ export function createSlackAgentDmHandler({
   slack,
   threadModelStore,
   userNameResolver,
+  runtimeController,
 }: SlackAgentDmHandlerOptions): SlackAgentDmHandler {
   return {
     async handleMessage({ message }) {
@@ -78,6 +81,11 @@ export function createSlackAgentDmHandler({
           });
         },
       });
+
+      if (runtimeController && !runtimeController.isAccepting()) {
+        await sender.sendReply(SLACK_DRAINING_REPLY);
+        return true;
+      }
 
       // Chat commands are matched against the raw text, before attachment
       // lines and the `<@user>:` prefix are added.
@@ -129,6 +137,7 @@ export function createSlackAgentDmHandler({
         mainAgent,
         indicator,
         reply: sender,
+        runtimeController,
       });
 
       return true;

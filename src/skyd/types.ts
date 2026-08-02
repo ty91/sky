@@ -14,6 +14,9 @@ export type SlackConnectionState =
 
 export type DaemonStatus = {
   instanceId: string;
+  supervision: {
+    mode: 'launchd' | 'foreground';
+  };
   process: {
     pid: number;
     state: 'running' | 'stopping';

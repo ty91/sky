@@ -2,8 +2,10 @@ import { TranscriptWriter } from '../agents/memory/transcript.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { TurnActivityIndicator } from './activity-indicator.js';
+import type { RuntimeController } from '../runtime/controller.js';
 
 export const SLACK_TURN_ERROR_REPLY = '오류가 났습니다. 잠시 뒤 다시 시도해 주세요.';
+export const SLACK_DRAINING_REPLY = 'Sky가 재시작을 준비 중입니다. 잠시 뒤 다시 시도해 주세요.';
 
 const INTERIM_LOG_PREVIEW_LENGTH = 100;
 
@@ -26,6 +28,7 @@ export type ExecuteSlackTurnOptions = {
   /** Shows the "thinking" state; hidden around each sent message. */
   indicator: TurnActivityIndicator;
   reply: SlackTurnReplyAdapter;
+  runtimeController?: Pick<RuntimeController, 'lease'>;
 };
 
 export async function executeSlackTurn({
@@ -35,12 +38,17 @@ export async function executeSlackTurn({
   mainAgent,
   indicator,
   reply,
+  runtimeController,
 }: ExecuteSlackTurnOptions): Promise<void> {
+  const lease = runtimeController?.lease('slack_turn');
+  if (runtimeController && !lease) {
+    await reply.sendReply(SLACK_DRAINING_REPLY);
+    return;
+  }
   const transcript = new TranscriptWriter(threadId);
 
-  await indicator.begin();
-
   try {
+    await indicator.begin();
     transcript.appendUser(text);
     let finalSent = false;
     // Holds the most recent assistant message. Once another message arrives it
@@ -91,5 +99,6 @@ export async function executeSlackTurn({
     await reply.sendReply(SLACK_TURN_ERROR_REPLY);
   } finally {
     await indicator.end();
+    lease?.release();
   }
 }

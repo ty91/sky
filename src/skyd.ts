@@ -27,8 +27,8 @@ function waitForShutdownSignal(): Promise<void> {
   });
 }
 
-async function runForeground(): Promise<void> {
-  const daemon = await startSkyd();
+async function runForeground(supervised: boolean): Promise<void> {
+  const daemon = await startSkyd({ supervisionMode: supervised ? 'launchd' : 'foreground' });
   try {
     await Promise.race([waitForShutdownSignal(), daemon.finished]);
   } finally {
@@ -41,11 +41,12 @@ const program = new Command()
   .description('Sky foreground daemon')
   .version(version)
   .option('--foreground', 'Run the daemon in the foreground')
-  .action(async (options: { foreground?: boolean }) => {
+  .option('--supervised', 'Run under the installed process supervisor')
+  .action(async (options: { foreground?: boolean; supervised?: boolean }) => {
     if (!options.foreground) {
       program.error('skyd must be run explicitly with --foreground');
     }
-    await runForeground();
+    await runForeground(options.supervised === true);
   });
 
 program.parseAsync().catch((error) => {

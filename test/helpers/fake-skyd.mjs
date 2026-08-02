@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 
@@ -10,6 +11,7 @@ const startedAt = new Date().toISOString();
 const runtimeState = process.env.SKY_FAKE_RUNTIME_STATE ?? 'ready';
 const status = {
   instanceId: `fake-${process.pid}`,
+  supervision: { mode: 'launchd' },
   process: {
     pid: process.pid,
     state: 'running',
@@ -31,7 +33,31 @@ const status = {
   recentErrors: [],
 };
 
+async function replaceForRestart() {
+  await new Promise((resolve) => server.close(resolve));
+  await rm(socketFile, { force: true });
+  const child = spawn(process.execPath, [process.env.SKY_FAKE_DAEMON], {
+    detached: true,
+    env: process.env,
+    stdio: 'ignore',
+  });
+  child.unref();
+  const state = JSON.parse(await readFile(process.env.SKY_FAKE_LAUNCHCTL_STATE, 'utf8'));
+  state.pid = child.pid;
+  await writeFile(process.env.SKY_FAKE_LAUNCHCTL_STATE, JSON.stringify(state));
+  process.exit(0);
+}
+
 const server = http.createServer((request, response) => {
+  if (request.method === 'POST' && request.url === '/restart') {
+    const body = JSON.stringify({ accepted: true, instanceId: status.instanceId });
+    response.writeHead(202, {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+    });
+    response.end(body, () => void replaceForRestart());
+    return;
+  }
   if (request.method !== 'GET' || request.url !== '/status') {
     response.writeHead(404).end();
     return;

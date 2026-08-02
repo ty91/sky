@@ -19,8 +19,10 @@ import { fileURLToPath } from 'node:url';
 import { SlackStartupError } from '../dist/bot.js';
 import { startSkyd } from '../dist/skyd/app.js';
 import {
+  ControlRequestError,
   DaemonAlreadyRunningError,
   getDaemonStatus,
+  requestDaemonRestart,
 } from '../dist/skyd/control.js';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
 
@@ -35,6 +37,20 @@ async function withTempHome(run) {
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
+}
+
+async function writeValidSettings(homeDir) {
+  const settingsFile = path.join(homeDir, '.sky', 'settings.json');
+  await mkdir(path.dirname(settingsFile), { recursive: true });
+  await writeFile(
+    settingsFile,
+    JSON.stringify({
+      slack: { botToken: 'xoxb-test', appToken: 'xapp-test' },
+      model: 'anthropic/test-model',
+      agentBackend: 'pi',
+    }),
+    { mode: 0o600 },
+  );
 }
 
 async function waitForStatus(socketFile, predicate, timeoutMs = 2_000) {
@@ -129,6 +145,123 @@ test('GET /status stays available without settings and exposes stable control er
     }
 
     await assert.rejects(lstat(daemon.paths.socketFile), { code: 'ENOENT' });
+  });
+});
+
+test('POST /restart drains active work over UDS before a supervised replacement starts', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    let lease;
+    let runtimeClosed = false;
+    const oldDaemon = await startSkyd({
+      homeDir,
+      supervisionMode: 'launchd',
+      startRuntime: async (_settings, runtimeController) => {
+        lease = runtimeController.lease('slack_turn');
+        return {
+          close: async () => {
+            runtimeClosed = true;
+          },
+        };
+      },
+    });
+
+    const oldStatus = await waitForStatus(
+      oldDaemon.paths.socketFile,
+      (status) => status.runtime.state === 'ready',
+    );
+    const accepted = await requestDaemonRestart(oldDaemon.paths.socketFile);
+    assert.deepEqual(accepted, { accepted: true, instanceId: oldStatus.instanceId });
+
+    const draining = await getDaemonStatus(oldDaemon.paths.socketFile);
+    assert.equal(draining.runtime.state, 'draining');
+    assert.equal(draining.activeWorkCount, 1);
+    assert.equal(runtimeClosed, false);
+
+    lease.release();
+    await oldDaemon.finished;
+    assert.equal(runtimeClosed, true);
+    await assert.rejects(lstat(oldDaemon.paths.socketFile), { code: 'ENOENT' });
+
+    const replacement = await startSkyd({
+      homeDir,
+      supervisionMode: 'launchd',
+      startRuntime: async () => ({ close: async () => {} }),
+    });
+    try {
+      const replacementStatus = await waitForStatus(
+        replacement.paths.socketFile,
+        (status) => status.runtime.state === 'ready',
+      );
+      assert.notEqual(replacementStatus.instanceId, oldStatus.instanceId);
+    } finally {
+      await replacement.close();
+    }
+  });
+});
+
+test('restart validates disk settings and rejects foreground without disturbing the runtime', async () => {
+  await withTempHome(async (homeDir) => {
+    const invalid = await startSkyd({ homeDir, supervisionMode: 'launchd' });
+    try {
+      await waitForStatus(
+        invalid.paths.socketFile,
+        (status) => status.runtime.state === 'needs_configuration',
+      );
+      await assert.rejects(
+        requestDaemonRestart(invalid.paths.socketFile),
+        (error) => error instanceof ControlRequestError && error.code === 'settings_missing',
+      );
+      assert.equal((await getDaemonStatus(invalid.paths.socketFile)).process.state, 'running');
+    } finally {
+      await invalid.close();
+    }
+
+    await writeValidSettings(homeDir);
+    const foreground = await startSkyd({
+      homeDir,
+      supervisionMode: 'foreground',
+      startRuntime: async () => ({ close: async () => {} }),
+    });
+    try {
+      await waitForStatus(
+        foreground.paths.socketFile,
+        (status) => status.runtime.state === 'ready',
+      );
+      await assert.rejects(
+        requestDaemonRestart(foreground.paths.socketFile),
+        (error) =>
+          error instanceof ControlRequestError && error.code === 'restart_unsupported_foreground',
+      );
+      assert.equal((await getDaemonStatus(foreground.paths.socketFile)).runtime.state, 'ready');
+    } finally {
+      await foreground.close();
+    }
+  });
+});
+
+test('stop aborts remaining activity after its bounded drain deadline', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    let runtimeClosed = false;
+    const daemon = await startSkyd({
+      homeDir,
+      stopDrainTimeoutMs: 10,
+      startRuntime: async (_settings, runtimeController) => {
+        const lease = runtimeController.lease('maintenance');
+        return {
+          close: async () => {
+            runtimeClosed = true;
+            lease.release();
+          },
+        };
+      },
+    });
+    await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+    await daemon.close();
+    assert.equal(runtimeClosed, true);
+    const logs = await readFile(daemon.paths.logFile, 'utf8');
+    assert.match(logs, /Drain deadline exceeded/);
   });
 });
 
@@ -232,7 +365,7 @@ test('Slack startup failures degrade, redact credentials, and recover through re
         backend: 'claude-agent-sdk',
         model: 'anthropic/test-model',
       });
-      assert.equal(ready.activeWorkCount, 2);
+      assert.equal(ready.activeWorkCount, 0);
       assert.deepEqual(
         ready.recentErrors.map(({ code }) => code),
         ['slack_startup_failed', 'slack_startup_failed'],

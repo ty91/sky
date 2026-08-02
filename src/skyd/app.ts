@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { SlackStartupError, startBotRuntime, type BotRuntime } from '../bot.js';
+import {
+  createRuntimeController,
+  type RuntimeController,
+  type SupervisionMode,
+} from '../runtime/controller.js';
 import { computeBackoffMs, isAbortError, sleep, type BackoffOptions } from '../runtime/retry.js';
 import type { Settings } from '../settings.js';
 import { startControlServer, type ControlServer } from './control.js';
@@ -13,7 +18,10 @@ const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
 
-export type RuntimeStarter = (settings: Settings) => Promise<BotRuntime>;
+export type RuntimeStarter = (
+  settings: Settings,
+  runtimeController: RuntimeController,
+) => Promise<BotRuntime>;
 
 export type StartSkydOptions = {
   homeDir?: string;
@@ -22,6 +30,9 @@ export type StartSkydOptions = {
   backoff?: BackoffOptions;
   random?: () => number;
   logger?: JsonlLoggerOptions;
+  supervisionMode?: SupervisionMode;
+  restartDrainTimeoutMs?: number;
+  stopDrainTimeoutMs?: number;
 };
 
 export type Skyd = {
@@ -55,7 +66,11 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const logger = createJsonlLogger(paths.logFile, options.logger);
   const instanceId = randomUUID();
   const startedAt = new Date();
-  const abortController = new AbortController();
+  const runtimeController = createRuntimeController({
+    supervisionMode: options.supervisionMode ?? 'foreground',
+    restartTimeoutMs: options.restartDrainTimeoutMs,
+    stopTimeoutMs: options.stopDrainTimeoutMs,
+  });
   const mutable: MutableStatus = {
     runtimeState: 'starting',
     slackState: 'not_configured',
@@ -73,13 +88,16 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
   const status = (): DaemonStatus => ({
     instanceId,
+    supervision: { mode: runtimeController.supervisionMode },
     process: {
       pid: process.pid,
-      state: mutable.runtimeState === 'draining' ? 'stopping' : 'running',
+      state: runtimeController.isAccepting() ? 'running' : 'stopping',
       startedAt: startedAt.toISOString(),
       uptimeMs: Math.max(0, Date.now() - startedAt.getTime()),
     },
-    runtime: { state: mutable.runtimeState },
+    runtime: {
+      state: runtimeController.isAccepting() ? mutable.runtimeState : 'draining',
+    },
     productVersion: options.productVersion ?? PRODUCT_VERSION,
     slack: {
       state: mutable.slackState,
@@ -90,13 +108,30 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       backend: mutable.backend,
       model: mutable.model,
     },
-    activeWorkCount: runtime?.activeWorkCount() ?? 0,
+    activeWorkCount: runtimeController.activeCount(),
     recentErrors: [...mutable.recentErrors],
   });
 
   let controlServer: ControlServer;
   try {
-    controlServer = await startControlServer(paths.socketFile, status);
+    controlServer = await startControlServer(paths.socketFile, status, {
+      requestRestart: () => {
+        const result = runtimeController.requestRestart(() => {
+          try {
+            loadSecureSettings(paths.settingsFile);
+            return undefined;
+          } catch (error) {
+            if (error instanceof ConfigurationError) {
+              return { code: error.code, message: error.message };
+            }
+            throw error;
+          }
+        });
+        return result.ok
+          ? { ok: true, instanceId }
+          : { ok: false, code: result.code, message: result.message, statusCode: 409 };
+      },
+    });
   } catch (error) {
     logger.log('error', 'control', error instanceof Error ? error.message : String(error));
     throw error;
@@ -114,7 +149,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       mutable.slackState = 'not_configured';
       addError(error.code);
       logger.log('warn', 'settings', error.message);
-      await waitForAbort(abortController.signal);
+      await waitForAbort(runtimeController.drainingSignal);
       return;
     }
 
@@ -127,13 +162,13 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     ]);
 
     let attempt = 0;
-    while (!abortController.signal.aborted) {
+    while (!runtimeController.drainingSignal.aborted) {
       mutable.runtimeState = attempt === 0 ? 'starting' : 'degraded';
       mutable.slackState = attempt === 0 ? 'connecting' : 'retrying';
       mutable.nextRetryAt = null;
 
       try {
-        runtime = await startRuntime(settings);
+        runtime = await startRuntime(settings, runtimeController);
       } catch (error) {
         if (!(error instanceof SlackStartupError)) throw error;
         attempt += 1;
@@ -145,7 +180,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
         mutable.nextRetryAt = new Date(Date.now() + delayMs).toISOString();
         logger.log('error', 'slack', `Slack startup failed: ${causeMessage(error)}`);
         try {
-          await sleep(delayMs, abortController.signal);
+          await sleep(delayMs, runtimeController.drainingSignal);
         } catch (sleepError) {
           if (!isAbortError(sleepError)) throw sleepError;
         }
@@ -156,12 +191,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       mutable.slackState = 'connected';
       mutable.nextRetryAt = null;
       logger.log('info', 'runtime', 'Slack and agent runtime started.');
-      try {
-        await waitForAbort(abortController.signal);
-      } finally {
-        await runtime.close();
-        runtime = undefined;
-      }
+      await waitForAbort(runtimeController.drainingSignal);
       return;
     }
   })().catch((error) => {
@@ -170,23 +200,38 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     throw error;
   });
 
-  let closePromise: Promise<void> | undefined;
+  const lifecycleTask = (async () => {
+    let runtimeError: unknown;
+    try {
+      await runtimeTask;
+    } catch (error) {
+      runtimeError = error;
+      runtimeController.requestStop();
+    }
+
+    mutable.runtimeState = 'draining';
+    mutable.nextRetryAt = null;
+    const drain = await runtimeController.drain();
+    if (drain.timedOut) {
+      addError('drain_timeout');
+      logger.log('warn', 'runtime', 'Drain deadline exceeded; aborting remaining activity.');
+    }
+    await runtime?.close();
+    runtime = undefined;
+    mutable.slackState = 'stopped';
+    await controlServer.close();
+    runtimeController.finish();
+    logger.log('info', 'daemon', 'Daemon stopped.');
+    if (runtimeError) throw runtimeError;
+  })();
+
   return {
     paths,
     status,
-    finished: runtimeTask,
+    finished: lifecycleTask,
     close() {
-      if (closePromise) return closePromise;
-      closePromise = (async () => {
-        mutable.runtimeState = 'draining';
-        mutable.slackState = 'stopped';
-        mutable.nextRetryAt = null;
-        abortController.abort();
-        await runtimeTask.catch(() => undefined);
-        await controlServer.close();
-        logger.log('info', 'daemon', 'Daemon stopped.');
-      })();
-      return closePromise;
+      runtimeController.requestStop();
+      return lifecycleTask;
     },
   };
 }

@@ -1,6 +1,7 @@
 import { nextCronRun } from './cron.js';
 import type { ScheduledJobDispatcher } from './dispatcher.js';
 import type { ScheduledJobStore } from './types.js';
+import type { RuntimeController } from '../runtime/controller.js';
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 60_000;
@@ -25,6 +26,7 @@ export type ScheduledJobSchedulerOptions = {
   runningTimeoutMs?: number;
   setInterval?: (callback: () => void, milliseconds: number) => IntervalHandle;
   clearInterval?: (handle: IntervalHandle) => void;
+  runtimeController?: Pick<RuntimeController, 'lease'>;
 };
 
 export function createScheduledJobScheduler(
@@ -62,66 +64,77 @@ export function createScheduledJobScheduler(
   }
 
   async function runTick(): Promise<void> {
-    const currentTime = now();
-    await recoverStaleJobs(currentTime);
-    const jobs = options.store.claimDue(currentTime);
-    for (const job of jobs) {
-      try {
-        await options.dispatcher.dispatch(job);
-        options.store.markDone(job.id);
-      } catch (cause) {
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        const outcome = options.store.recordFailure(
-          job.id,
-          error.message,
-          now() + retryDelayMs,
-          maxAttempts,
-        );
-        if (outcome === 'failed') {
+    const lease = options.runtimeController?.lease('scheduler_dispatch');
+    if (options.runtimeController && !lease) return;
+
+    try {
+      const currentTime = now();
+      await recoverStaleJobs(currentTime);
+      const jobs = options.store.claimDue(currentTime);
+      for (const job of jobs) {
+        try {
+          await options.dispatcher.dispatch(job);
+          options.store.markDone(job.id);
+        } catch (cause) {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          const outcome = options.store.recordFailure(
+            job.id,
+            error.message,
+            now() + retryDelayMs,
+            maxAttempts,
+          );
+          if (outcome === 'failed') {
+            try {
+              await options.dispatcher.notifyFailure(job, error, maxAttempts);
+            } catch (notificationError) {
+              const message =
+                notificationError instanceof Error
+                  ? notificationError.message
+                  : String(notificationError);
+              console.error(
+                `[scheduler] failed to send failure notice for job=${job.id}: ${message}`,
+              );
+            }
+          }
+        }
+      }
+
+      const cronJobs = options.store.claimDueCron(currentTime);
+      for (const job of cronJobs) {
+        let lastError: string | null = null;
+        try {
+          await options.dispatcher.dispatch(job);
+        } catch (cause) {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          lastError = error.message;
+          console.error(`[scheduler] cron job=${job.id} dispatch failed: ${error.message}`);
           try {
-            await options.dispatcher.notifyFailure(job, error, maxAttempts);
+            await options.dispatcher.notifyFailure(job, error, job.runCount);
           } catch (notificationError) {
             const message =
               notificationError instanceof Error
                 ? notificationError.message
                 : String(notificationError);
-            console.error(`[scheduler] failed to send failure notice for job=${job.id}: ${message}`);
+            console.error(
+              `[scheduler] failed to send cron failure notice for job=${job.id}: ${message}`,
+            );
           }
         }
-      }
-    }
-
-    const cronJobs = options.store.claimDueCron(currentTime);
-    for (const job of cronJobs) {
-      let lastError: string | null = null;
-      try {
-        await options.dispatcher.dispatch(job);
-      } catch (cause) {
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        lastError = error.message;
-        console.error(`[scheduler] cron job=${job.id} dispatch failed: ${error.message}`);
+        // Re-arm for the next occurrence regardless of success so a single failed
+        // run never kills the recurring schedule.
         try {
-          await options.dispatcher.notifyFailure(job, error, job.runCount);
-        } catch (notificationError) {
-          const message =
-            notificationError instanceof Error
-              ? notificationError.message
-              : String(notificationError);
-          console.error(`[scheduler] failed to send cron failure notice for job=${job.id}: ${message}`);
+          const nextRunAt = nextCronRun(job.cronExpr ?? '', job.timezone, now());
+          options.store.rearmCron(job.id, nextRunAt, lastError);
+        } catch (cause) {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          // An unparseable cron expression cannot be rescheduled; fail it so it
+          // stops occupying a running slot.
+          options.store.recordFailure(job.id, `cron re-arm failed: ${error.message}`, now(), 0);
+          console.error(`[scheduler] cron job=${job.id} re-arm failed: ${error.message}`);
         }
       }
-      // Re-arm for the next occurrence regardless of success so a single failed
-      // run never kills the recurring schedule.
-      try {
-        const nextRunAt = nextCronRun(job.cronExpr ?? '', job.timezone, now());
-        options.store.rearmCron(job.id, nextRunAt, lastError);
-      } catch (cause) {
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        // An unparseable cron expression cannot be rescheduled; fail it so it
-        // stops occupying a running slot.
-        options.store.recordFailure(job.id, `cron re-arm failed: ${error.message}`, now(), 0);
-        console.error(`[scheduler] cron job=${job.id} re-arm failed: ${error.message}`);
-      }
+    } finally {
+      lease?.release();
     }
   }
 

@@ -3,6 +3,8 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import net from 'node:net';
 import type { DaemonStatus } from './types.js';
 
+const CONTROL_REQUEST_TIMEOUT_MS = 2_000;
+
 export class DaemonAlreadyRunningError extends Error {
   constructor(socketFile: string) {
     super(`A skyd instance is already listening at ${socketFile}.`);
@@ -24,6 +26,14 @@ export class ControlRequestError extends Error {
 
 export type ControlServer = {
   close(): Promise<void>;
+};
+
+export type ControlRestartResult =
+  | { ok: true; instanceId: string }
+  | { ok: false; code: string; message: string; statusCode: number };
+
+export type ControlServerOptions = {
+  requestRestart?: () => ControlRestartResult;
 };
 
 function closeHttpServer(server: http.Server): Promise<void> {
@@ -64,17 +74,40 @@ function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   getStatus: () => DaemonStatus,
+  options: ControlServerOptions,
 ): void {
-  if (request.url !== '/status') {
-    writeJson(response, 404, { error: { code: 'not_found' } });
+  if (request.url === '/status') {
+    if (request.method !== 'GET') {
+      response.setHeader('allow', 'GET');
+      writeJson(response, 405, { error: { code: 'method_not_allowed' } });
+      return;
+    }
+    writeJson(response, 200, getStatus());
     return;
   }
-  if (request.method !== 'GET') {
-    response.setHeader('allow', 'GET');
-    writeJson(response, 405, { error: { code: 'method_not_allowed' } });
+
+  if (request.url === '/restart') {
+    if (request.method !== 'POST') {
+      response.setHeader('allow', 'POST');
+      writeJson(response, 405, { error: { code: 'method_not_allowed' } });
+      return;
+    }
+    if (!options.requestRestart) {
+      writeJson(response, 404, { error: { code: 'not_found' } });
+      return;
+    }
+    const result = options.requestRestart();
+    if (!result.ok) {
+      writeJson(response, result.statusCode, {
+        error: { code: result.code, message: result.message },
+      });
+      return;
+    }
+    writeJson(response, 202, { accepted: true, instanceId: result.instanceId });
     return;
   }
-  writeJson(response, 200, getStatus());
+
+  writeJson(response, 404, { error: { code: 'not_found' } });
 }
 
 async function prepareSocket(socketFile: string): Promise<void> {
@@ -98,12 +131,13 @@ async function prepareSocket(socketFile: string): Promise<void> {
 export async function startControlServer(
   socketFile: string,
   getStatus: () => DaemonStatus,
+  options: ControlServerOptions = {},
 ): Promise<ControlServer> {
   await prepareSocket(socketFile);
 
   const server = http.createServer((request, response) => {
     try {
-      handleRequest(request, response, getStatus);
+      handleRequest(request, response, getStatus, options);
     } catch {
       writeJson(response, 500, { error: { code: 'internal_error' } });
     }
@@ -154,13 +188,18 @@ export async function startControlServer(
   };
 }
 
-export function getDaemonStatus(socketFile: string): Promise<DaemonStatus> {
+function requestJson<T>(
+  socketFile: string,
+  method: 'GET' | 'POST',
+  requestPath: string,
+  expectedStatus: number,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = http.request(
       {
         socketPath: socketFile,
-        path: '/status',
-        method: 'GET',
+        path: requestPath,
+        method,
         headers: { accept: 'application/json' },
       },
       (response) => {
@@ -171,20 +210,36 @@ export function getDaemonStatus(socketFile: string): Promise<DaemonStatus> {
         });
         response.on('end', () => {
           try {
-            const parsed = JSON.parse(body) as DaemonStatus | { error?: { code?: string } };
-            if (response.statusCode !== 200) {
-              const code = 'error' in parsed ? parsed.error?.code : undefined;
+            const parsed = JSON.parse(body) as T;
+            if (response.statusCode !== expectedStatus) {
+              const candidate = parsed as { error?: { code?: string } };
+              const code = candidate.error?.code;
               reject(new ControlRequestError(code ?? 'unknown_error', response.statusCode ?? 500));
               return;
             }
-            resolve(parsed as DaemonStatus);
+            resolve(parsed as T);
           } catch (error) {
             reject(error);
           }
         });
       },
     );
+    request.setTimeout(CONTROL_REQUEST_TIMEOUT_MS, () => {
+      request.destroy(
+        new Error(`Daemon control request timed out after ${CONTROL_REQUEST_TIMEOUT_MS}ms.`),
+      );
+    });
     request.once('error', reject);
     request.end();
   });
+}
+
+export function getDaemonStatus(socketFile: string): Promise<DaemonStatus> {
+  return requestJson<DaemonStatus>(socketFile, 'GET', '/status', 200);
+}
+
+export function requestDaemonRestart(
+  socketFile: string,
+): Promise<{ accepted: true; instanceId: string }> {
+  return requestJson(socketFile, 'POST', '/restart', 202);
 }

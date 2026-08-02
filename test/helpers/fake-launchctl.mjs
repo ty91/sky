@@ -7,7 +7,13 @@ async function readState() {
   try {
     return JSON.parse(await readFile(stateFile, 'utf8'));
   } catch {
-    return { loaded: false, pid: null, bootstrapCount: 0, bootoutCount: 0 };
+    return {
+      loaded: false,
+      pid: null,
+      bootstrapCount: 0,
+      bootoutCount: 0,
+      kickstartCount: 0,
+    };
   }
 }
 
@@ -42,6 +48,7 @@ async function startDaemon(state, plistFile) {
   child.unref();
   state.loaded = true;
   state.pid = child.pid;
+  state.plistFile = plistFile;
   state.bootstrapCount += 1;
   await saveState(state);
 }
@@ -68,6 +75,14 @@ if (command === 'print') {
   if (!state.loaded) {
     process.stderr.write('service is not loaded\n');
     process.exitCode = 3;
+  } else if (args.includes('-k')) {
+    state.kickstartCount = (state.kickstartCount ?? 0) + 1;
+    if (alive(state.pid)) process.kill(state.pid, 'SIGTERM');
+    const deadline = Date.now() + 3000;
+    while (alive(state.pid) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await startDaemon(state, state.plistFile);
   }
 } else {
   process.stderr.write(`unsupported fake launchctl command: ${command}\n`);

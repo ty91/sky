@@ -2,12 +2,13 @@ import { Assistant, type AssistantConfig } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
+import type { RuntimeController } from '../runtime/controller.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { maybeHandleChatCommand } from './commands.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
-import { executeSlackTurn } from './turn.js';
+import { executeSlackTurn, SLACK_DRAINING_REPLY } from './turn.js';
 import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
 export type SlackAssistantOptions = {
@@ -15,6 +16,7 @@ export type SlackAssistantOptions = {
   mainAgent: AgentConfig;
   threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
+  runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
 };
 
 export const DEFAULT_SUGGESTED_PROMPTS = [
@@ -24,7 +26,13 @@ export const DEFAULT_SUGGESTED_PROMPTS = [
 ] as const;
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
-  const { conversationManager, mainAgent, threadModelStore, userNameResolver } = options;
+  const {
+    conversationManager,
+    mainAgent,
+    threadModelStore,
+    userNameResolver,
+    runtimeController,
+  } = options;
 
   return {
     threadStarted: async ({ say, setSuggestedPrompts, saveThreadContext, event }) => {
@@ -33,6 +41,11 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       const threadId = toThreadId(channelId, threadTs);
 
       console.log(`[slack] assistant_thread_started: ${threadId}`);
+
+      if (runtimeController && !runtimeController.isAccepting()) {
+        await say(SLACK_DRAINING_REPLY);
+        return;
+      }
 
       await say('안녕하세요! 무엇을 도와드릴까요?');
       await setSuggestedPrompts({
@@ -53,6 +66,11 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         : message.ts;
       const threadId = toThreadId(channelId, threadTs);
       const sender = new SlackSender({ say });
+
+      if (runtimeController && !runtimeController.isAccepting()) {
+        await sender.sendReply(SLACK_DRAINING_REPLY);
+        return;
+      }
 
       // Chat commands are matched against the raw text, before attachment
       // lines and the `<@user>:` prefix are added.
@@ -105,6 +123,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         mainAgent,
         indicator,
         reply: sender,
+        runtimeController,
       });
     },
   };

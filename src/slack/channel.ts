@@ -1,13 +1,14 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
+import type { RuntimeController } from '../runtime/controller.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { maybeHandleChatCommand, stripLeadingMentionLabel } from './commands.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
 import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
 import { toThreadId } from './thread-id.js';
-import { executeSlackTurn } from './turn.js';
+import { executeSlackTurn, SLACK_DRAINING_REPLY } from './turn.js';
 import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
 export type SlackChannelEvent = SlackChannelMessageEvent & {
@@ -39,6 +40,7 @@ export type SlackChannelHandlerOptions = {
   slack: SlackChannelClient;
   threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
+  runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
 };
 
 export type SlackChannelHandler = {
@@ -53,6 +55,7 @@ export function createSlackChannelHandler({
   slack,
   threadModelStore,
   userNameResolver,
+  runtimeController,
 }: SlackChannelHandlerOptions): SlackChannelHandler {
   return {
     async handleMessage({ event }) {
@@ -86,6 +89,11 @@ export function createSlackChannelHandler({
           });
         },
       });
+
+      if (runtimeController && !runtimeController.isAccepting()) {
+        await sender.sendReply(SLACK_DRAINING_REPLY);
+        return;
+      }
 
       // Chat commands are matched against the mention-stripped text, before the
       // `<@user>:` prefix and any thread history are added.
@@ -127,6 +135,7 @@ export function createSlackChannelHandler({
         mainAgent,
         indicator,
         reply: sender,
+        runtimeController,
       });
     },
   };

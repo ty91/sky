@@ -1,10 +1,17 @@
 import { Command } from 'commander';
+import { restartLaunchAgent } from '../service/launch-agent.js';
+import { reportLifecycleError, reportStatusResult } from './service-output.js';
 
 export const restartCommand = new Command('restart')
-  .description('Restart the daemon (available after graceful restart support lands)')
-  .action(() => {
-    console.error(
-      'sky restart is temporarily unavailable while graceful launchd restart support is implemented. Use `sky stop` followed by `sky start` if an explicit non-graceful restart is acceptable.',
-    );
-    process.exitCode = 1;
+  .description('Gracefully restart the supervised daemon')
+  .option('--force', 'Force replacement through launchctl when the daemon is unresponsive')
+  .option('--json', 'Print stable JSON output')
+  .action(async (options: { force?: boolean; json?: boolean }) => {
+    const json = options.json === true;
+    if (!json) console.error(options.force ? 'Force-restarting Sky…' : 'Restarting Sky…');
+    try {
+      reportStatusResult(await restartLaunchAgent({ force: options.force === true }), json);
+    } catch (error) {
+      reportLifecycleError(error, json);
+    }
   });

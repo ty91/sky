@@ -17,6 +17,7 @@ import type { AgentEffort } from './effort.js';
 import type { AgentConfig } from './types.js';
 import type { SlackFileUploader } from '../slack/files.js';
 import type { ScheduledJobStore } from '../scheduler/types.js';
+import type { RuntimeController } from '../runtime/controller.js';
 
 const MAIN_AGENT_TOOLS = [
   'Bash',
@@ -45,8 +46,7 @@ export type MainAgentConfigOptions = {
   systemPromptLoader?: () => string;
   model?: string;
   effort?: AgentEffort;
-  /** Test seam for the in-process restart signal. Production defaults to process.kill. */
-  restartSignalParent?: (pid: number, signal: NodeJS.Signals) => void;
+  runtimeController?: Pick<RuntimeController, 'requestRestart'>;
   /** Lazily resolves a Slack uploader for Slack-bound sessions. */
   slackFileUploaderProvider?: () => SlackFileUploader | undefined;
   scheduledJobStore?: ScheduledJobStore;
@@ -78,15 +78,18 @@ export function createMainAgentConfig(options: MainAgentConfigOptions): AgentCon
     customToolsFactory: ({ sessionKey }) => {
       const { channelId, threadTs } = parseSessionKey(sessionKey);
       const tools: AgentToolSpec[] = [
-        createRestartHarnessToolSpec(
-          {
-            sessionKey,
-            channelId,
-            threadTs,
-            parentPid: process.pid,
+        createRestartHarnessToolSpec({
+          sessionKey,
+          channelId,
+          threadTs,
+          runtimeController: options.runtimeController ?? {
+            requestRestart: () => ({
+              ok: false,
+              code: 'restart_unavailable',
+              message: 'Restart is unavailable outside the daemon runtime.',
+            }),
           },
-          options.restartSignalParent,
-        ),
+        }),
       ];
 
       if (options.slackFileUploaderProvider) {

@@ -41,8 +41,7 @@ export function removePidFile() {
  * responsible for ensuring no live daemon is already running — this helper
  * simply fires the spawn, unrefs it, and returns the new pid.
  *
- * Separated out so `startDaemon()` (external CLI) and `spawnDetachedRestart()`
- * (self-restart from inside the bot) share the exact same launch recipe.
+ * Legacy detached launch recipe retained only for migration compatibility.
  */
 function spawnBotProcess(): number {
   const out = openSync(LOG_FILE, 'a');
@@ -80,31 +79,6 @@ export function startDaemon() {
   const newPid = spawnBotProcess();
   console.log(`sky started (pid: ${newPid})`);
   console.log(`log: ${LOG_FILE}`);
-}
-
-/**
- * Called from **inside** the running bot process to swap itself out.
- *
- * Unlike `startDaemon()`, this intentionally skips the "already running"
- * check: the current process *is* the running daemon and is about to exit.
- * Order of operations matters:
- *
- *   1. Delete the stale pid file so the child's first `writeFileSync` to
- *      `PID_FILE` never collides with a concurrent reader.
- *   2. Spawn the detached replacement and unref it.
- *
- * The caller should then initiate its own shutdown (e.g. `process.kill(pid,
- * 'SIGTERM')`). Any brief overlap between the old and new process is tolerated
- * — Slack socket mode accepts multiple concurrent connections, and the old
- * daemon's Slack app stops as soon as the SIGTERM handler resolves.
- */
-export function spawnDetachedRestart(): number {
-  ensureDir();
-  removePidFile();
-
-  const newPid = spawnBotProcess();
-  console.log(`[restart] spawned replacement daemon (pid: ${newPid})`);
-  return newPid;
 }
 
 export async function stopDaemon() {
