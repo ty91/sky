@@ -10,8 +10,10 @@ import type {
   OperationRequest,
 } from './operations.js';
 import type { DaemonStatus } from './types.js';
+import type { DiagnosticsReport } from '../diagnostics.js';
 
 const CONTROL_REQUEST_TIMEOUT_MS = 2_000;
+const DIAGNOSTICS_REQUEST_TIMEOUT_MS = 10_000;
 
 export class DaemonAlreadyRunningError extends Error {
   constructor(socketFile: string) {
@@ -46,6 +48,7 @@ export type ControlServerOptions = {
   requestRestart?: () => ControlRestartResult;
   operations?: OperationRegistry;
   logger?: JsonlLogger;
+  getDiagnostics?: () => DiagnosticsReport | Promise<DiagnosticsReport>;
 };
 
 function closeHttpServer(server: http.Server): Promise<void> {
@@ -207,6 +210,20 @@ async function handleRequest(
       return;
     }
     writeJson(response, 200, getStatus());
+    return;
+  }
+
+  if (url.pathname === '/diagnostics') {
+    if (request.method !== 'GET') {
+      response.setHeader('allow', 'GET');
+      writeJson(response, 405, { error: { code: 'method_not_allowed' } });
+      return;
+    }
+    if (!options.getDiagnostics) {
+      writeJson(response, 404, { error: { code: 'not_found' } });
+      return;
+    }
+    writeJson(response, 200, await options.getDiagnostics());
     return;
   }
 
@@ -405,6 +422,7 @@ function requestJson<T>(
   method: 'GET' | 'POST',
   requestPath: string,
   expectedStatus: number,
+  timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = http.request(
@@ -439,9 +457,9 @@ function requestJson<T>(
         });
       },
     );
-    request.setTimeout(CONTROL_REQUEST_TIMEOUT_MS, () => {
+    request.setTimeout(timeoutMs, () => {
       request.destroy(
-        new Error(`Daemon control request timed out after ${CONTROL_REQUEST_TIMEOUT_MS}ms.`),
+        new Error(`Daemon control request timed out after ${timeoutMs}ms.`),
       );
     });
     request.once('error', reject);
@@ -451,6 +469,16 @@ function requestJson<T>(
 
 export function getDaemonStatus(socketFile: string): Promise<DaemonStatus> {
   return requestJson<DaemonStatus>(socketFile, 'GET', '/status', 200);
+}
+
+export function getDaemonDiagnostics(socketFile: string): Promise<DiagnosticsReport> {
+  return requestJson<DiagnosticsReport>(
+    socketFile,
+    'GET',
+    '/diagnostics',
+    200,
+    DIAGNOSTICS_REQUEST_TIMEOUT_MS,
+  );
 }
 
 export function requestDaemonRestart(

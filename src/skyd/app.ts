@@ -23,6 +23,7 @@ import {
 } from './operations.js';
 import { ConfigurationError, loadSecureSettings } from './settings.js';
 import type { DaemonStatus, RuntimeState, SlackConnectionState } from './types.js';
+import { runDiagnostics } from '../diagnostics.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -107,6 +108,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     model: null,
     recentErrors: [],
   };
+  let activeSettings: Settings | undefined;
   let runtime: BotRuntime | undefined;
   const operations: OperationRegistry = createOperationRegistry({
     runtimeController,
@@ -166,6 +168,12 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       },
       operations,
       logger,
+      getDiagnostics: () =>
+        runDiagnostics(paths, {
+          daemonStatus: status(),
+          activeSettings,
+          homeDir: options.homeDir,
+        }),
     });
   } catch (error) {
     logger.log('error', 'control', error instanceof Error ? error.message : String(error));
@@ -187,6 +195,8 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       await waitForAbort(runtimeController.drainingSignal);
       return;
     }
+
+    activeSettings = settings;
 
     mutable.backend = settings.agentBackend;
     mutable.model = settings.model;

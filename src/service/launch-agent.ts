@@ -339,9 +339,11 @@ async function controlStatus(socketFile: string): Promise<ServiceStatus['control
   }
 }
 
-export async function getServiceStatus(): Promise<ServiceStatus> {
+export async function getServiceStatus(
+  options: { skyHome?: SkyHome; homeDir?: string } = {},
+): Promise<ServiceStatus> {
   assertMacOS();
-  const paths = launchAgentPaths();
+  const paths = launchAgentPaths(options.skyHome, options.homeDir);
   const [launchd, control] = await Promise.all([
     launchdStatus(paths),
     controlStatus(paths.socketFile),

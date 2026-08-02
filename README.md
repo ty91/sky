@@ -12,6 +12,7 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - Sky home의 `settings.json`에 지정된 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 macOS LaunchAgent 상태와 daemon control 상태를 함께 보여주며 자동화를 위한 `--json`을 제공합니다.
+- `sky doctor`는 설치, runtime, configuration, credential metadata, Sky home 권한과 workspace prompt를 한 번에 진단합니다.
 - `skyd`는 foreground daemon으로 실행되며 Sky home의 `run/skyd.sock`에 HTTP/JSON control interface를 제공합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
 - `memory`와 `dream`은 daemon operation으로 실행되며 CLI를 끊어도 계속 진행됩니다.
@@ -179,6 +180,7 @@ sky start
 sky stop
 sky restart
 sky status
+sky doctor
 sky service status
 sky logs
 sky logs --follow
@@ -207,6 +209,25 @@ curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/stat
 설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.
 
 `skyd --foreground`는 supervisor가 없으므로 control restart를 거부합니다. `sky status`의 `supervision` 항목에서 현재 daemon이 `launchd` 또는 `foreground`로 실행 중인지 확인할 수 있습니다.
+
+### Doctor
+
+`sky doctor`는 하나의 구조화된 check 목록에서 사람용 출력과 `--json` 출력을 만듭니다. 각 check는 안정적인 `id`, `pass`/`warn`/`fail` status, summary, 선택적 detail과 remediation을 가집니다. 설치된 Node/Sky version과 package wrapper, LaunchAgent, control socket, daemon runtime/Slack state, 최근 stable error code, 설정·credential metadata, managed path의 owner/mode/type, SQLite sidecar, workspace와 네 prompt file을 검사합니다.
+
+```bash
+sky doctor
+sky doctor --json
+```
+
+daemon이 응답하면 CLI는 `GET /diagnostics`를 사용해 active runtime과 disk configuration의 차이까지 확인합니다. control socket에 연결할 수 없으면 같은 diagnostics module의 read-only local fallback이 service, Sky home, configuration metadata와 workspace를 검사합니다. fallback은 directory를 만들거나 mode를 바꾸거나 migration을 실행하지 않으며, runtime-only check는 실패 대신 `warn`과 unavailable detail로 표시합니다.
+
+Exit code는 다음과 같습니다.
+
+- `0`: fail이 없음. warning은 있을 수 있습니다.
+- `1`: 하나 이상의 check가 fail입니다.
+- `2`: daemon diagnostics 자체의 내부 오류 등으로 진단을 완료하지 못했습니다.
+
+Doctor는 secret 값·길이, Slack message, prompt 또는 transcript 내용을 출력하지 않습니다. remediation도 `chmod`, 삭제, migration을 자동 실행하지 않고 검토할 명령과 위험만 안내합니다. 기본 doctor는 daemon이 이미 관찰한 Slack 연결 상태와 local backend 설정만 읽으며 Slack `auth.test`, scope probe, 새 network request 또는 비용이 생기는 agent turn을 실행하지 않습니다. 외부 credential probe와 backend smoke는 별도의 명시적 opt-in 진단으로 추가해야 합니다.
 
 ### Maintenance operation
 
@@ -269,6 +290,7 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
   - LaunchAgent 설치/load 상태, launchd process state와 PID
   - control socket 도달 여부와 daemon runtime/Slack 상태
   - daemon이 보고하는 product version, model과 agent backend
+- `sky doctor --json`은 `schemaVersion`, `mode`(`daemon`/`local-fallback`), `overall`과 안정적인 check 배열을 반환합니다.
 - `sky start`, `sky stop`, `sky status`, `sky service install`, `sky service uninstall`은 안정적인 JSON 결과를 위한 `--json`을 지원합니다.
 - LaunchAgent plist에는 `HOME`, Node wrapper 실행에 필요한 최소 `PATH`, override 사용 시 `SKY_HOME`만 들어가며 Slack/Claude/provider credential은 복사하지 않습니다.
 - 이전 PID 기반 daemon이 발견되면 `sky service install`은 command가 실제 `@ty91/sky`의 `dist/bot.js`인지 확인한 뒤에만 `SIGTERM`을 보냅니다. 20초 안에 끝나지 않아도 자동으로 `SIGKILL`하지 않습니다.
