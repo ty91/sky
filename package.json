@@ -24,6 +24,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test test/*.test.mjs",
     "test:package": "node --test test/package-release.smoke.mjs",
+    "test:launchd": "node --test test/launchd-package.smoke.mjs",
     "release:check-tag": "node scripts/verify-release-tag.mjs",
     "prepack": "pnpm build"
   },

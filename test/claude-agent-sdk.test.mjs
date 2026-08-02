@@ -157,12 +157,12 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
       systemPrompt: 'fallback',
       systemPromptLoader: () => `loaded-${++loaderCalls}`,
       model: 'anthropic/claude-opus-4-7',
-      tools: ['Agent', 'Bash', 'Read', 'Skill', 'TodoWrite', 'TaskOutput', 'TaskStop', 'restart_harness'],
+      tools: ['Agent', 'Bash', 'Read', 'Skill', 'TodoWrite', 'TaskOutput', 'TaskStop', 'sample_tool'],
       maxTurns: 3,
       customToolsFactory: () => [
         {
-          name: 'restart_harness',
-          description: 'Restart the harness',
+          name: 'sample_tool',
+          description: 'Run a sample custom tool',
           inputSchema: { reason: z.string().optional() },
           async execute(input) {
             return {
@@ -224,7 +224,7 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
     'TodoWrite',
     'TaskOutput',
     'TaskStop',
-    'mcp__sky__restart_harness',
+    'mcp__sky__sample_tool',
   ]);
   assert.equal(mcpServerCalls.length, 1);
   assert.equal(mcpServerCalls[0].name, 'sky');

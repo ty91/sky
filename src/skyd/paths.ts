@@ -9,6 +9,7 @@ export type SkydPaths = {
   settingsFile: string;
   socketFile: string;
   logFile: string;
+  launchdStderrFile: string;
 };
 
 function isMissing(error: unknown): boolean {
@@ -32,15 +33,10 @@ function ensurePrivateDirectory(directory: string): void {
   chmodSync(directory, 0o700);
 }
 
-export function prepareSkydPaths(homeDir = os.homedir()): SkydPaths {
+export function resolveSkydPaths(homeDir = os.homedir()): SkydPaths {
   const skyDir = path.join(homeDir, '.sky');
   const runDir = path.join(skyDir, 'run');
   const logsDir = path.join(skyDir, 'logs');
-
-  ensurePrivateDirectory(skyDir);
-  ensurePrivateDirectory(runDir);
-  ensurePrivateDirectory(logsDir);
-
   return {
     skyDir,
     runDir,
@@ -48,5 +44,14 @@ export function prepareSkydPaths(homeDir = os.homedir()): SkydPaths {
     settingsFile: path.join(skyDir, 'settings.json'),
     socketFile: path.join(runDir, 'skyd.sock'),
     logFile: path.join(logsDir, 'skyd.jsonl'),
+    launchdStderrFile: path.join(logsDir, 'launchd.stderr.log'),
   };
+}
+
+export function prepareSkydPaths(homeDir = os.homedir()): SkydPaths {
+  const paths = resolveSkydPaths(homeDir);
+  ensurePrivateDirectory(paths.skyDir);
+  ensurePrivateDirectory(paths.runDir);
+  ensurePrivateDirectory(paths.logsDir);
+  return paths;
 }

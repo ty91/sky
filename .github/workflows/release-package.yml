@@ -41,6 +41,9 @@ jobs:
       - name: Test packed package
         run: pnpm test:package
 
+      - name: Test packed package with launchd
+        run: pnpm test:launchd
+
       - name: Publish to GitHub Packages
         run: |
           printf '%s\n' '@ty91:registry=https://npm.pkg.github.com' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"

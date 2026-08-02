@@ -3,7 +3,7 @@ import type { AgentEffort } from './effort.js';
 
 /**
  * Context handed to per-session tool factories when a session opens. Lets
- * bound tools (e.g. `restart_harness`) know which thread they're acting on.
+ * bound tools know which Slack thread they're acting on.
  */
 export type McpFactoryContext = {
   sessionKey: string;

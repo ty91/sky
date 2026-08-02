@@ -38,6 +38,7 @@ type LaunchAgentPaths = {
   legacyPidFile: string;
   legacyLogFile: string;
   migratedLegacyLogFile: string;
+  launchdStderrFile: string;
   launchAgentsDir: string;
   plistFile: string;
 };
@@ -115,6 +116,7 @@ function launchAgentPaths(homeDir = os.homedir()): LaunchAgentPaths {
     legacyPidFile: path.join(skyDir, 'sky.pid'),
     legacyLogFile: path.join(skyDir, 'sky.log'),
     migratedLegacyLogFile: path.join(logsDir, 'legacy-sky.log'),
+    launchdStderrFile: path.join(logsDir, 'launchd.stderr.log'),
     launchAgentsDir: path.join(homeDir, 'Library', 'LaunchAgents'),
     plistFile: path.join(homeDir, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`),
   };
@@ -231,6 +233,8 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
   <string>Standard</string>
   <key>Umask</key>
   <integer>63</integer>
+  <key>StandardErrorPath</key>
+  <string>${xml(paths.launchdStderrFile)}</string>
   <key>ExitTimeOut</key>
   <integer>30</integer>
   <key>EnvironmentVariables</key>
@@ -247,6 +251,8 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
 
 function ensureLaunchAgentsDirectory(paths: LaunchAgentPaths): void {
   mkdirSync(paths.launchAgentsDir, { recursive: true, mode: 0o700 });
+  mkdirSync(paths.logsDir, { recursive: true, mode: 0o700 });
+  chmodSync(paths.logsDir, 0o700);
 }
 
 function temporaryPlistPath(paths: LaunchAgentPaths): string {

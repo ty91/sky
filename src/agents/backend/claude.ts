@@ -11,11 +11,6 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentConfig } from '../types.js';
-import {
-  RESTART_HARNESS_FQ_TOOL_NAME,
-  RESTART_HARNESS_SERVER_NAME,
-  RESTART_HARNESS_TOOL_NAME,
-} from '../tools/restart-harness.js';
 import { Pushable } from '../../session/pushable.js';
 import type {
   AgentSession,
@@ -26,7 +21,7 @@ import type {
   CreateAgentSessionOptions,
 } from './types.js';
 
-const CLAUDE_MCP_SERVER_NAME = RESTART_HARNESS_SERVER_NAME;
+const CLAUDE_MCP_SERVER_NAME = 'sky';
 const CLAUDE_MODEL_PROVIDER = 'anthropic';
 
 // Rechecked against @anthropic-ai/claude-agent-sdk 0.3.201 sdk-tools.d.ts.
@@ -106,9 +101,6 @@ function unique(values: string[]): string[] {
 }
 
 function toMcpToolName(name: string): string {
-  if (name === RESTART_HARNESS_TOOL_NAME) {
-    return RESTART_HARNESS_FQ_TOOL_NAME;
-  }
   return `mcp__${CLAUDE_MCP_SERVER_NAME}__${name}`;
 }
 

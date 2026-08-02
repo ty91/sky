@@ -140,6 +140,7 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
       'Label',
       'ProcessType',
       'ProgramArguments',
+      'StandardErrorPath',
       'Umask',
     ]);
     assert.equal(plist.Label, 'com.ty91.skyd');
@@ -152,6 +153,10 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
     assert.equal(plist.ProcessType, 'Standard');
     assert.equal(plist.Umask, 0o77);
     assert.equal(plist.ExitTimeOut, 30);
+    assert.equal(
+      plist.StandardErrorPath,
+      path.join(context.homeDir, '.sky', 'logs', 'launchd.stderr.log'),
+    );
     assert.deepEqual(Object.keys(plist.EnvironmentVariables).toSorted(), ['HOME', 'PATH']);
     assert.equal(plist.EnvironmentVariables.HOME, context.homeDir);
     assert.doesNotMatch(JSON.stringify(plist), /SLACK|CLAUDE|TOKEN|RunAtLoad|ThrottleInterval/i);
@@ -167,6 +172,10 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
     const status = await runCli(['status', '--json'], context.env);
     assert.equal(status.code, 0, status.stderr || status.stdout);
     assert.equal(JSON.parse(status.stdout).status.launchd.pid, firstState.pid);
+
+    const serviceStatus = await runCli(['service', 'status', '--json'], context.env);
+    assert.equal(serviceStatus.code, 0, serviceStatus.stderr || serviceStatus.stdout);
+    assert.equal(JSON.parse(serviceStatus.stdout).status.launchd.pid, firstState.pid);
 
     const restarted = await runCli(['restart', '--json'], context.env);
     assert.equal(restarted.code, 0, restarted.stderr || restarted.stdout);

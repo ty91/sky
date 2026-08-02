@@ -1,8 +1,5 @@
 import { Command } from 'commander';
-import { loadSettings } from '../settings.js';
-import { resolveAgentSessionFactory } from '../agents/backend/index.js';
-import { runDreamAgent, dreamDailyFilePath, type DreamStep } from '../agents/dream/agent.js';
-import { createConversationManager } from '../conversation/manager.js';
+import { createOperationFromCli } from './operation-client.js';
 
 // L3 Dream Agent runs every day at 02:00 KST via cron.
 // See docs/plans/active/2026-04-20-memory-v2-phase3-dream.md.
@@ -13,7 +10,7 @@ function assertDateKey(value: string): asserts value is string {
   }
 }
 
-function assertStep(value: string): asserts value is DreamStep {
+function assertStep(value: string): asserts value is 'summarize' | 'knowledge' {
   if (value !== 'summarize' && value !== 'knowledge') {
     throw new Error(`--step must be "summarize" or "knowledge" (got: ${value})`);
   }
@@ -23,39 +20,21 @@ export const dreamCommand = new Command('dream')
   .description('Run the Dream Agent (L3 — daily summary + knowledge update, silent)')
   .option('--date <YYYY-MM-DD>', 'Target KST date (defaults to yesterday)')
   .option('--step <step>', 'Only run one step: summarize | knowledge')
-  .action(async (opts: { date?: string; step?: string }) => {
+  .option('--detach', 'Print the operation ID without waiting for completion')
+  .action(async (opts: { date?: string; step?: string; detach?: boolean }) => {
     if (opts.date) assertDateKey(opts.date);
-    if (opts.step) assertStep(opts.step);
-
-    const settings = loadSettings({ silent: true });
-    console.log('[dream] starting L3 dream agent…');
-    const createSession = resolveAgentSessionFactory(settings.agentBackend, {
-      claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
-    });
-
-    const conversationManager = createConversationManager({
-      defaultCwd: settings.workspace,
-      createSession,
-    });
-
-    const result = await runDreamAgent({
-      conversationManager,
-      workspace: settings.workspace,
-      targetDate: opts.date,
-      onlyStep: opts.step as DreamStep | undefined,
-    });
-
-    console.log(`[dream] target date: ${result.targetDate}`);
-    console.log(`[dream] transcript entries: ${result.entryCount}`);
-    console.log(`[dream] quiet day: ${result.quietDay}`);
-    console.log(`[dream] daily file: ${dreamDailyFilePath(settings.workspace, result.targetDate)}`);
-
-    if (result.summarize) {
-      console.log(`[dream] step 1 summary: ${result.summarize.summary}`);
-    }
-    if (result.knowledge) {
-      console.log(`[dream] step 2 summary: ${result.knowledge.summary}`);
+    let step: 'summarize' | 'knowledge' | undefined;
+    if (opts.step) {
+      assertStep(opts.step);
+      step = opts.step;
     }
 
-    console.log('[dream] done');
+    await createOperationFromCli(
+      {
+        type: 'dream',
+        ...(opts.date ? { date: opts.date } : {}),
+        ...(step ? { step } : {}),
+      },
+      { detach: opts.detach === true },
+    );
   });

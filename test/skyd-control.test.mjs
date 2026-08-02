@@ -22,7 +22,12 @@ import {
   ControlRequestError,
   DaemonAlreadyRunningError,
   getDaemonStatus,
+  createOperation,
+  getLogHistory,
+  getOperation,
   requestDaemonRestart,
+  streamLogRecords,
+  watchOperation,
 } from '../dist/skyd/control.js';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
 
@@ -470,5 +475,232 @@ test('structured logs rotate with bounded archives and redact secret-shaped valu
     const output = combined.join('');
     assert.doesNotMatch(output, /xoxb-token|xapp-token|opaque-secret|abc\.def/);
     assert.match(output, /\[REDACTED\]/);
+  });
+});
+
+test('maintenance operations are single-flight, observable, and included in daemon drain', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    let releaseOperation;
+    const operationGate = new Promise((resolve) => {
+      releaseOperation = resolve;
+    });
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request, context) => {
+        context.progress(`Running ${request.type}.`);
+        await operationGate;
+        return { processed: 1, summary: 'private agent output' };
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const created = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+      assert.ok(created.operationId);
+
+      await assert.rejects(
+        createOperation(daemon.paths.socketFile, { type: 'dream' }),
+        (error) =>
+          error instanceof ControlRequestError &&
+          error.code === 'operation_active' &&
+          error.statusCode === 409 &&
+          error.details.activeOperationId === created.operationId,
+      );
+
+      const running = await getOperation(daemon.paths.socketFile, created.operationId);
+      assert.ok(running.state === 'queued' || running.state === 'running');
+      assert.equal((await getDaemonStatus(daemon.paths.socketFile)).activeWorkCount, 1);
+
+      const eventsPromise = (async () => {
+        const events = [];
+        for await (const event of watchOperation(daemon.paths.socketFile, created.operationId)) {
+          events.push(event);
+        }
+        return events;
+      })();
+      releaseOperation();
+      const events = await eventsPromise;
+      assert.deepEqual(events.map((event) => event.type), [
+        'queued',
+        'running',
+        'progress',
+        'succeeded',
+      ]);
+      const completed = await getOperation(daemon.paths.socketFile, created.operationId);
+      assert.equal(completed.state, 'succeeded');
+      assert.deepEqual(completed.result, { processed: 1, summary: 'private agent output' });
+      assert.equal((await getDaemonStatus(daemon.paths.socketFile)).activeWorkCount, 0);
+
+      const logText = await readFile(daemon.paths.logFile, 'utf8');
+      assert.doesNotMatch(logText, /private agent output/);
+    } finally {
+      releaseOperation();
+      await daemon.close();
+    }
+  });
+});
+
+test('operation records and events obey their retention bounds', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    let nowMs = Date.parse('2026-08-02T00:00:00.000Z');
+    let nextId = 0;
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (_request, context) => {
+        for (let index = 0; index < 1_005; index += 1) context.progress(`step ${index}`);
+        return { ok: true };
+      },
+      operationRegistry: {
+        completedLimit: 2,
+        retentionMs: 100,
+        eventLimit: 1_000,
+        now: () => new Date(nowMs),
+        createId: () => `operation-${++nextId}`,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const ids = [];
+      for (let index = 0; index < 3; index += 1) {
+        nowMs += 1;
+        const { operationId } = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+        ids.push(operationId);
+        for await (const event of watchOperation(daemon.paths.socketFile, operationId)) {
+          // Completion of the stream is the observable completion barrier.
+          assert.ok(event.sequence > 0);
+        }
+      }
+
+      await assert.rejects(
+        getOperation(daemon.paths.socketFile, ids[0]),
+        (error) => error instanceof ControlRequestError && error.code === 'operation_not_found',
+      );
+      const retainedEvents = [];
+      for await (const event of watchOperation(daemon.paths.socketFile, ids[2])) {
+        retainedEvents.push(event);
+      }
+      assert.equal(retainedEvents.length, 1_000);
+      assert.equal(retainedEvents.at(-1).type, 'succeeded');
+
+      nowMs += 101;
+      await assert.rejects(
+        getOperation(daemon.paths.socketFile, ids[2]),
+        (error) => error instanceof ControlRequestError && error.code === 'operation_not_found',
+      );
+    } finally {
+      await daemon.close();
+    }
+  });
+});
+
+test('daemon shutdown waits for a running maintenance operation to drain', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    let releaseOperation;
+    const gate = new Promise((resolve) => {
+      releaseOperation = resolve;
+    });
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async () => {
+        await gate;
+        return { ok: true };
+      },
+    });
+    await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+    await createOperation(daemon.paths.socketFile, { type: 'memory' });
+    await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 1);
+
+    let stopped = false;
+    const closing = daemon.close().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(stopped, false);
+    releaseOperation();
+    await closing;
+    assert.equal(stopped, true);
+  });
+});
+
+test('operation failures expose a stable code without logging prompt or token contents', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async () => {
+        throw new Error('private user prompt xoxb-operation-secret');
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const { operationId } = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+      for await (const event of watchOperation(daemon.paths.socketFile, operationId)) {
+        assert.ok(event.sequence > 0);
+      }
+      const operation = await getOperation(daemon.paths.socketFile, operationId);
+      assert.equal(operation.state, 'failed');
+      assert.deepEqual(operation.error, { code: 'operation_failed' });
+      const logs = await readFile(daemon.paths.logFile, 'utf8');
+      assert.doesNotMatch(logs, /private user prompt|xoxb-operation-secret/);
+    } finally {
+      await daemon.close();
+    }
+  });
+});
+
+test('log history and streams use cursors across rotation and process instances', async () => {
+  await withTempHome(async (homeDir) => {
+    const daemonA = await startSkyd({
+      homeDir,
+      logger: { maxBytes: 240, archiveCount: 5 },
+    });
+    let cursorA;
+    try {
+      await waitForStatus(
+        daemonA.paths.socketFile,
+        (status) => status.runtime.state === 'needs_configuration',
+      );
+      const firstHistory = await getLogHistory(daemonA.paths.socketFile, { limit: 100 });
+      cursorA = firstHistory.records[0].cursor;
+      assert.ok(cursorA.startsWith(`${daemonA.status().instanceId}:`));
+    } finally {
+      await daemonA.close();
+    }
+
+    const daemonB = await startSkyd({
+      homeDir,
+      logger: { maxBytes: 240, archiveCount: 5 },
+    });
+    try {
+      await waitForStatus(
+        daemonB.paths.socketFile,
+        (status) => status.runtime.state === 'needs_configuration',
+      );
+      const resumed = await getLogHistory(daemonB.paths.socketFile, {
+        cursor: cursorA,
+        limit: 100,
+      });
+      assert.ok(resumed.records.some((record) => record.cursor.startsWith(`${daemonB.status().instanceId}:`)));
+
+      const abortController = new AbortController();
+      const iterator = streamLogRecords(daemonB.paths.socketFile, {
+        cursor: resumed.nextCursor,
+        signal: abortController.signal,
+      })[Symbol.asyncIterator]();
+      const nextRecord = iterator.next();
+      const created = await createOperation(daemonB.paths.socketFile, { type: 'memory' });
+      const streamed = await nextRecord;
+      abortController.abort();
+      assert.equal(streamed.done, false);
+      assert.equal(streamed.value.operationId, created.operationId);
+    } finally {
+      await daemonB.close();
+    }
   });
 });

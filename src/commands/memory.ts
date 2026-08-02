@@ -1,8 +1,5 @@
 import { Command } from 'commander';
-import { loadSettings } from '../settings.js';
-import { resolveAgentSessionFactory } from '../agents/backend/index.js';
-import { runMemoryAgent } from '../agents/memory/agent.js';
-import { createConversationManager } from '../conversation/manager.js';
+import { createOperationFromCli } from './operation-client.js';
 
 // L2 Working Memory Agent runs every 5 minutes via cron.
 // Slack notifications are intentionally OFF — see docs/plans/active/2026-04-20-memory-v2.md.
@@ -11,26 +8,7 @@ import { createConversationManager } from '../conversation/manager.js';
 
 export const memoryCommand = new Command('memory')
   .description('Run the Memory Agent (L2 working memory — silent, no Slack notification)')
-  .action(async () => {
-    const settings = loadSettings({ silent: true });
-    console.log('[memory] starting L2 working memory agent...');
-    const createSession = resolveAgentSessionFactory(settings.agentBackend, {
-      claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
-    });
-    const conversationManager = createConversationManager({
-      defaultCwd: settings.workspace,
-      createSession,
-    });
-
-    const result = await runMemoryAgent({
-      conversationManager,
-      workspace: settings.workspace,
-    });
-
-    if (result.skipped) {
-      console.log('[memory] skipped (no meaningful update)');
-    } else {
-      console.log(`[memory] processed ${result.processed} transcript(s)`);
-      console.log(`[memory] summary: ${result.summary}`);
-    }
-  });
+  .option('--detach', 'Print the operation ID without waiting for completion')
+  .action((options: { detach?: boolean }) =>
+    createOperationFromCli({ type: 'memory' }, { detach: options.detach === true }),
+  );

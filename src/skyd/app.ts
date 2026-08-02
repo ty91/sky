@@ -10,6 +10,12 @@ import { computeBackoffMs, isAbortError, sleep, type BackoffOptions } from '../r
 import type { Settings } from '../settings.js';
 import { startControlServer, type ControlServer } from './control.js';
 import { createJsonlLogger, type JsonlLoggerOptions } from './logger.js';
+import { createMaintenanceOperationRunner } from './maintenance.js';
+import {
+  createOperationRegistry,
+  type OperationRegistry,
+  type OperationRunner,
+} from './operations.js';
 import { prepareSkydPaths, type SkydPaths } from './paths.js';
 import { ConfigurationError, loadSecureSettings } from './settings.js';
 import type { DaemonStatus, RuntimeState, SlackConnectionState } from './types.js';
@@ -33,6 +39,14 @@ export type StartSkydOptions = {
   supervisionMode?: SupervisionMode;
   restartDrainTimeoutMs?: number;
   stopDrainTimeoutMs?: number;
+  runOperation?: OperationRunner;
+  operationRegistry?: {
+    completedLimit?: number;
+    retentionMs?: number;
+    eventLimit?: number;
+    now?: () => Date;
+    createId?: () => string;
+  };
 };
 
 export type Skyd = {
@@ -63,8 +77,11 @@ function causeMessage(error: SlackStartupError): string {
 
 export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const paths = prepareSkydPaths(options.homeDir);
-  const logger = createJsonlLogger(paths.logFile, options.logger);
   const instanceId = randomUUID();
+  const logger = createJsonlLogger(paths.logFile, {
+    ...options.logger,
+    instanceId,
+  });
   const startedAt = new Date();
   const runtimeController = createRuntimeController({
     supervisionMode: options.supervisionMode ?? 'foreground',
@@ -81,6 +98,12 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     recentErrors: [],
   };
   let runtime: BotRuntime | undefined;
+  const operations: OperationRegistry = createOperationRegistry({
+    runtimeController,
+    logger,
+    run: options.runOperation ?? createMaintenanceOperationRunner(paths.settingsFile, logger),
+    ...options.operationRegistry,
+  });
 
   const addError = (code: string) => {
     mutable.recentErrors = [...mutable.recentErrors, { code, at: new Date().toISOString() }].slice(-10);
@@ -131,6 +154,8 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
           ? { ok: true, instanceId }
           : { ok: false, code: result.code, message: result.message, statusCode: 409 };
       },
+      operations,
+      logger,
     });
   } catch (error) {
     logger.log('error', 'control', error instanceof Error ? error.message : String(error));
@@ -215,6 +240,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     if (drain.timedOut) {
       addError('drain_timeout');
       logger.log('warn', 'runtime', 'Drain deadline exceeded; aborting remaining activity.');
+      operations.cancelActive();
     }
     await runtime?.close();
     runtime = undefined;

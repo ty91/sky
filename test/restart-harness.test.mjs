@@ -5,120 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-test('restart harness records pending restart through the runtime controller and rate limits repeats', () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-restart-'));
-
-  try {
-    const output = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
-import assert from 'node:assert/strict';
-import { runRestartHarnessTool } from './dist/agents/tools/restart-harness.js';
-import { createRuntimeController } from './dist/runtime/controller.js';
-import { _resetRestartStateForTests, isRestartPending } from './dist/runtime/pending-restart.js';
-
-_resetRestartStateForTests();
-const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
-const ctx = {
-  sessionKey: 'C123:111.22',
-  channelId: 'C123',
-  threadTs: '111.22',
-  runtimeController,
-};
-
-const first = runRestartHarnessTool(ctx, { reason: 'reload' });
-
-assert.equal(first.isError, undefined);
-assert.match(first.content[0].text, /Restart scheduled/);
-assert.equal(isRestartPending(), true);
-assert.equal(runtimeController.isAccepting(), false);
-
-const nextRuntimeController = createRuntimeController({ supervisionMode: 'launchd' });
-const second = runRestartHarnessTool({ ...ctx, runtimeController: nextRuntimeController }, {});
-
-assert.equal(second.isError, true);
-assert.match(second.content[0].text, /rate limited/i);
-assert.equal(nextRuntimeController.isAccepting(), true);
-console.log('restart-harness-ok');
-        `,
-      ],
-      {
-        cwd: process.cwd(),
-        env: { ...process.env, HOME: homeDir },
-        encoding: 'utf8',
-      },
-    );
-
-    assert.match(output, /restart-harness-ok/);
-  } finally {
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  }
-});
-
-test('main agent exposes restart_harness as a backend-neutral tool spec bound to Slack session context', async () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-restart-pi-tool-'));
-
-  try {
-    const output = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
-import assert from 'node:assert/strict';
-import { createMainAgentConfig } from './dist/agents/main.js';
-import { createRuntimeController } from './dist/runtime/controller.js';
-import { _resetRestartStateForTests, consumePendingRestart } from './dist/runtime/pending-restart.js';
-
-_resetRestartStateForTests();
-const agent = createMainAgentConfig({ systemPrompt: 'system' });
-
-assert.ok(agent.tools.includes('restart_harness'));
-assert.equal(typeof agent.customToolsFactory, 'function');
-
-const runtimeController = createRuntimeController({ supervisionMode: 'launchd' });
-const agentWithController = createMainAgentConfig({
-  systemPrompt: 'system',
-  runtimeController,
-});
-const tools = agentWithController.customToolsFactory({ sessionKey: 'C123:111.22' });
-assert.equal(tools.length, 1);
-assert.equal(tools[0].name, 'restart_harness');
-
-const result = await tools[0].execute({ reason: 'reload' });
-
-assert.match(result.content[0].text, /Restart scheduled/);
-assert.deepEqual(result.details, {
-  sessionKey: 'C123:111.22',
-  channelId: 'C123',
-  threadTs: '111.22',
-});
-
-const pending = consumePendingRestart();
-assert.equal(pending.sessionKey, 'C123:111.22');
-assert.equal(pending.channelId, 'C123');
-assert.equal(pending.threadTs, '111.22');
-assert.equal(pending.reason, 'reload');
-assert.equal(runtimeController.isAccepting(), false);
-console.log('restart-tool-spec-ok');
-        `,
-      ],
-      {
-        cwd: process.cwd(),
-        env: { ...process.env, HOME: homeDir },
-        encoding: 'utf8',
-      },
-    );
-
-    assert.match(output, /restart-tool-spec-ok/);
-  } finally {
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  }
-});
-
 test('Pi adapter converts backend-neutral tool specs to Pi tool definitions', async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-pi-tool-adapter-'));
 
@@ -222,7 +108,7 @@ const agentWithoutUploader = createMainAgentConfig({ systemPrompt: 'system' });
 assert.ok(agentWithoutUploader.tools.includes('slack_attach_files'));
 assert.deepEqual(
   agentWithoutUploader.customToolsFactory({ sessionKey: 'C123:111.22' }).map((tool) => tool.name),
-  ['restart_harness'],
+  [],
 );
 
 const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sky-main-tool-'));
@@ -241,7 +127,7 @@ try {
   });
 
   const tools = agentWithUploader.customToolsFactory({ sessionKey: 'C123:111.22' });
-  assert.deepEqual(tools.map((tool) => tool.name), ['restart_harness', 'slack_attach_files']);
+  assert.deepEqual(tools.map((tool) => tool.name), ['slack_attach_files']);
 
   const attachTool = tools.find((tool) => tool.name === 'slack_attach_files');
   const result = await attachTool.execute({ paths: [filePath] });
@@ -356,71 +242,6 @@ console.log('slack-lazy-uploader-ok');
     );
 
     assert.match(output, /slack-lazy-uploader-ok/);
-  } finally {
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  }
-});
-
-test('post-restart trigger is delivered through the original Pi conversation and Slack thread', () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-post-restart-'));
-
-  try {
-    const output = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
-import assert from 'node:assert/strict';
-import { triggerPostRestartIfPending } from './dist/bot.js';
-import { requestRestart, _resetRestartStateForTests } from './dist/runtime/pending-restart.js';
-
-_resetRestartStateForTests();
-requestRestart({
-  sessionKey: 'C123:111.22',
-  channelId: 'C123',
-  threadTs: '111.22',
-  reason: 'reload',
-  requestedAt: Date.now(),
-});
-
-const calls = { runTurn: [], posts: [] };
-const conversationManager = {
-  runTurn: async (key, agent, text, options) => {
-    calls.runTurn.push({ key, agentName: agent.name, text });
-    await options.onFinal('back online');
-    return { kind: 'ok', text: 'back online', handle: { sessionId: 'pi-session' } };
-  },
-};
-const slackApp = {
-  client: {
-    chat: {
-      postMessage: async (message) => {
-        calls.posts.push(message);
-      },
-    },
-  },
-};
-
-await triggerPostRestartIfPending(slackApp, conversationManager, { name: 'main' });
-
-assert.equal(calls.runTurn.length, 1);
-assert.equal(calls.runTurn[0].key, 'C123:111.22');
-assert.equal(calls.runTurn[0].agentName, 'main');
-assert.match(calls.runTurn[0].text, /<system-reminder>/);
-assert.ok(calls.runTurn[0].text.includes('Reason: reload.'));
-assert.deepEqual(calls.posts, [{ channel: 'C123', thread_ts: '111.22', text: 'back online' }]);
-console.log('post-restart-conversation-ok');
-        `,
-      ],
-      {
-        cwd: process.cwd(),
-        env: { ...process.env, HOME: homeDir },
-        encoding: 'utf8',
-      },
-    );
-
-    assert.match(output, /post-restart-conversation-ok/);
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
   }

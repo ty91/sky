@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import {
+  getServiceStatus,
   installLaunchAgent,
   uninstallLaunchAgent,
 } from '../service/launch-agent.js';
@@ -8,6 +9,7 @@ import {
   printStatus,
   reportInstallResult,
   reportLifecycleError,
+  reportStatusResult,
 } from './service-output.js';
 
 type JsonOptions = { json?: boolean };
@@ -44,7 +46,20 @@ const uninstallCommand = new Command('uninstall')
     }
   });
 
+const statusCommand = new Command('status')
+  .description('Show LaunchAgent and daemon status')
+  .option('--json', 'Print stable JSON output')
+  .action(async (options: JsonOptions) => {
+    const json = options.json === true;
+    try {
+      reportStatusResult(await getServiceStatus(), json);
+    } catch (error) {
+      reportLifecycleError(error, json);
+    }
+  });
+
 export const serviceCommand = new Command('service')
   .description('Manage persistent LaunchAgent registration')
+  .addCommand(statusCommand)
   .addCommand(installCommand)
   .addCommand(uninstallCommand);

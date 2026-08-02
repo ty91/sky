@@ -14,7 +14,9 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - `sky status`는 macOS LaunchAgent 상태와 daemon control 상태를 함께 보여주며 자동화를 위한 `--json`을 제공합니다.
 - `skyd`는 foreground daemon으로 실행되며 `~/.sky/run/skyd.sock`의 HTTP/JSON control interface를 제공합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
-- 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `restart_harness`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
+- `memory`와 `dream`은 daemon operation으로 실행되며 CLI를 끊어도 계속 진행됩니다.
+- structured JSONL log는 control interface에서 history와 live stream으로 제공되고, `sky logs --follow`는 daemon 교체 뒤에도 cursor로 이어집니다.
+- 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
 - main agent는 `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 one-shot 리마인더를 관리하고 예정 시각에 먼저 Slack DM을 보낼 수 있습니다.
 - 에이전트 작업 디렉토리(`cwd`)는 기본적으로 `~/.sky/workspace`로 고정됩니다.
 
@@ -162,7 +164,13 @@ sky start
 sky stop
 sky restart
 sky status
+sky service status
 sky logs
+sky logs --follow
+sky memory
+sky dream
+sky operation status <id>
+sky operation watch <id>
 sky service uninstall
 ```
 
@@ -183,14 +191,47 @@ curl --unix-socket ~/.sky/run/skyd.sock http://localhost/status
 
 설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.
 
-`skyd --foreground`는 supervisor가 없으므로 control restart와 `restart_harness`를 거부합니다. `sky status`의 `supervision` 항목에서 현재 daemon이 `launchd` 또는 `foreground`로 실행 중인지 확인할 수 있습니다.
+`skyd --foreground`는 supervisor가 없으므로 control restart를 거부합니다. `sky status`의 `supervision` 항목에서 현재 daemon이 `launchd` 또는 `foreground`로 실행 중인지 확인할 수 있습니다.
+
+### Maintenance operation
+
+`sky memory`와 `sky dream`은 CLI 안에서 agent runtime을 만들지 않고 실행 중인 daemon에 operation을 요청합니다. CLI는 operation ID를 첫 줄에 출력하고 기본적으로 완료까지 event stream을 지켜봅니다. `Ctrl-C`는 operation을 취소하지 않고 화면만 분리합니다. 처음부터 기다리지 않으려면 `--detach`를 사용합니다.
+
+```bash
+sky memory --detach
+sky dream --date 2026-08-01 --step summarize
+sky operation status <operation-id> --json
+sky operation watch <operation-id>
+```
+
+`memory`와 `dream`은 합쳐서 한 번에 하나만 실행됩니다. 이미 실행 중이면 새 요청은 active operation ID와 함께 거부됩니다. 완료 record는 최대 100개이면서 완료 후 24시간 이내인 것만, event는 operation당 최근 1,000개만 daemon 메모리에 남습니다. daemon을 재시작하면 operation registry는 복원되지 않습니다.
+
+control interface의 operation endpoint는 다음과 같습니다.
+
+- `POST /operations`: `{"type":"memory"}` 또는 `{"type":"dream","date":"YYYY-MM-DD","step":"summarize|knowledge"}`를 받아 `202`와 operation ID를 반환합니다.
+- `GET /operations/:id`: 상태, 입력, 시각, 결과 또는 오류 코드를 반환합니다.
+- `GET /operations/:id/events`: 완료될 때까지 `application/x-ndjson` event stream을 반환합니다.
+
+### Structured log
+
+```bash
+sky logs
+sky logs --json
+sky logs --follow
+sky logs --cursor <cursor> --limit 500
+```
+
+daemon이 살아 있으면 CLI는 `GET /logs` history와 `GET /logs/stream` live stream을 사용합니다. 각 app log record의 cursor는 daemon instance ID와 process-local sequence로 구성됩니다. follow stream이 끊기고 LaunchAgent job이 계속 loaded 상태면 마지막 cursor로 새 control socket에 재접속합니다. job이 unload되면 rotation archive까지 마지막 record를 읽고 종료합니다.
+
+daemon control socket에 연결할 수 없으면 `~/.sky/logs/skyd.jsonl`과 최대 5개 archive, `~/.sky/logs/launchd.stderr.log`를 read-only fallback으로 조회합니다. `--json`은 record 하나당 JSON 한 줄을 출력합니다. 외부 `tail` process는 사용하지 않습니다.
 
 ## Package 검증과 release
 
-`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다.
+`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다. `pnpm test:launchd`는 GitHub-hosted macOS runner에서만 실제 LaunchAgent lifecycle을 검증하며 로컬 실행에서는 skip됩니다.
 
 ```bash
 pnpm test:package
+pnpm test:launchd
 pnpm pack --dry-run --json
 ```
 
@@ -218,6 +259,8 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
 - 이전 PID 기반 daemon이 발견되면 `sky service install`은 command가 실제 `@ty91/sky`의 `dist/bot.js`인지 확인한 뒤에만 `SIGTERM`을 보냅니다. 20초 안에 끝나지 않아도 자동으로 `SIGKILL`하지 않습니다.
 - 기존 `~/.sky/sky.log`는 migration 시 `~/.sky/logs/legacy-sky.log`로 한 번만 이동됩니다.
 - `skyd` structured app log는 `~/.sky/logs/skyd.jsonl`에 기록되며 10 MiB 단위, archive 5개로 rotation됩니다.
+- LaunchAgent가 daemon entrypoint를 시작하지 못한 오류는 `~/.sky/logs/launchd.stderr.log`에 남으며 daemon down 상태의 `sky logs` fallback에 포함됩니다.
+- structured app log에는 Slack message, agent prompt, token을 기록하지 않고 operation 종류/상태와 안전한 daemon 진단만 기록합니다.
 - `~/.sky`, `~/.sky/run`, `~/.sky/logs`는 `0700`, control socket과 settings/log 파일은 `0600` 권한을 사용합니다.
 - Conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.
 - 예약된 리마인더도 같은 `~/.sky/sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
