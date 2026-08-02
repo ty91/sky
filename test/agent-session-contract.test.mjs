@@ -136,10 +136,9 @@ function createPiAdapterHarness() {
   }
 
   const deps = {
-    AuthStorage: { create: () => ({}) },
-    ModelRegistry: {
-      create: () => ({
-        find: (provider, modelId) => ({ provider, modelId }),
+    ModelRuntime: {
+      create: async () => ({
+        getModel: (provider, modelId) => ({ provider, id: modelId }),
       }),
     },
     getAgentDir: () => '/tmp/pi-agent',
@@ -268,15 +267,6 @@ function resultMessage(sessionId, subtype = 'success') {
     session_id: sessionId,
     is_error: subtype !== 'success',
     ...(subtype === 'success' ? { result: 'final answer' } : {}),
-  };
-}
-
-function assistantMessage(sessionId, text) {
-  return {
-    type: 'assistant',
-    session_id: sessionId,
-    parent_tool_use_id: null,
-    message: { content: [{ type: 'text', text }] },
   };
 }
 

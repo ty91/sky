@@ -1,0 +1,67 @@
+name: Release package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+
+      - name: Verify macOS arm64 runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify release tag
+        run: pnpm release:check-tag
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Test packed package
+        run: pnpm test:package
+
+      - name: Publish to GitHub Packages
+        run: |
+          printf '%s\n' '@ty91:registry=https://npm.pkg.github.com' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/npmrc"
+          NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc" pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test published package
+        run: |
+          package_version=$(node -p "require('./package.json').version")
+          sky_smoke_home="$RUNNER_TEMP/sky-registry-smoke"
+          mkdir -p "$sky_smoke_home/pnpm"
+          export HOME="$sky_smoke_home"
+          export PNPM_HOME="$sky_smoke_home/pnpm"
+          export XDG_CACHE_HOME="$sky_smoke_home/cache"
+          export XDG_CONFIG_HOME="$sky_smoke_home/config"
+          export XDG_DATA_HOME="$sky_smoke_home/data"
+          export PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
+          NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc" pnpm add --global "@ty91/sky@$package_version"
+          sky_bin="$(pnpm bin --global | tail -n 1)/sky"
+          test "$("$sky_bin" --version)" = "$package_version"
+          "$sky_bin" --help | grep -q 'Usage: sky'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

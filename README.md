@@ -18,12 +18,56 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 
 ## 준비물
 
-- Node.js 18+
+- [mise](https://mise.jdx.dev/)
 - Slack bot token + app token (Socket Mode 사용 시)
 - Slack app event subscriptions: `app_mention`, `message.im`, public channel message events, private channel message events
 - Slack agent messaging experience: `agent_view`
 - Slack scopes: `app_mentions.read`, `chat:write`, `im:history`, `channels:history`, `groups:history`, `files:write`, `reactions:write`
 - 선택한 backend에서 사용할 모델 인증 설정
+
+Sky의 개발 및 package release toolchain은 `mise.toml`에 고정되어 있습니다.
+
+```bash
+mise install
+mise exec -- node --version
+mise exec -- pnpm --version
+```
+
+각각 Node.js `24.16.0`, pnpm `11.10.0`이 출력되어야 합니다.
+
+## 설치
+
+### Private GitHub Package
+
+소스 clone 없이 설치하려면 Node.js와 pnpm을 mise의 전역 toolchain으로 준비합니다.
+
+```bash
+mise use --global node@24.16.0 pnpm@11.10.0
+mise exec -- pnpm setup
+```
+
+새 shell을 연 뒤 `read:packages` 권한이 있는 GitHub personal access token(classic)을 준비합니다. 실제 token을 파일에 쓰지 않도록 `~/.npmrc`에는 환경변수 참조만 추가합니다.
+
+```ini
+@ty91:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+token을 현재 install 명령에만 주입해 package를 전역 설치합니다.
+
+```bash
+NODE_AUTH_TOKEN=<github-pat-classic> mise exec -- pnpm add --global @ty91/sky
+mise exec -- sky --version
+```
+
+### 개발 checkout
+
+```bash
+git clone https://github.com/ty91/sky.git
+cd sky
+mise install
+mise exec -- pnpm install --frozen-lockfile
+```
 
 ## 에이전트 백엔드와 인증 방식
 
@@ -37,11 +81,6 @@ Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend�
 인증이 없거나 모델 이름을 backend가 찾지 못하면 session 생성 단계의 model/auth 오류가 그대로 보고됩니다. 먼저 선택한 backend의 로컬 인증 상태와 모델 이름을 확인하세요.
 
 ## 설정
-
-```bash
-cd ~/Developer/workspace/sky
-pnpm install
-```
 
 `~/.sky/settings.json` 을 만듭니다:
 
@@ -102,7 +141,7 @@ node --test test/agent-session-contract.test.mjs
 
 필요하면 `SKY_PI_AGENT_BACKEND_SMOKE_MODEL`, `SKY_AGENT_BACKEND_SMOKE_WORKSPACE`로 smoke 전용 model과 workspace를 지정할 수 있습니다.
 
-CLI 설치:
+개발 checkout의 CLI를 전역으로 연결하려면:
 
 ```bash
 pnpm link --global
@@ -123,6 +162,28 @@ sky logs
 ```bash
 sky run
 ```
+
+## Package 검증과 release
+
+`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky --help`와 `sky --version`을 실행합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다.
+
+```bash
+pnpm test:package
+pnpm pack --dry-run --json
+```
+
+release version의 원본은 `package.json`입니다. version을 올리고 검증한 뒤 동일한 `vX.Y.Z` tag를 push합니다.
+
+```bash
+pnpm version <version> --no-git-tag-version
+pnpm test
+pnpm test:package
+pnpm release:check-tag -- v<version>
+git tag v<version>
+git push origin v<version>
+```
+
+tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스트와 package smoke를 검증한 뒤 `@ty91/sky`를 private GitHub Packages에 publish합니다. tag와 `package.json` version이 다르면 publish하지 않습니다.
 
 ## 운영 메모
 

@@ -1,12 +1,12 @@
 import {
-  AuthStorage as PiAuthStorage,
   createAgentSession as piCreateAgentSession,
   DefaultResourceLoader as PiDefaultResourceLoader,
   getAgentDir as piGetAgentDir,
-  ModelRegistry as PiModelRegistry,
+  ModelRuntime as PiModelRuntime,
   SessionManager as PiSessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import path from 'node:path';
 import { z } from 'zod';
 import type { AgentConfig } from '../types.js';
 import type {
@@ -17,13 +17,12 @@ import type {
 } from './types.js';
 
 type PiSession = Awaited<ReturnType<typeof piCreateAgentSession>>['session'];
-type PiModelRegistryInstance = ReturnType<typeof PiModelRegistry.create>;
+type PiModelRuntimeInstance = Awaited<ReturnType<typeof PiModelRuntime.create>>;
 type PiBackendDeps = {
-  AuthStorage: typeof PiAuthStorage;
   createAgentSession: typeof piCreateAgentSession;
   DefaultResourceLoader: typeof PiDefaultResourceLoader;
   getAgentDir: typeof piGetAgentDir;
-  ModelRegistry: typeof PiModelRegistry;
+  ModelRuntime: typeof PiModelRuntime;
   SessionManager: typeof PiSessionManager;
 };
 
@@ -49,15 +48,14 @@ type PiSessionEvent = {
 };
 
 const DEFAULT_PI_BACKEND_DEPS: PiBackendDeps = {
-  AuthStorage: PiAuthStorage,
   createAgentSession: piCreateAgentSession,
   DefaultResourceLoader: PiDefaultResourceLoader,
   getAgentDir: piGetAgentDir,
-  ModelRegistry: PiModelRegistry,
+  ModelRuntime: PiModelRuntime,
   SessionManager: PiSessionManager,
 };
 
-function resolveModel(modelRegistry: PiModelRegistryInstance, modelName: string) {
+function resolveModel(modelRuntime: PiModelRuntimeInstance, modelName: string) {
   const slash = modelName.indexOf('/');
   if (slash <= 0 || slash === modelName.length - 1) {
     throw new Error(`Invalid Pi model name: ${modelName}`);
@@ -65,7 +63,7 @@ function resolveModel(modelRegistry: PiModelRegistryInstance, modelName: string)
 
   const provider = modelName.slice(0, slash);
   const modelId = modelName.slice(slash + 1);
-  const model = modelRegistry.find(provider, modelId);
+  const model = modelRuntime.getModel(provider, modelId);
   if (!model) {
     throw new Error(`Pi model not found: ${modelName}`);
   }
@@ -214,9 +212,11 @@ export function createPiSessionFactoryWithDeps(
   return Object.assign(
     async ({ key, agent, cwd, resume }: CreateAgentSessionOptions): Promise<AgentSession> => {
       const agentDir = deps.getAgentDir();
-      const authStorage = deps.AuthStorage.create();
-      const modelRegistry = deps.ModelRegistry.create(authStorage);
-      const model = agent.model ? resolveModel(modelRegistry, agent.model) : undefined;
+      const modelRuntime = await deps.ModelRuntime.create({
+        authPath: path.join(agentDir, 'auth.json'),
+        modelsPath: path.join(agentDir, 'models.json'),
+      });
+      const model = agent.model ? resolveModel(modelRuntime, agent.model) : undefined;
       const resourceLoader = new deps.DefaultResourceLoader({
         cwd,
         agentDir,
@@ -228,8 +228,7 @@ export function createPiSessionFactoryWithDeps(
       const { session } = await deps.createAgentSession({
         cwd,
         agentDir,
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         ...(model ? { model } : {}),
         ...(agent.effort ? { thinkingLevel: agent.effort } : {}),
         ...(agent.tools ? { tools: toPiToolNames(agent.tools) } : {}),

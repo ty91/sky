@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { readFileSync } from 'node:fs';
 import { startCommand } from './commands/start.js';
 import { stopCommand } from './commands/stop.js';
 import { restartCommand } from './commands/restart.js';
@@ -9,10 +10,14 @@ import { logsCommand } from './commands/logs.js';
 import { memoryCommand } from './commands/memory.js';
 import { dreamCommand } from './commands/dream.js';
 
+const { version } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
+
 const program = new Command()
   .name('sky')
   .description('Pi coding agent chatbot for Slack')
-  .version('0.1.0');
+  .version(version);
 
 program.addCommand(startCommand);
 program.addCommand(stopCommand);
