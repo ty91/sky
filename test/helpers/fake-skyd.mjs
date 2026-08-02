@@ -3,7 +3,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 
-const socketFile = path.join(process.env.HOME, '.sky', 'run', 'skyd.sock');
+const skyHome = process.env.SKY_HOME || path.join(process.env.HOME, '.sky');
+const socketFile = path.join(skyHome, 'run', 'skyd.sock');
 await mkdir(path.dirname(socketFile), { recursive: true, mode: 0o700 });
 await rm(socketFile, { force: true });
 

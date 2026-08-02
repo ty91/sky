@@ -140,7 +140,7 @@ test('GET /status stays available without settings and exposes stable control er
       assert.equal(missing.statusCode, 404);
       assert.deepEqual(JSON.parse(missing.body), { error: { code: 'not_found' } });
 
-      assert.equal(permissions(await lstat(daemon.paths.skyDir)), 0o700);
+      assert.equal(permissions(await lstat(daemon.paths.rootDir)), 0o700);
       assert.equal(permissions(await lstat(daemon.paths.runDir)), 0o700);
       assert.equal(permissions(await lstat(daemon.paths.logsDir)), 0o700);
       assert.equal(permissions(await lstat(daemon.paths.socketFile)), 0o600);

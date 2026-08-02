@@ -1,6 +1,6 @@
 import { ControlRequestError, createOperation, getOperation, watchOperation } from '../skyd/control.js';
 import type { OperationEvent, OperationRecord, OperationRequest } from '../skyd/operations.js';
-import { resolveSkydPaths } from '../skyd/paths.js';
+import { createSkyHome } from '../sky-home.js';
 
 function operationErrorMessage(error: unknown): string {
   if (error instanceof ControlRequestError) {
@@ -65,7 +65,7 @@ export async function watchOperationFromCli(
   operationId: string,
   options: { json?: boolean } = {},
 ): Promise<void> {
-  const socketFile = resolveSkydPaths().socketFile;
+  const socketFile = createSkyHome().socketFile;
   const abortController = new AbortController();
   let detached = false;
   const detach = () => {
@@ -99,11 +99,12 @@ export async function createOperationFromCli(
   request: OperationRequest,
   options: { detach?: boolean } = {},
 ): Promise<void> {
-  const socketFile = resolveSkydPaths().socketFile;
+  const socketFile = createSkyHome().socketFile;
   try {
     const { operationId } = await createOperation(socketFile, request);
+    const watching = options.detach ? undefined : watchOperationFromCli(operationId);
     console.log(`operation: ${operationId}`);
-    if (!options.detach) await watchOperationFromCli(operationId);
+    await watching;
   } catch (error) {
     console.error(`error: ${operationErrorMessage(error)}`);
     process.exitCode = 1;
@@ -112,7 +113,7 @@ export async function createOperationFromCli(
 
 export async function showOperationStatus(operationId: string, json: boolean): Promise<void> {
   try {
-    const operation = await getOperation(resolveSkydPaths().socketFile, operationId);
+    const operation = await getOperation(createSkyHome().socketFile, operationId);
     if (json) {
       console.log(
         JSON.stringify(

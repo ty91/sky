@@ -3,6 +3,7 @@ import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { TurnActivityIndicator } from './activity-indicator.js';
 import type { RuntimeController } from '../runtime/controller.js';
+import { createSkyHome, type SkyHome } from '../sky-home.js';
 
 export const SLACK_TURN_ERROR_REPLY = '오류가 났습니다. 잠시 뒤 다시 시도해 주세요.';
 export const SLACK_DRAINING_REPLY = 'Sky가 재시작을 준비 중입니다. 잠시 뒤 다시 시도해 주세요.';
@@ -29,6 +30,7 @@ export type ExecuteSlackTurnOptions = {
   indicator: TurnActivityIndicator;
   reply: SlackTurnReplyAdapter;
   runtimeController?: Pick<RuntimeController, 'lease'>;
+  skyHome?: SkyHome;
 };
 
 export async function executeSlackTurn({
@@ -39,13 +41,14 @@ export async function executeSlackTurn({
   indicator,
   reply,
   runtimeController,
+  skyHome = createSkyHome(),
 }: ExecuteSlackTurnOptions): Promise<void> {
   const lease = runtimeController?.lease('slack_turn');
   if (runtimeController && !lease) {
     await reply.sendReply(SLACK_DRAINING_REPLY);
     return;
   }
-  const transcript = new TranscriptWriter(threadId);
+  const transcript = new TranscriptWriter(threadId, skyHome);
 
   try {
     await indicator.begin();

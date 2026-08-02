@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   accessSync,
-  chmodSync,
   constants,
   existsSync,
   lstatSync,
@@ -15,6 +14,13 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import {
+  createSkyHome,
+  ensurePrivateDirectory,
+  ensurePrivateFile,
+  prepareSkyHome,
+  type SkyHome,
+} from '../sky-home.js';
 import {
   ControlRequestError,
   getDaemonStatus,
@@ -32,6 +38,7 @@ const LEGACY_STOP_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 250;
 
 type LaunchAgentPaths = {
+  skyHome: SkyHome;
   homeDir: string;
   logsDir: string;
   socketFile: string;
@@ -106,17 +113,19 @@ export class ServiceLifecycleError extends Error {
   }
 }
 
-function launchAgentPaths(homeDir = os.homedir()): LaunchAgentPaths {
-  const skyDir = path.join(homeDir, '.sky');
-  const logsDir = path.join(skyDir, 'logs');
+function launchAgentPaths(
+  skyHome: SkyHome = createSkyHome(),
+  homeDir = os.homedir(),
+): LaunchAgentPaths {
   return {
+    skyHome,
     homeDir,
-    logsDir,
-    socketFile: path.join(skyDir, 'run', 'skyd.sock'),
-    legacyPidFile: path.join(skyDir, 'sky.pid'),
-    legacyLogFile: path.join(skyDir, 'sky.log'),
-    migratedLegacyLogFile: path.join(logsDir, 'legacy-sky.log'),
-    launchdStderrFile: path.join(logsDir, 'launchd.stderr.log'),
+    logsDir: skyHome.logsDir,
+    socketFile: skyHome.socketFile,
+    legacyPidFile: skyHome.legacyPidFile,
+    legacyLogFile: skyHome.legacyLogFile,
+    migratedLegacyLogFile: skyHome.migratedLegacyLogFile,
+    launchdStderrFile: skyHome.launchdStderrFile,
     launchAgentsDir: path.join(homeDir, 'Library', 'LaunchAgents'),
     plistFile: path.join(homeDir, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`),
   };
@@ -215,6 +224,12 @@ function launchAgentPathValue(skydWrapper: string): string {
 
 function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
   const environmentPath = launchAgentPathValue(skydWrapper);
+  const skyHomeEnvironment =
+    paths.skyHome.source === 'override'
+      ? `    <key>SKY_HOME</key>
+    <string>${xml(paths.skyHome.rootDir)}</string>
+`
+      : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -243,7 +258,7 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
     <string>${xml(paths.homeDir)}</string>
     <key>PATH</key>
     <string>${xml(environmentPath)}</string>
-  </dict>
+${skyHomeEnvironment}   </dict>
 </dict>
 </plist>
 `;
@@ -251,8 +266,7 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
 
 function ensureLaunchAgentsDirectory(paths: LaunchAgentPaths): void {
   mkdirSync(paths.launchAgentsDir, { recursive: true, mode: 0o700 });
-  mkdirSync(paths.logsDir, { recursive: true, mode: 0o700 });
-  chmodSync(paths.logsDir, 0o700);
+  ensurePrivateDirectory(paths.logsDir);
 }
 
 function temporaryPlistPath(paths: LaunchAgentPaths): string {
@@ -489,10 +503,9 @@ async function isVerifiedLegacyProcess(pid: number): Promise<boolean> {
 
 function moveLegacyLogOnce(paths: LaunchAgentPaths): void {
   if (!existsSync(paths.legacyLogFile) || existsSync(paths.migratedLegacyLogFile)) return;
-  mkdirSync(paths.logsDir, { recursive: true, mode: 0o700 });
-  chmodSync(paths.logsDir, 0o700);
+  ensurePrivateDirectory(paths.logsDir);
   renameSync(paths.legacyLogFile, paths.migratedLegacyLogFile);
-  chmodSync(paths.migratedLegacyLogFile, 0o600);
+  ensurePrivateFile(paths.migratedLegacyLogFile);
 }
 
 async function migrateLegacyDaemon(paths: LaunchAgentPaths): Promise<LegacyMigrationState> {
@@ -578,6 +591,7 @@ async function restorePreviousPlist(
 export async function installLaunchAgent(): Promise<InstallResult> {
   assertMacOS();
   const paths = launchAgentPaths();
+  prepareSkyHome(paths.skyHome);
   const skydWrapper = resolveExecutable('skyd');
   const desired = desiredPlist(paths, skydWrapper);
   const previous = readExistingPlist(paths);

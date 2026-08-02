@@ -1,5 +1,10 @@
-import { chmodSync, lstatSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { parseSettings, type Settings } from '../settings.js';
+import {
+  ensurePrivateFile,
+  UnsafeSkyPathError,
+  type SkyHome,
+} from '../sky-home.js';
 
 export type ConfigurationErrorCode =
   | 'settings_missing'
@@ -16,37 +21,24 @@ export class ConfigurationError extends Error {
   }
 }
 
-function isMissing(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
-}
-
-export function loadSecureSettings(settingsFile: string): Settings {
-  let stats;
+export function loadSecureSettings(home: SkyHome): Settings {
+  const settingsFile = home.settingsFile;
   try {
-    stats = lstatSync(settingsFile);
+    if (!ensurePrivateFile(settingsFile)) {
+      throw new ConfigurationError('settings_missing', 'Settings file is missing.');
+    }
   } catch (error) {
-    if (isMissing(error)) {
-      throw new ConfigurationError('settings_missing', 'Settings file is missing.', error);
+    if (error instanceof ConfigurationError) throw error;
+    if (error instanceof UnsafeSkyPathError) {
+      throw new ConfigurationError('settings_unsafe', 'Settings file is unsafe.', error);
     }
     throw new ConfigurationError('settings_invalid', 'Settings file cannot be inspected.', error);
   }
 
-  if (stats.isSymbolicLink() || !stats.isFile()) {
-    throw new ConfigurationError(
-      'settings_unsafe',
-      'Settings must be a regular file owned by the current user.',
-    );
-  }
-  if (process.getuid && stats.uid !== process.getuid()) {
-    throw new ConfigurationError(
-      'settings_unsafe',
-      'Settings must be owned by the current user.',
-    );
-  }
-
   try {
-    chmodSync(settingsFile, 0o600);
-    return parseSettings(JSON.parse(readFileSync(settingsFile, 'utf8')));
+    return parseSettings(JSON.parse(readFileSync(settingsFile, 'utf8')), {
+      defaultWorkspace: home.workspaceDir,
+    });
   } catch (error) {
     throw new ConfigurationError('settings_invalid', 'Settings are not valid.', error);
   }

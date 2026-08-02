@@ -2,6 +2,7 @@ import type { AgentConfig } from '../types.js';
 import { getUnreadTranscripts, advanceCursors, type UnreadTranscript } from './cursors.js';
 import { MEMORY_AGENT_SYSTEM_PROMPT } from './prompt.js';
 import type { ConversationManager } from '../../conversation/manager.js';
+import type { SkyHome } from '../../sky-home.js';
 
 // L2 Working Memory Agent — see docs/plans/active/2026-04-20-memory-v2.md
 // Fast, 5-minute cadence. Sonnet is sufficient for single-file rolling summary.
@@ -15,6 +16,7 @@ const SKIP_SENTINEL = 'SKIP';
 type MemoryAgentOptions = {
   conversationManager: ConversationManager;
   workspace: string;
+  skyHome?: SkyHome;
 };
 
 function buildUserPrompt(transcripts: UnreadTranscript[]): string {
@@ -65,7 +67,7 @@ function createMemoryAgentConfig(workspace: string): AgentConfig {
  * update memory files, then advance cursors.
  */
 export async function runMemoryAgent(options: MemoryAgentOptions): Promise<MemoryAgentResult> {
-  const transcripts = getUnreadTranscripts();
+  const transcripts = getUnreadTranscripts(options.skyHome);
 
   if (transcripts.length === 0) {
     return { processed: 0, skipped: true, summary: 'No new transcripts to process.' };
@@ -103,7 +105,7 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
 
     // Advance cursors either way — we consumed the transcripts. A SKIP means
     // we intentionally chose not to rewrite _recent.md for these entries.
-    advanceCursors(transcripts);
+    advanceCursors(transcripts, options.skyHome);
     console.log(`[memory-agent] cursors advanced for ${transcripts.length} transcript(s)`);
 
     if (isSkip) {

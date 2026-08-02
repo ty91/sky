@@ -1,15 +1,16 @@
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { SKY_DIR } from '../settings.js';
+import {
+  createSkyHome,
+  prepareSqliteDatabase,
+  secureSqliteFiles,
+  type SkyHome,
+} from '../sky-home.js';
 import type {
   NewScheduledJob,
   ScheduledJob,
   ScheduledJobFailureOutcome,
   ScheduledJobStore,
 } from './types.js';
-
-const DEFAULT_DB_PATH = path.join(SKY_DIR, 'sky.db');
 
 type ScheduledJobRow = {
   id: string;
@@ -89,13 +90,14 @@ function toScheduledJob(row: ScheduledJobRow): ScheduledJob {
   };
 }
 
-export function openScheduledJobStore(dbPath: string = DEFAULT_DB_PATH): ScheduledJobStore {
-  if (dbPath !== ':memory:') {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
-  }
+export function openScheduledJobStore(
+  location: string | SkyHome = createSkyHome(),
+): ScheduledJobStore {
+  const dbPath = prepareSqliteDatabase(location);
 
   const db = new DatabaseSync(dbPath);
   ensureSchema(db);
+  if (dbPath !== ':memory:') secureSqliteFiles(dbPath);
 
   const handles: StoreHandles = {
     db,

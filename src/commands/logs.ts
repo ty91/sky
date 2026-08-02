@@ -12,7 +12,11 @@ import {
   selectLogHistory,
   type LogRecord,
 } from '../skyd/logger.js';
-import { resolveSkydPaths } from '../skyd/paths.js';
+import {
+  createSkyHome,
+  inspectPrivateFile,
+  type SkyHome,
+} from '../sky-home.js';
 
 type LogsOptions = {
   follow?: boolean;
@@ -41,7 +45,7 @@ function printRecord(record: LogRecord, json: boolean): void {
 }
 
 function stderrRecords(filePath: string, limit: number): LogRecord[] {
-  if (!existsSync(filePath)) return [];
+  if (!inspectPrivateFile(filePath)) return [];
   const allLines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
   const lines = allLines.slice(-limit);
   const offset = allLines.length - lines.length;
@@ -54,9 +58,8 @@ function stderrRecords(filePath: string, limit: number): LogRecord[] {
   }));
 }
 
-function fallbackRecords(cursor: string | undefined, limit: number): LogRecord[] {
-  const paths = resolveSkydPaths();
-  const records = readLogRecords(paths.logFile);
+function fallbackRecords(home: SkyHome, cursor: string | undefined, limit: number): LogRecord[] {
+  const records = readLogRecords(home.logFile);
   try {
     return selectLogHistory(records, cursor, limit).records;
   } catch (error) {
@@ -66,16 +69,16 @@ function fallbackRecords(cursor: string | undefined, limit: number): LogRecord[]
 }
 
 function printFallback(
+  home: SkyHome,
   cursor: string | undefined,
   limit: number,
   json: boolean,
   includeLaunchdStderr: boolean,
 ): string | undefined {
-  const paths = resolveSkydPaths();
-  const appRecords = fallbackRecords(cursor, limit);
+  const appRecords = fallbackRecords(home, cursor, limit);
   for (const record of appRecords) printRecord(record, json);
   if (includeLaunchdStderr) {
-    for (const record of stderrRecords(paths.launchdStderrFile, limit)) printRecord(record, json);
+    for (const record of stderrRecords(home.launchdStderrFile, limit)) printRecord(record, json);
   }
   return appRecords.at(-1)?.cursor ?? cursor;
 }
@@ -106,7 +109,8 @@ async function followLogs(
   json: boolean,
   limit: number,
 ): Promise<void> {
-  const socketFile = resolveSkydPaths().socketFile;
+  const home = createSkyHome();
+  const socketFile = home.socketFile;
   const abortController = new AbortController();
   const stop = () => abortController.abort();
   process.once('SIGINT', stop);
@@ -134,11 +138,11 @@ async function followLogs(
 
       if (abortController.signal.aborted) return;
       if (!(await launchAgentLoaded())) {
-        printFallback(lastCursor, limit, json, !printedFallback);
+        printFallback(home, lastCursor, limit, json, !printedFallback);
         return;
       }
       if (!printedFallback) {
-        lastCursor = printFallback(lastCursor, limit, json, true);
+        lastCursor = printFallback(home, lastCursor, limit, json, true);
         printedFallback = true;
       }
       await abortableBackoff(delayMs, abortController.signal);
@@ -150,6 +154,7 @@ async function followLogs(
 }
 
 async function showLogs(options: LogsOptions): Promise<void> {
+  const home = createSkyHome();
   const json = options.json === true;
   const limit = parseLimit(options.limit ?? '200');
   if (options.follow) {
@@ -158,18 +163,18 @@ async function showLogs(options: LogsOptions): Promise<void> {
   }
 
   try {
-    const history = await getLogHistory(resolveSkydPaths().socketFile, {
+    const history = await getLogHistory(home.socketFile, {
       cursor: options.cursor,
       limit,
     });
     for (const record of history.records) printRecord(record, json);
   } catch {
-    const records = fallbackRecords(options.cursor, limit);
+    const records = fallbackRecords(home, options.cursor, limit);
     for (const record of records) printRecord(record, json);
-    for (const record of stderrRecords(resolveSkydPaths().launchdStderrFile, limit)) {
+    for (const record of stderrRecords(home.launchdStderrFile, limit)) {
       printRecord(record, json);
     }
-    if (records.length === 0 && !existsSync(resolveSkydPaths().launchdStderrFile) && !json) {
+    if (records.length === 0 && !existsSync(home.launchdStderrFile) && !json) {
       console.log('No logs found yet.');
     }
   }

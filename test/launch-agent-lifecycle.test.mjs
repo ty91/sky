@@ -222,6 +222,22 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
   }
 });
 
+test('service install records an absolute SKY_HOME override for launchd', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  const customRoot = path.join(context.homeDir, 'custom-sky-home');
+  const env = { ...context.env, SKY_HOME: customRoot };
+  try {
+    const installed = await runCli(['service', 'install', '--json'], env);
+    assert.equal(installed.code, 0, installed.stderr || installed.stdout);
+
+    const plist = await parsePlist(context.plistFile);
+    assert.equal(plist.StandardErrorPath, path.join(customRoot, 'logs', 'launchd.stderr.log'));
+    assert.equal(plist.EnvironmentVariables.SKY_HOME, customRoot);
+  } finally {
+    await cleanup(context);
+  }
+});
+
 test('unhealthy startup states are reported as completed but non-zero', { timeout: 30_000 }, async (t) => {
   for (const runtimeState of ['needs_configuration', 'degraded']) {
     await t.test(runtimeState, async () => {

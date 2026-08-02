@@ -1,10 +1,11 @@
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { SKY_DIR } from '../settings.js';
+import {
+  createSkyHome,
+  prepareSqliteDatabase,
+  secureSqliteFiles,
+  type SkyHome,
+} from '../sky-home.js';
 import type { ThreadModelReader } from './types.js';
-
-const DEFAULT_DB_PATH = path.join(SKY_DIR, 'sky.db');
 
 /**
  * Per-thread model override, set by the `!model` chat command before the
@@ -40,13 +41,14 @@ function ensureSchema(db: DatabaseSync): void {
   `);
 }
 
-export function openThreadModelStore(dbPath: string = DEFAULT_DB_PATH): ThreadModelStore {
-  if (dbPath !== ':memory:') {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
-  }
+export function openThreadModelStore(
+  location: string | SkyHome = createSkyHome(),
+): ThreadModelStore {
+  const dbPath = prepareSqliteDatabase(location);
 
   const db = new DatabaseSync(dbPath);
   ensureSchema(db);
+  if (dbPath !== ':memory:') secureSqliteFiles(dbPath);
 
   const handles: StoreHandles = {
     db,

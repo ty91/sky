@@ -1,6 +1,5 @@
 import {
   appendFileSync,
-  chmodSync,
   existsSync,
   readFileSync,
   renameSync,
@@ -9,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { ensurePrivateFile, inspectPrivateFile } from '../sky-home.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -79,29 +79,34 @@ function sanitize(value: string, protectedValues: ReadonlySet<string>): string {
 }
 
 function ensureLogFile(filePath: string): void {
-  if (!existsSync(filePath)) {
-    writeFileSync(filePath, '', { mode: 0o600 });
-  }
-  chmodSync(filePath, 0o600);
+  ensurePrivateFile(filePath, true);
 }
 
 function rotate(filePath: string, archiveCount: number): void {
   if (archiveCount <= 0) {
+    ensurePrivateFile(filePath);
     writeFileSync(filePath, '', { mode: 0o600 });
+    ensurePrivateFile(filePath);
     return;
   }
 
-  rmSync(`${filePath}.${archiveCount}`, { force: true });
+  const oldestArchive = `${filePath}.${archiveCount}`;
+  if (inspectPrivateFile(oldestArchive)) rmSync(oldestArchive);
   for (let index = archiveCount - 1; index >= 1; index -= 1) {
     const source = `${filePath}.${index}`;
     if (existsSync(source)) {
-      renameSync(source, `${filePath}.${index + 1}`);
+      ensurePrivateFile(source);
+      const destination = `${filePath}.${index + 1}`;
+      renameSync(source, destination);
+      ensurePrivateFile(destination);
     }
   }
   if (existsSync(filePath)) {
+    ensurePrivateFile(filePath);
     renameSync(filePath, `${filePath}.1`);
+    ensurePrivateFile(`${filePath}.1`);
   }
-  writeFileSync(filePath, '', { mode: 0o600 });
+  ensurePrivateFile(filePath, true);
 }
 
 function isLogRecord(value: unknown): value is LogRecord {
@@ -123,9 +128,9 @@ export function readLogRecords(filePath: string, archiveCount = 5): LogRecord[] 
   const files: string[] = [];
   for (let index = archiveCount; index >= 1; index -= 1) {
     const archive = `${filePath}.${index}`;
-    if (existsSync(archive)) files.push(archive);
+    if (inspectPrivateFile(archive)) files.push(archive);
   }
-  if (existsSync(filePath)) files.push(filePath);
+  if (inspectPrivateFile(filePath)) files.push(filePath);
 
   const records: LogRecord[] = [];
   for (const file of files) {
@@ -192,6 +197,7 @@ export function createJsonlLogger(
     },
 
     log(level, scope, message, context = {}) {
+      ensureLogFile(filePath);
       sequence += 1;
       const record: LogRecord = {
         cursor: `${instanceId}:${sequence}`,
@@ -210,7 +216,7 @@ export function createJsonlLogger(
         rotate(filePath, archiveCount);
       }
       appendFileSync(filePath, line, { encoding: 'utf8', mode: 0o600 });
-      chmodSync(filePath, 0o600);
+      ensureLogFile(filePath);
       for (const listener of listeners) listener(record);
     },
 

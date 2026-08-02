@@ -2,16 +2,17 @@ import { resolveAgentSessionFactory } from '../agents/backend/index.js';
 import { runDreamAgent, dreamDailyFilePath } from '../agents/dream/agent.js';
 import { runMemoryAgent } from '../agents/memory/agent.js';
 import { createConversationManager } from '../conversation/manager.js';
+import type { SkyHome } from '../sky-home.js';
 import type { JsonlLogger } from './logger.js';
 import { loadSecureSettings } from './settings.js';
 import type { OperationRunner } from './operations.js';
 
 export function createMaintenanceOperationRunner(
-  settingsFile: string,
+  skyHome: SkyHome,
   logger: JsonlLogger,
 ): OperationRunner {
   return async (request, context) => {
-    const settings = loadSecureSettings(settingsFile);
+    const settings = loadSecureSettings(skyHome);
     logger.protect([
       settings.slack.botToken,
       settings.slack.appToken,
@@ -30,7 +31,11 @@ export function createMaintenanceOperationRunner(
     try {
       if (request.type === 'memory') {
         context.progress('Running working-memory update.');
-        return await runMemoryAgent({ conversationManager, workspace: settings.workspace });
+        return await runMemoryAgent({
+          conversationManager,
+          workspace: settings.workspace,
+          skyHome,
+        });
       }
 
       context.progress('Running daily dream update.');
@@ -39,6 +44,7 @@ export function createMaintenanceOperationRunner(
         workspace: settings.workspace,
         targetDate: request.date,
         onlyStep: request.step,
+        transcriptsDir: skyHome.transcriptsDir,
       });
       return {
         ...result,

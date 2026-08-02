@@ -1,24 +1,34 @@
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { SKY_DIR } from '../../settings.js';
-
-const CURSORS_FILE = path.join(SKY_DIR, 'memory-cursors.json');
-const TRANSCRIPTS_DIR = path.join(SKY_DIR, 'transcripts');
+import {
+  createSkyHome,
+  ensurePrivateDirectory,
+  ensurePrivateFile,
+  inspectPrivateDirectory,
+  inspectPrivateFile,
+  type SkyHome,
+} from '../../sky-home.js';
 
 /** Byte offset per transcript file (relative path from transcripts dir). */
 type CursorMap = Record<string, number>;
 
-function loadCursors(): CursorMap {
+function loadCursors(skyHome: SkyHome): CursorMap {
   try {
-    return JSON.parse(readFileSync(CURSORS_FILE, 'utf8'));
+    ensurePrivateFile(skyHome.memoryCursorFile);
+    return JSON.parse(readFileSync(skyHome.memoryCursorFile, 'utf8'));
   } catch {
     return {};
   }
 }
 
-function saveCursors(cursors: CursorMap): void {
-  mkdirSync(path.dirname(CURSORS_FILE), { recursive: true });
-  writeFileSync(CURSORS_FILE, JSON.stringify(cursors, null, 2), 'utf8');
+function saveCursors(cursors: CursorMap, skyHome: SkyHome): void {
+  ensurePrivateDirectory(skyHome.rootDir);
+  ensurePrivateFile(skyHome.memoryCursorFile);
+  writeFileSync(skyHome.memoryCursorFile, JSON.stringify(cursors, null, 2), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  ensurePrivateFile(skyHome.memoryCursorFile);
 }
 
 export type UnreadTranscript = {
@@ -35,30 +45,26 @@ export type UnreadTranscript = {
 /**
  * Scan all transcript files and return those with unread content.
  */
-export function getUnreadTranscripts(): UnreadTranscript[] {
-  const cursors = loadCursors();
+export function getUnreadTranscripts(skyHome: SkyHome = createSkyHome()): UnreadTranscript[] {
+  const cursors = loadCursors(skyHome);
   const results: UnreadTranscript[] = [];
 
   let chatDirs: string[];
   try {
-    chatDirs = readdirSync(TRANSCRIPTS_DIR);
+    chatDirs = readdirSync(skyHome.transcriptsDir);
   } catch {
     return [];
   }
 
   for (const chatDir of chatDirs) {
-    const chatPath = path.join(TRANSCRIPTS_DIR, chatDir);
-
-    let files: string[];
-    try {
-      files = readdirSync(chatPath).filter((f) => f.endsWith('.md'));
-    } catch {
-      continue;
-    }
+    const chatPath = path.join(skyHome.transcriptsDir, chatDir);
+    if (!inspectPrivateDirectory(chatPath)) continue;
+    const files = readdirSync(chatPath).filter((f) => f.endsWith('.md'));
 
     for (const file of files) {
       const absolutePath = path.join(chatPath, file);
       const relativePath = `${chatDir}/${file}`;
+      if (!inspectPrivateFile(absolutePath)) continue;
 
       let fileSize: number;
       try {
@@ -91,10 +97,13 @@ export function getUnreadTranscripts(): UnreadTranscript[] {
 /**
  * Advance cursors for the given transcripts (call after successful processing).
  */
-export function advanceCursors(transcripts: UnreadTranscript[]): void {
-  const cursors = loadCursors();
+export function advanceCursors(
+  transcripts: UnreadTranscript[],
+  skyHome: SkyHome = createSkyHome(),
+): void {
+  const cursors = loadCursors(skyHome);
   for (const t of transcripts) {
     cursors[t.relativePath] = t.newOffset;
   }
-  saveCursors(cursors);
+  saveCursors(cursors, skyHome);
 }

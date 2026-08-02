@@ -1,11 +1,7 @@
 import { readFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { z } from 'zod';
 import { AGENT_EFFORT_LEVELS } from './agents/effort.js';
-
-export const SKY_DIR = path.join(os.homedir(), '.sky');
-const SETTINGS_FILE = path.join(SKY_DIR, 'settings.json');
+import { createSkyHome, type SkyHome } from './sky-home.js';
 
 const slackSettingsSchema = z.object({
   botToken: z.string(),
@@ -19,34 +15,43 @@ const claudeAgentSdkSettingsSchema = z.object({
   oauthToken: z.string().min(1),
 });
 
-const settingsSchema = z
-  .object({
-    slack: slackSettingsSchema,
-    model: z.string().min(1),
-    agentBackend: z.enum(['pi', 'claude-agent-sdk']).default('pi'),
-    claudeAgentSdk: claudeAgentSdkSettingsSchema.optional(),
-    effort: z.enum(AGENT_EFFORT_LEVELS).optional(),
-    workspace: z.string().default(path.join(os.homedir(), '.sky', 'workspace')),
-  })
-  .strict();
-
-export type Settings = z.infer<typeof settingsSchema>;
-
-export function parseSettings(raw: unknown): Settings {
-  return settingsSchema.parse(raw);
+function createSettingsSchema(defaultWorkspace: string) {
+  return z
+    .object({
+      slack: slackSettingsSchema,
+      model: z.string().min(1),
+      agentBackend: z.enum(['pi', 'claude-agent-sdk']).default('pi'),
+      claudeAgentSdk: claudeAgentSdkSettingsSchema.optional(),
+      effort: z.enum(AGENT_EFFORT_LEVELS).optional(),
+      workspace: z.string().default(defaultWorkspace),
+    })
+    .strict();
 }
 
-export function loadSettings(options: { silent?: boolean } = {}): Settings {
+export type Settings = z.infer<ReturnType<typeof createSettingsSchema>>;
+
+export function parseSettings(
+  raw: unknown,
+  options: { defaultWorkspace?: string } = {},
+): Settings {
+  const defaultWorkspace = options.defaultWorkspace ?? createSkyHome().workspaceDir;
+  return createSettingsSchema(defaultWorkspace).parse(raw);
+}
+
+export function loadSettings(
+  options: { silent?: boolean; skyHome?: SkyHome } = {},
+): Settings {
+  const home = options.skyHome ?? createSkyHome();
   if (!options.silent) {
-    console.log(`[startup] reading ${SETTINGS_FILE}`);
+    console.log(`[startup] reading ${home.settingsFile}`);
   }
   try {
-    const raw = readFileSync(SETTINGS_FILE, 'utf8');
-    return parseSettings(JSON.parse(raw));
+    const raw = readFileSync(home.settingsFile, 'utf8');
+    return parseSettings(JSON.parse(raw), { defaultWorkspace: home.workspaceDir });
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       throw new Error(
-        `Settings file not found: ${SETTINGS_FILE}\n` +
+        `Settings file not found: ${home.settingsFile}\n` +
           'Create it with Slack settings and a Pi model, for example: ' +
           '{ "slack": { "botToken": "...", "appToken": "..." }, "model": "anthropic/claude-opus-4-7" }',
         { cause: error },

@@ -8,6 +8,11 @@ import {
 } from '../runtime/controller.js';
 import { computeBackoffMs, isAbortError, sleep, type BackoffOptions } from '../runtime/retry.js';
 import type { Settings } from '../settings.js';
+import {
+  createSkyHome,
+  prepareSkyHome,
+  type SkyHome,
+} from '../sky-home.js';
 import { startControlServer, type ControlServer } from './control.js';
 import { createJsonlLogger, type JsonlLoggerOptions } from './logger.js';
 import { createMaintenanceOperationRunner } from './maintenance.js';
@@ -16,7 +21,6 @@ import {
   type OperationRegistry,
   type OperationRunner,
 } from './operations.js';
-import { prepareSkydPaths, type SkydPaths } from './paths.js';
 import { ConfigurationError, loadSecureSettings } from './settings.js';
 import type { DaemonStatus, RuntimeState, SlackConnectionState } from './types.js';
 
@@ -27,9 +31,12 @@ const { version: PRODUCT_VERSION } = JSON.parse(
 export type RuntimeStarter = (
   settings: Settings,
   runtimeController: RuntimeController,
+  skyHome: SkyHome,
 ) => Promise<BotRuntime>;
 
 export type StartSkydOptions = {
+  skyHome?: SkyHome;
+  rootDir?: string;
   homeDir?: string;
   productVersion?: string;
   startRuntime?: RuntimeStarter;
@@ -50,7 +57,7 @@ export type StartSkydOptions = {
 };
 
 export type Skyd = {
-  paths: SkydPaths;
+  paths: SkyHome;
   status(): DaemonStatus;
   finished: Promise<void>;
   close(): Promise<void>;
@@ -76,7 +83,10 @@ function causeMessage(error: SlackStartupError): string {
 }
 
 export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
-  const paths = prepareSkydPaths(options.homeDir);
+  process.umask(0o077);
+  const paths =
+    options.skyHome ?? createSkyHome({ rootDir: options.rootDir, homeDir: options.homeDir });
+  prepareSkyHome(paths);
   const instanceId = randomUUID();
   const logger = createJsonlLogger(paths.logFile, {
     ...options.logger,
@@ -101,7 +111,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const operations: OperationRegistry = createOperationRegistry({
     runtimeController,
     logger,
-    run: options.runOperation ?? createMaintenanceOperationRunner(paths.settingsFile, logger),
+    run: options.runOperation ?? createMaintenanceOperationRunner(paths, logger),
     ...options.operationRegistry,
   });
 
@@ -141,7 +151,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       requestRestart: () => {
         const result = runtimeController.requestRestart(() => {
           try {
-            loadSecureSettings(paths.settingsFile);
+            loadSecureSettings(paths);
             return undefined;
           } catch (error) {
             if (error instanceof ConfigurationError) {
@@ -167,7 +177,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const runtimeTask = (async () => {
     let settings: Settings;
     try {
-      settings = loadSecureSettings(paths.settingsFile);
+      settings = loadSecureSettings(paths);
     } catch (error) {
       if (!(error instanceof ConfigurationError)) throw error;
       mutable.runtimeState = 'needs_configuration';
@@ -193,7 +203,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       mutable.nextRetryAt = null;
 
       try {
-        runtime = await startRuntime(settings, runtimeController);
+        runtime = await startRuntime(settings, runtimeController, paths);
       } catch (error) {
         if (!(error instanceof SlackStartupError)) throw error;
         attempt += 1;

@@ -10,7 +10,7 @@ Maintain a single file — \`memory/_recent.md\` — as a rolling snapshot of **
 
 All memory files live in an Obsidian vault at:
 
-\`~/.sky/workspace/memory\`  (symlink → iCloud vault)
+\`<Sky home>/workspace/memory\`  (symlink → iCloud vault)
 
 Always use this symlink path. The raw iCloud path contains spaces and is awkward in tool calls.
 
@@ -55,7 +55,7 @@ This prevents LLM's tendency to make documents grow forever.
 
 ## Input
 
-You receive new transcript content since the last run. Each transcript file is located at \`~/.sky/transcripts/<chatId>/<sessionId>.md\` and contains entries like:
+You receive new transcript content since the last run. Each transcript file is located under the selected Sky home's \`transcripts/<chatId>/<sessionId>.md\` and contains entries like:
 
 \`\`\`
 ### user (2026-04-20T07:30:00Z)

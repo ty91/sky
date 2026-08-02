@@ -2,6 +2,7 @@ import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import type { RuntimeController } from '../runtime/controller.js';
+import type { SkyHome } from '../sky-home.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { maybeHandleChatCommand, stripLeadingMentionLabel } from './commands.js';
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
@@ -41,6 +42,7 @@ export type SlackChannelHandlerOptions = {
   threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
   runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
+  skyHome?: SkyHome;
 };
 
 export type SlackChannelHandler = {
@@ -56,6 +58,7 @@ export function createSlackChannelHandler({
   threadModelStore,
   userNameResolver,
   runtimeController,
+  skyHome,
 }: SlackChannelHandlerOptions): SlackChannelHandler {
   return {
     async handleMessage({ event }) {
@@ -136,6 +139,7 @@ export function createSlackChannelHandler({
         indicator,
         reply: sender,
         runtimeController,
+        skyHome,
       });
     },
   };

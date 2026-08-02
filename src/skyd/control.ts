@@ -1,6 +1,7 @@
-import { chmodSync, lstatSync, rmSync } from 'node:fs';
+import { lstatSync, rmSync } from 'node:fs';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import net from 'node:net';
+import { ensurePrivateSocket } from '../sky-home.js';
 import { LogCursorNotFoundError, type JsonlLogger, type LogRecord } from './logger.js';
 import type {
   OperationEvent,
@@ -331,17 +332,7 @@ async function handleRequest(
 }
 
 async function prepareSocket(socketFile: string): Promise<void> {
-  let stats;
-  try {
-    stats = lstatSync(socketFile);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return;
-    throw error;
-  }
-
-  if (!stats.isSocket()) {
-    throw new Error(`Refusing to replace a non-socket path at ${socketFile}.`);
-  }
+  if (!ensurePrivateSocket(socketFile)) return;
   if (await probeSocket(socketFile)) {
     throw new DaemonAlreadyRunningError(socketFile);
   }
@@ -378,9 +369,9 @@ export async function startControlServer(
 
   let listeningIdentity: string;
   try {
+    ensurePrivateSocket(socketFile);
     const listeningStats = lstatSync(socketFile);
     listeningIdentity = `${listeningStats.dev}:${listeningStats.ino}`;
-    chmodSync(socketFile, 0o600);
   } catch (error) {
     await closeHttpServer(server);
     rmSync(socketFile, { force: true });

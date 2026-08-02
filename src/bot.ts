@@ -19,6 +19,7 @@ import {
   type SlackUploadV2Client,
 } from './slack/files.js';
 import type { Settings } from './settings.js';
+import { createSkyHome, type SkyHome } from './sky-home.js';
 
 export class SlackStartupError extends Error {
   constructor(cause: unknown) {
@@ -77,6 +78,7 @@ export function createSlackFileUploaderProvider(
 export async function startBotRuntime(
   settings: Settings,
   runtimeController: RuntimeController,
+  skyHome: SkyHome = createSkyHome(),
 ): Promise<BotRuntime> {
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
@@ -87,7 +89,7 @@ export async function startBotRuntime(
     claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
   });
 
-  const scheduledJobStore = openScheduledJobStore();
+  const scheduledJobStore = openScheduledJobStore(skyHome);
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
   let scheduledJobScheduler: ScheduledJobScheduler | undefined;
 
@@ -103,8 +105,8 @@ export async function startBotRuntime(
     scheduledJobStore,
   });
 
-  const conversationStore = openConversationStore();
-  const threadModelStore = openThreadModelStore();
+  const conversationStore = openConversationStore(skyHome);
+  const threadModelStore = openThreadModelStore(skyHome);
 
   const conversationManager: ConversationManager = createConversationManager({
     defaultCwd: settings.workspace,
@@ -139,6 +141,7 @@ export async function startBotRuntime(
         mainAgent,
         threadModelStore,
         runtimeController,
+        skyHome,
       });
     } catch (error) {
       throw new SlackStartupError(error);

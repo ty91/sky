@@ -123,3 +123,21 @@ test('logs --follow reconnects with its last cursor after daemon replacement', a
     await rm(homeDir, { recursive: true, force: true });
   }
 });
+
+test('logs uses the same absolute SKY_HOME override as the daemon', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-logs-override-'));
+  const rootDir = path.join(homeDir, 'private-sky');
+  const env = { ...process.env, HOME: homeDir, SKY_HOME: rootDir };
+  const daemon = await startSkyd({ rootDir });
+  try {
+    const result = await runCli(['logs', '--json'], env);
+    assert.equal(result.stderr, '');
+    const records = result.stdout.trim().split('\n').map((line) => JSON.parse(line));
+    assert.ok(
+      records.some((record) => record.cursor.startsWith(`${daemon.status().instanceId}:`)),
+    );
+  } finally {
+    await daemon.close();
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});

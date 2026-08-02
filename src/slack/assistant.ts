@@ -3,6 +3,7 @@ import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import type { RuntimeController } from '../runtime/controller.js';
+import type { SkyHome } from '../sky-home.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
 import { maybeHandleChatCommand } from './commands.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
@@ -17,6 +18,7 @@ export type SlackAssistantOptions = {
   threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
   runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
+  skyHome?: SkyHome;
 };
 
 export const DEFAULT_SUGGESTED_PROMPTS = [
@@ -32,6 +34,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
     threadModelStore,
     userNameResolver,
     runtimeController,
+    skyHome,
   } = options;
 
   return {
@@ -124,6 +127,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
         indicator,
         reply: sender,
         runtimeController,
+        skyHome,
       });
     },
   };

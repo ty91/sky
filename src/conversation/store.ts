@@ -1,10 +1,12 @@
-import { mkdirSync } from 'node:fs';
-import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { SKY_DIR } from '../settings.js';
+import {
+  createSkyHome,
+  prepareSqliteDatabase,
+  secureSqliteFiles,
+  type SkyHome,
+} from '../sky-home.js';
 import type { ConversationStore, PersistedConversation } from './types.js';
 
-const DEFAULT_DB_PATH = path.join(SKY_DIR, 'sky.db');
 const CONVERSATION_SCHEMA_VERSION = '4';
 
 type StoreHandles = {
@@ -135,13 +137,14 @@ function ensureSchema(db: DatabaseSync): void {
   }
 }
 
-export function openConversationStore(dbPath: string = DEFAULT_DB_PATH): ConversationStore {
-  if (dbPath !== ':memory:') {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
-  }
+export function openConversationStore(
+  location: string | SkyHome = createSkyHome(),
+): ConversationStore {
+  const dbPath = prepareSqliteDatabase(location);
 
   const db = new DatabaseSync(dbPath);
   ensureSchema(db);
+  if (dbPath !== ':memory:') secureSqliteFiles(dbPath);
 
   const handles: StoreHandles = {
     db,

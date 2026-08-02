@@ -9,16 +9,16 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - public/private Slack 채널에서는 Sky를 한 번 멘션하면 해당 Slack thread에서 backend conversation이 시작됩니다.
 - 저장된 conversation이 있는 채널 thread는 이후 멘션 없이도 같은 backend session으로 이어집니다.
 - 채널 thread 중간에서 Sky를 처음 멘션하면 이전 thread 메시지가 첫 요청 앞에 포함됩니다.
-- `~/.sky/settings.json`의 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 system prompt로 넣습니다.
+- Sky home의 `settings.json`에 지정된 `workspace` 아래 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 system prompt로 넣습니다.
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 macOS LaunchAgent 상태와 daemon control 상태를 함께 보여주며 자동화를 위한 `--json`을 제공합니다.
-- `skyd`는 foreground daemon으로 실행되며 `~/.sky/run/skyd.sock`의 HTTP/JSON control interface를 제공합니다.
+- `skyd`는 foreground daemon으로 실행되며 Sky home의 `run/skyd.sock`에 HTTP/JSON control interface를 제공합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
 - `memory`와 `dream`은 daemon operation으로 실행되며 CLI를 끊어도 계속 진행됩니다.
 - structured JSONL log는 control interface에서 history와 live stream으로 제공되고, `sky logs --follow`는 daemon 교체 뒤에도 cursor로 이어집니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
 - main agent는 `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 one-shot 리마인더를 관리하고 예정 시각에 먼저 Slack DM을 보낼 수 있습니다.
-- 에이전트 작업 디렉토리(`cwd`)는 기본적으로 `~/.sky/workspace`로 고정됩니다.
+- 에이전트 작업 디렉토리(`cwd`)는 기본적으로 Sky home의 `workspace`로 고정됩니다.
 
 ## 준비물
 
@@ -74,20 +74,36 @@ mise install
 mise exec -- pnpm install --frozen-lockfile
 ```
 
+## Sky home과 private filesystem
+
+Sky가 소유하는 settings, secret store, control socket, log, SQLite DB, transcript, memory cursor와 기본 workspace는 하나의 **Sky home** 아래에 있습니다. 기본 root는 `~/.sky`입니다.
+
+다른 root를 사용하려면 비어 있지 않은 절대경로를 `SKY_HOME`에 지정합니다. 상대경로, 빈 값과 NUL 문자를 포함한 값은 configuration error로 거부됩니다.
+
+```bash
+SKY_HOME=/Volumes/private/sky sky service install
+```
+
+`sky service install`은 override를 LaunchAgent plist에 기록하므로 daemon도 같은 root를 사용합니다. 기본 root를 사용할 때는 plist에 `SKY_HOME`을 추가하지 않습니다. Override는 기존 `~/.sky`를 이동하거나 합치는 기능이 아니라 별도의 Sky home을 선택하는 기능이므로, 기존 data는 자동으로 복사되지 않습니다.
+
+`SKY_HOME`을 사용해도 LaunchAgent label은 `com.ty91.skyd`로 유지되며 사용자당 active daemon은 하나뿐입니다. Named profile과 여러 daemon의 동시 실행은 지원하지 않습니다. Root를 바꿀 때는 새 환경값으로 `sky service install`을 다시 실행해 plist를 reconcile해야 합니다.
+
+Sky가 만드는 directory는 `0700`, settings·secret·DB와 WAL/SHM·cursor·transcript·log는 `0600`으로 유지됩니다. 기존 managed entry는 현재 사용자 소유의 실제 directory 또는 regular file인 경우에만 권한을 교정합니다. Symlink, 다른 사용자 소유 entry와 예상 타입이 다른 entry는 따라가거나 수정하지 않습니다. Settings에서 외부 `workspace`를 지정한 경우 그 directory 전체를 재귀적으로 chmod하지 않습니다.
+
 ## 에이전트 백엔드와 인증 방식
 
-Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend를 선택합니다.
+Sky는 Sky home의 `settings.json`에 있는 `agentBackend` 값으로 에이전트 backend를 선택합니다.
 
 - `pi`: 기본값입니다. Pi coding agent SDK를 직접 사용하며, 모델 인증과 provider 선택은 Pi model registry와 AuthStorage를 따릅니다.
 - `claude-agent-sdk`: Claude Agent SDK를 사용합니다. `claudeAgentSdk.oauthToken`을 설정하거나 daemon 환경에 `CLAUDE_CODE_OAUTH_TOKEN`을 주입합니다. 명시적인 환경변수가 있으면 우선합니다. Sky는 SDK 호출 환경에서 `ANTHROPIC_API_KEY`를 제거하고 OAuth token을 전달합니다.
 
-`~/.sky/settings.json`의 `model` 값은 `<provider>/<model>` 형식이어야 합니다. 예를 들어 `anthropic/claude-opus-4-7`처럼 provider와 model id를 함께 지정합니다. Pi backend는 이 값을 Pi model registry에서 찾고, Claude Agent SDK backend는 `anthropic/` provider를 제거한 model id를 SDK에 전달합니다.
+Sky home의 `settings.json`에 있는 `model` 값은 `<provider>/<model>` 형식이어야 합니다. 예를 들어 `anthropic/claude-opus-4-7`처럼 provider와 model id를 함께 지정합니다. Pi backend는 이 값을 Pi model registry에서 찾고, Claude Agent SDK backend는 `anthropic/` provider를 제거한 model id를 SDK에 전달합니다.
 
 인증이 없거나 모델 이름을 backend가 찾지 못하면 session 생성 단계의 model/auth 오류가 그대로 보고됩니다. 먼저 선택한 backend의 로컬 인증 상태와 모델 이름을 확인하세요.
 
 ## 설정
 
-`~/.sky/settings.json` 을 만듭니다:
+Sky home에 `settings.json`을 만듭니다. Override가 없다면 경로는 `~/.sky/settings.json`입니다.
 
 ```json
 {
@@ -100,8 +116,7 @@ Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend�
   "claudeAgentSdk": {
     "oauthToken": "your-claude-code-oauth-token"
   },
-  "effort": "xhigh",
-  "workspace": "/Users/taeyoung/.sky/workspace"
+  "effort": "xhigh"
 }
 ```
 
@@ -111,7 +126,7 @@ Sky는 `~/.sky/settings.json`의 `agentBackend` 값으로 에이전트 backend�
 - `agentBackend`: 선택. 기본값 `pi`. `pi` 또는 `claude-agent-sdk`를 지정합니다.
 - `claudeAgentSdk.oauthToken`: `claude-agent-sdk` backend용 선택 credential입니다. status와 structured log에는 노출되지 않습니다.
 - `effort`: 선택. `medium`, `high`, `xhigh` 중 하나입니다. 생략하면 backend 기본값을 사용합니다.
-- `workspace`: 선택. 기본값 `~/.sky/workspace`. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
+- `workspace`: 선택. 기본값은 선택한 Sky home의 `workspace`입니다. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
 - `slack` 설정은 필수입니다.
 
 ## 실행
@@ -186,7 +201,7 @@ skyd --foreground
 
 ```bash
 skyd --foreground
-curl --unix-socket ~/.sky/run/skyd.sock http://localhost/status
+curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/status
 ```
 
 설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.
@@ -223,7 +238,7 @@ sky logs --cursor <cursor> --limit 500
 
 daemon이 살아 있으면 CLI는 `GET /logs` history와 `GET /logs/stream` live stream을 사용합니다. 각 app log record의 cursor는 daemon instance ID와 process-local sequence로 구성됩니다. follow stream이 끊기고 LaunchAgent job이 계속 loaded 상태면 마지막 cursor로 새 control socket에 재접속합니다. job이 unload되면 rotation archive까지 마지막 record를 읽고 종료합니다.
 
-daemon control socket에 연결할 수 없으면 `~/.sky/logs/skyd.jsonl`과 최대 5개 archive, `~/.sky/logs/launchd.stderr.log`를 read-only fallback으로 조회합니다. `--json`은 record 하나당 JSON 한 줄을 출력합니다. 외부 `tail` process는 사용하지 않습니다.
+daemon control socket에 연결할 수 없으면 Sky home의 `logs/skyd.jsonl`과 최대 5개 archive, `logs/launchd.stderr.log`를 read-only fallback으로 조회합니다. `--json`은 record 하나당 JSON 한 줄을 출력합니다. 외부 `tail` process는 사용하지 않습니다.
 
 ## Package 검증과 release
 
@@ -255,15 +270,15 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
   - control socket 도달 여부와 daemon runtime/Slack 상태
   - daemon이 보고하는 product version, model과 agent backend
 - `sky start`, `sky stop`, `sky status`, `sky service install`, `sky service uninstall`은 안정적인 JSON 결과를 위한 `--json`을 지원합니다.
-- LaunchAgent plist에는 `HOME`과 Node wrapper 실행에 필요한 최소 `PATH`만 들어가며 Slack/Claude/provider credential은 복사하지 않습니다.
+- LaunchAgent plist에는 `HOME`, Node wrapper 실행에 필요한 최소 `PATH`, override 사용 시 `SKY_HOME`만 들어가며 Slack/Claude/provider credential은 복사하지 않습니다.
 - 이전 PID 기반 daemon이 발견되면 `sky service install`은 command가 실제 `@ty91/sky`의 `dist/bot.js`인지 확인한 뒤에만 `SIGTERM`을 보냅니다. 20초 안에 끝나지 않아도 자동으로 `SIGKILL`하지 않습니다.
-- 기존 `~/.sky/sky.log`는 migration 시 `~/.sky/logs/legacy-sky.log`로 한 번만 이동됩니다.
-- `skyd` structured app log는 `~/.sky/logs/skyd.jsonl`에 기록되며 10 MiB 단위, archive 5개로 rotation됩니다.
-- LaunchAgent가 daemon entrypoint를 시작하지 못한 오류는 `~/.sky/logs/launchd.stderr.log`에 남으며 daemon down 상태의 `sky logs` fallback에 포함됩니다.
+- 기존 Sky home의 `sky.log`는 migration 시 `logs/legacy-sky.log`로 한 번만 이동됩니다.
+- `skyd` structured app log는 Sky home의 `logs/skyd.jsonl`에 기록되며 10 MiB 단위, archive 5개로 rotation됩니다.
+- LaunchAgent가 daemon entrypoint를 시작하지 못한 오류는 Sky home의 `logs/launchd.stderr.log`에 남으며 daemon down 상태의 `sky logs` fallback에 포함됩니다.
 - structured app log에는 Slack message, agent prompt, token을 기록하지 않고 operation 종류/상태와 안전한 daemon 진단만 기록합니다.
-- `~/.sky`, `~/.sky/run`, `~/.sky/logs`는 `0700`, control socket과 settings/log 파일은 `0600` 권한을 사용합니다.
-- Conversation resume 매핑은 `~/.sky/sky.db`에 저장됩니다.
-- 예약된 리마인더도 같은 `~/.sky/sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
+- Sky home root와 `run`, `logs`, `transcripts`, 새 기본 `workspace`는 `0700`, control socket과 managed file은 `0600` 권한을 사용합니다.
+- Conversation resume 매핑은 Sky home의 `sky.db`에 저장됩니다.
+- 예약된 리마인더도 같은 `sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
 - 리마인더 실행이 실패하면 60초 간격으로 최대 3회 시도한 뒤 실패 알림을 보냅니다.
 - 봇이 꺼져 있는 동안 예정 시각이 지난 리마인더는 재시작 후 catch-up하지 않고 건너뜁니다.
 - 저장 record에는 backend, session id, resume reference, agent 이름, model이 들어갑니다.
@@ -284,7 +299,7 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
 - Slack agent Messages 탭에서는 루트 DM을 보내면 해당 메시지의 Slack thread로 새 backend session이 시작됩니다.
 - 같은 Slack thread에 이어서 메시지를 보내면 같은 backend session으로 이어집니다.
 - public/private 채널에서는 루트 메시지 또는 thread reply에서 Sky를 멘션하면 해당 Slack thread에 답변합니다.
-- Conversation이 `~/.sky/sky.db`에 저장된 채널 thread는 멘션 없는 후속 reply도 같은 session으로 처리합니다.
+- Conversation이 Sky home의 `sky.db`에 저장된 채널 thread는 멘션 없는 후속 reply도 같은 session으로 처리합니다.
 - 채널 thread에서 처음 Sky를 멘션한 요청에는 해당 멘션 이전의 Slack thread history가 함께 전달됩니다.
 
 ### 채팅 명령어
@@ -300,4 +315,4 @@ tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스
 - 대화가 이미 시작된 thread에서는 backend session의 모델을 바꿀 수 없으므로 `!model`이 거부됩니다.
 - 채널에서는 멘션이 필요하므로 `@sky !model fable` 형태로 보냅니다.
 - 알 수 없는 명령어(`!foo`)는 에이전트로 전달되지 않고 usage 안내로 응답합니다.
-- thread별 모델은 `~/.sky/sky.db`의 `thread_models` 테이블에 저장되며, 재시작 이후의 예약 리마인더/후속 턴에도 동일하게 적용됩니다.
+- thread별 모델은 Sky home의 `sky.db`에 있는 `thread_models` 테이블에 저장되며, 재시작 이후의 예약 리마인더/후속 턴에도 동일하게 적용됩니다.

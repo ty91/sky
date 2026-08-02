@@ -1,8 +1,12 @@
-import { mkdirSync, appendFileSync } from 'node:fs';
-import path from 'node:path';
-import { SKY_DIR } from '../../settings.js';
-
-const TRANSCRIPTS_DIR = path.join(SKY_DIR, 'transcripts');
+import { appendFileSync } from 'node:fs';
+import {
+  createSkyHome,
+  ensurePrivateDirectory,
+  ensurePrivateFile,
+  transcriptDirectory,
+  transcriptFile,
+  type SkyHome,
+} from '../../sky-home.js';
 
 type BufferedEntry = { role: 'user' | 'assistant'; text: string; timestamp: string };
 
@@ -14,18 +18,16 @@ function formatEntry(entry: BufferedEntry): string {
   return `### ${entry.role} (${entry.timestamp})\n\n${entry.text}\n\n`;
 }
 
-function ensureDir(dir: string): void {
-  mkdirSync(dir, { recursive: true });
-}
-
 export class TranscriptWriter {
   private readonly chatId: string;
+  private readonly skyHome: SkyHome;
   private sessionId: string | undefined;
   private readonly buffer: BufferedEntry[] = [];
   private flushed = false;
 
-  constructor(chatId: string) {
+  constructor(chatId: string, skyHome: SkyHome = createSkyHome()) {
     this.chatId = chatId;
+    this.skyHome = skyHome;
   }
 
   setSessionId(sessionId: string): void {
@@ -61,10 +63,13 @@ export class TranscriptWriter {
   }
 
   private writeToFile(content: string): void {
-    const dir = path.join(TRANSCRIPTS_DIR, this.chatId);
-    ensureDir(dir);
+    const dir = transcriptDirectory(this.skyHome, this.chatId);
+    ensurePrivateDirectory(this.skyHome.transcriptsDir);
+    ensurePrivateDirectory(dir);
 
-    const filePath = path.join(dir, `${this.sessionId}.md`);
-    appendFileSync(filePath, content, 'utf8');
+    const filePath = transcriptFile(this.skyHome, this.chatId, this.sessionId ?? '');
+    ensurePrivateFile(filePath);
+    appendFileSync(filePath, content, { encoding: 'utf8', mode: 0o600 });
+    ensurePrivateFile(filePath);
   }
 }

@@ -1,8 +1,10 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { SKY_DIR } from '../../settings.js';
-
-const TRANSCRIPTS_DIR = path.join(SKY_DIR, 'transcripts');
+import {
+  createSkyHome,
+  inspectPrivateDirectory,
+  inspectPrivateFile,
+} from '../../sky-home.js';
 
 export type TranscriptEntry = {
   chatId: string;
@@ -54,7 +56,7 @@ export function parseTranscriptFile(
 }
 
 /**
- * Scan all transcript files under `~/.sky/transcripts/` and return
+ * Scan all transcript files under the selected Sky home's transcripts directory and return
  * entries whose timestamps fall in `[startUtc, endUtc)`, sorted chronologically.
  *
  * `transcriptsDir` is overrideable for tests.
@@ -62,7 +64,7 @@ export function parseTranscriptFile(
 export function extractEntriesInRange(
   startUtc: Date,
   endUtc: Date,
-  transcriptsDir: string = TRANSCRIPTS_DIR,
+  transcriptsDir: string = createSkyHome().transcriptsDir,
 ): TranscriptEntry[] {
   let chatDirs: string[];
   try {
@@ -75,12 +77,7 @@ export function extractEntriesInRange(
 
   for (const chatId of chatDirs) {
     const chatPath = path.join(transcriptsDir, chatId);
-    try {
-      const st = statSync(chatPath);
-      if (!st.isDirectory()) continue;
-    } catch {
-      continue;
-    }
+    if (!inspectPrivateDirectory(chatPath)) continue;
 
     let files: string[];
     try {
@@ -92,6 +89,7 @@ export function extractEntriesInRange(
     for (const file of files) {
       const sessionId = file.replace(/\.md$/, '');
       const absolute = path.join(chatPath, file);
+      if (!inspectPrivateFile(absolute)) continue;
       let contents: string;
       try {
         contents = readFileSync(absolute, 'utf8');
