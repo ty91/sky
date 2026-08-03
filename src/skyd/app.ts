@@ -47,6 +47,7 @@ import {
   createConnections,
   type ConnectionsOptions,
 } from '../connections.js';
+import { inspectLaunchAgent, type LaunchdStatus } from '../service/launch-agent.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -88,6 +89,7 @@ export type StartSkydOptions = {
       };
   connections?: Omit<ConnectionsOptions, 'homeDir'>;
   configurationEnv?: NodeJS.ProcessEnv;
+  inspectLaunchAgent?: () => LaunchdStatus | Promise<LaunchdStatus>;
 };
 
 export type Skyd = {
@@ -248,6 +250,19 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
         },
       };
     },
+    getSystem: async () => ({
+      schemaVersion: 1,
+      daemon: status(),
+      launchAgent: {
+        ...(await (options.inspectLaunchAgent?.() ??
+          inspectLaunchAgent({ skyHome: paths, homeDir: options.homeDir }))),
+        supported: process.platform === 'darwin',
+      },
+      capabilities: {
+        update: 'unsupported',
+        rollback: 'unsupported',
+      },
+    }),
     issueAdminLogin: () => {
       if (mutable.admin.state !== 'listening') throw new ControlError('admin_unavailable');
       return {

@@ -40,6 +40,9 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     token: options.botToken,
     appToken: options.appToken,
     socketMode: true,
+    // Sky performs and awaits auth.test below. Bolt's eager constructor check creates an
+    // unobserved rejecting Promise for invalid tokens before startup can enter retry mode.
+    tokenVerificationEnabled: false,
   });
 
   const userNameResolver = createCachedSlackUserNameResolver(app.client);

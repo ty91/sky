@@ -240,6 +240,36 @@ code, .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
 .management-empty h2 { margin: 14px 0 0; font-size: 1.15rem; }
 .management-empty p { margin: 7px 0 0; color: var(--muted); font-size: .8rem; }
 
+.logs-page, .system-page { max-width: 1180px; }
+.stream-state { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid #c8c7bf; color: #6f7773; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+.stream-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.stream-live { border-color: #b8d1c2; color: #2d674e; }
+.stream-live i { background: #64a37d; box-shadow: 0 0 0 4px rgba(100,163,125,.12); }
+.log-notice { border-color: #d7bd86; background: #fff7e4; color: #725626; }
+.log-toolbar { display: flex; align-items: end; gap: 16px; margin-bottom: 17px; padding: 16px 18px; border: 1px solid var(--line); background: var(--panel); }
+.log-toolbar label { display: grid; gap: 6px; color: #59635e; font-size: .7rem; font-weight: 700; }
+.log-toolbar select, .log-toolbar input { min-width: 160px; padding: 9px 10px; border: 1px solid #c9cec7; background: #fff; color: var(--ink); }
+.log-toolbar > span { margin-left: auto; padding-bottom: 9px; color: var(--muted); font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: .68rem; }
+.log-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); background: #18221e; color: #d8e2dc; }
+.log-list li { padding: 14px 17px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.log-list li:last-child { border-bottom: 0; }
+.log-meta { display: flex; align-items: center; gap: 11px; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: .65rem; }
+.log-meta time { color: #879991; }
+.log-meta code { color: #b5c8bf; }
+.log-level { min-width: 47px; padding: 3px 5px; border: 1px solid #52625b; color: #aebcb5; text-align: center; text-transform: uppercase; }
+.log-level.log-warn { border-color: #9c7b43; color: #e1bd73; }
+.log-level.log-error { border-color: #9d5d51; color: #ed9585; }
+.log-level.log-debug { color: #8fa4b5; }
+.log-list p { margin: 9px 0 0; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: .76rem; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+.system-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 1px solid var(--line); }
+.system-actions, .capability-panel { margin-top: 20px; }
+.system-actions > p, .capability-panel > p { max-width: 760px; color: var(--muted); font-size: .82rem; line-height: 1.65; }
+.system-actions .primary-button { width: auto; min-width: 180px; }
+.capability-row { display: flex; align-items: center; justify-content: space-between; max-width: 460px; padding: 12px 0; border-top: 1px solid #e5e3da; font-size: .8rem; }
+.capability-row:first-of-type { margin-top: 20px; }
+.capability-row code { padding: 4px 7px; background: #ecebe5; color: #68706c; font-size: .68rem; text-transform: uppercase; }
+
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 76px minmax(0, 1fr); }
   .sidebar { padding-inline: 14px; }
@@ -253,6 +283,7 @@ code, .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .connections-grid { grid-template-columns: 1fr; }
   .management-list { grid-template-columns: 1fr; }
+  .system-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -275,6 +306,9 @@ code, .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
   .restart-banner, .form-actions { align-items: stretch; flex-direction: column; }
   .confirmation-panel { align-items: stretch; flex-direction: column; }
   .confirmation-actions { justify-content: space-between; }
+  .log-toolbar { align-items: stretch; flex-direction: column; }
+  .log-toolbar > span { margin-left: 0; padding-bottom: 0; }
+  .log-toolbar select, .log-toolbar input { width: 100%; }
   .restart-banner .primary-button, .form-actions .primary-button { width: 100%; }
   .reconnect-banner { align-items: flex-start; flex-wrap: wrap; }
   .reconnect-banner .text-button { margin-left: 22px; }

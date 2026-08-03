@@ -7,6 +7,7 @@ import type { SecretName, SettingsPatch } from '../configuration.js';
 import type { ConnectionTarget } from '../connections.js';
 import type { AdminAuthentication, AuthenticatedAdminSession } from './admin-auth.js';
 import { ControlError, type DaemonControl } from './control.js';
+import type { LogRecord } from './logger.js';
 
 export const DEFAULT_ADMIN_HOST = '0.0.0.0';
 export const DEFAULT_ADMIN_PORT = 4815;
@@ -218,6 +219,44 @@ function requireMutationProtection(
   return true;
 }
 
+async function streamLogEvents(
+  response: ServerResponse,
+  control: DaemonControl,
+  cursor?: string,
+): Promise<void> {
+  const abortController = new AbortController();
+  const close = () => abortController.abort();
+  response.once('close', close);
+  let heartbeat: NodeJS.Timeout | undefined;
+  try {
+    const stream = control.subscribe({
+      type: 'logs.stream',
+      cursor,
+      signal: abortController.signal,
+    });
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-store',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    response.write(': connected\n\n');
+    heartbeat = setInterval(() => {
+      if (!response.destroyed) response.write(': keep-alive\n\n');
+    }, 15_000);
+    heartbeat.unref();
+    for await (const record of stream) {
+      const event = record as LogRecord;
+      response.write(`id: ${event.cursor}\nevent: log\ndata: ${JSON.stringify(event)}\n\n`);
+    }
+    if (!response.destroyed) response.end();
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    response.removeListener('close', close);
+    abortController.abort();
+  }
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -274,6 +313,31 @@ async function handleRequest(
   if (url.pathname === '/api/overview') {
     if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
     writeJson(response, 200, await control.execute({ type: 'overview' }));
+    return;
+  }
+
+  if (url.pathname === '/api/system') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    writeJson(response, 200, await control.execute({ type: 'system.get' }));
+    return;
+  }
+
+  if (url.pathname === '/api/logs' || url.pathname === '/api/logs/stream') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    const cursor =
+      url.pathname === '/api/logs/stream' && typeof request.headers['last-event-id'] === 'string'
+        ? request.headers['last-event-id']
+        : (url.searchParams.get('cursor') ?? undefined);
+    if (url.pathname === '/api/logs') {
+      const limit = Number(url.searchParams.get('limit') ?? '200');
+      writeJson(
+        response,
+        200,
+        await control.execute({ type: 'logs.history', cursor, limit }),
+      );
+      return;
+    }
+    await streamLogEvents(response, control, cursor);
     return;
   }
 

@@ -22,7 +22,7 @@ import type {
   OperationRegistry,
   OperationRequest,
 } from './operations.js';
-import type { AdminOverview, DaemonStatus } from './types.js';
+import type { AdminOverview, DaemonStatus, SystemSnapshot } from './types.js';
 import type { WorkspacePromptSnapshot } from '../workspace-prompts.js';
 
 export type ControlConfiguration = PublicConfiguration & {
@@ -44,6 +44,7 @@ export type AdminLoginGrant = {
 export type ControlDependencies = {
   getStatus(): DaemonStatus;
   getOverview?: () => AdminOverview | Promise<AdminOverview>;
+  getSystem?: () => SystemSnapshot | Promise<SystemSnapshot>;
   getRuntimeAdmin?: () => RuntimeAdmin | undefined;
   issueAdminLogin?: () => AdminLoginGrant;
   requestRestart?: () => ControlRestartResult;
@@ -76,6 +77,7 @@ type SecretValueBody = {
 export type ControlExecuteRequest =
   | { type: 'status' }
   | { type: 'overview' }
+  | { type: 'system.get' }
   | { type: 'sessions.list' }
   | { type: 'session.reset'; threadKey: string }
   | { type: 'scheduler.jobs.list' }
@@ -103,6 +105,8 @@ export type ControlExecuteResult<Request extends ControlExecuteRequest> =
     ? DaemonStatus
     : Request extends { type: 'overview' }
       ? AdminOverview
+      : Request extends { type: 'system.get' }
+        ? SystemSnapshot
       : Request extends { type: 'sessions.list' }
         ? RuntimeSessionsSnapshot
         : Request extends { type: 'session.reset' }
@@ -363,6 +367,9 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
           case 'overview':
             if (!dependencies.getOverview) throw new ControlError('not_found');
             return asResult<Request>(await dependencies.getOverview());
+          case 'system.get':
+            if (!dependencies.getSystem) throw new ControlError('not_found');
+            return asResult<Request>(await dependencies.getSystem());
           case 'sessions.list':
             return asResult<Request>({ sessions: await runtimeAdmin().listSessions() });
           case 'session.reset':

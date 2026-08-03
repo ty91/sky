@@ -1,4 +1,5 @@
-import type { AdminOverview } from '../../src/skyd/types';
+import type { AdminOverview, SystemSnapshot } from '../../src/skyd/types';
+import type { LogHistory } from '../../src/skyd/logger';
 import type { ControlConfiguration } from '../../src/skyd/control';
 import type { WorkspacePrompt, WorkspacePromptSnapshot } from '../../src/workspace-prompts';
 import type { ConnectionsSnapshot } from '../../src/connections';
@@ -214,5 +215,50 @@ export function scheduledJobsFixture(): RuntimeScheduledJobsSnapshot {
         errorSummary: 'The most recent run failed.',
       },
     ],
+  };
+}
+
+export function logHistoryFixture(): LogHistory {
+  return {
+    records: [
+      {
+        cursor: 'instance-1:1',
+        timestamp: '2026-08-03T00:00:00.000Z',
+        level: 'info',
+        scope: 'daemon',
+        message: 'Control interface started.',
+      },
+      {
+        cursor: 'instance-1:2',
+        timestamp: '2026-08-03T00:00:01.000Z',
+        level: 'warn',
+        scope: 'slack',
+        message: 'Slack connection will retry.',
+      },
+    ],
+    nextCursor: 'instance-1:2',
+  };
+}
+
+export function systemFixture(overrides: Partial<SystemSnapshot> = {}): SystemSnapshot {
+  return {
+    schemaVersion: 1,
+    daemon: overviewFixture().daemon,
+    launchAgent: {
+      supported: true,
+      label: 'com.ty91.skyd',
+      plistFile: '/Users/taeyoung/Library/LaunchAgents/com.ty91.skyd.plist',
+      installed: true,
+      loaded: true,
+      autostart: true,
+      state: 'running',
+      pid: 4815,
+      lastExitStatus: 0,
+    },
+    capabilities: {
+      update: 'unsupported',
+      rollback: 'unsupported',
+    },
+    ...overrides,
   };
 }

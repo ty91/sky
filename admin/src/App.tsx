@@ -18,46 +18,16 @@ import type {
   WorkspacePrompt,
   WorkspacePromptSnapshot,
 } from '../../src/workspace-prompts';
-
-type Session = {
-  csrfToken: string;
-  expiresAt: string;
-};
+import { ApiError, requestJson, type Session } from './api';
+import { LogsPage } from './LogsPage';
+import { SystemPage } from './SystemPage';
 
 type AuthenticationState =
   | { phase: 'checking' }
   | { phase: 'anonymous'; message?: string }
   | { phase: 'unreachable' }
+  | { phase: 'restarting' }
   | { phase: 'authenticated'; session: Session };
-
-class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly details: Record<string, unknown> = {},
-  ) {
-    super(`Admin request failed with status ${status}.`);
-  }
-}
-
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      accept: 'application/json',
-      ...init?.headers,
-    },
-  });
-  const payload = (await response.json().catch(() => undefined)) as unknown;
-  if (!response.ok) {
-    const details =
-      payload && typeof payload === 'object' && 'error' in payload
-        ? (payload.error as Record<string, unknown>)
-        : {};
-    throw new ApiError(response.status, details);
-  }
-  return payload as T;
-}
 
 function takeFragmentToken(): string | undefined {
   const parameters = new URLSearchParams(window.location.hash.slice(1));
@@ -153,6 +123,23 @@ function ConnectionUnavailable({ onRetry }: { onRetry(): void }) {
   );
 }
 
+function RestartAccepted({ onContinue }: { onContinue(): void }) {
+  return (
+    <main className="login-page">
+      <div className="login-glow" aria-hidden="true" />
+      <section className="login-card connection-card" role="status" aria-label="Restart accepted">
+        <div className="brand-mark" aria-hidden="true">S</div>
+        <p className="eyebrow">Graceful restart accepted</p>
+        <h1>Sky is replacing the daemon</h1>
+        <p className="login-intro">
+          A short connection loss is expected. The replacement daemon rejects this session; run <code>sky admin --no-open</code> for a new one-time token.
+        </p>
+        <button className="primary-button" type="button" onClick={onContinue}>Sign in with a new token</button>
+      </section>
+    </main>
+  );
+}
+
 const navigation = [
   ['/', 'Dashboard'],
   ['/connections', 'Connections'],
@@ -166,9 +153,11 @@ const navigation = [
 function Shell({
   session,
   onSessionExpired,
+  onRestartAccepted,
 }: {
   session: Session;
   onSessionExpired(): void;
+  onRestartAccepted(): void;
 }) {
   return (
     <div className="app-shell">
@@ -207,6 +196,7 @@ function Shell({
               <ConnectionsPage
                 session={session}
                 onSessionExpired={onSessionExpired}
+                onRestartAccepted={onRestartAccepted}
               />
             }
           />
@@ -216,6 +206,7 @@ function Shell({
               <Agent
                 session={session}
                 onSessionExpired={onSessionExpired}
+                onRestartAccepted={onRestartAccepted}
               />
             }
           />
@@ -231,9 +222,8 @@ function Shell({
               <SchedulerPage session={session} onSessionExpired={onSessionExpired} />
             }
           />
-          {navigation.filter(([path]) => !['/', '/connections', '/agent', '/sessions', '/scheduler'].includes(path)).map(([path, label]) => (
-            <Route key={path} path={path} element={<Placeholder title={label} />} />
-          ))}
+          <Route path="/logs" element={<LogsPage onSessionExpired={onSessionExpired} />} />
+          <Route path="/system" element={<SystemPage session={session} onSessionExpired={onSessionExpired} onRestartAccepted={onRestartAccepted} />} />
           <Route path="*" element={<Dashboard onSessionExpired={onSessionExpired} />} />
         </Routes>
       </main>
@@ -329,9 +319,11 @@ function ConnectionsHeader() {
 function ConnectionsPage({
   session,
   onSessionExpired,
+  onRestartAccepted,
 }: {
   session: Session;
   onSessionExpired(): void;
+  onRestartAccepted(): void;
 }) {
   const [configuration, setConfiguration] = useState<ControlConfiguration>();
   const [connections, setConnections] = useState<ConnectionsSnapshot>();
@@ -459,7 +451,7 @@ function ConnectionsPage({
         method: 'POST',
         headers: { 'x-sky-csrf-token': session.csrfToken },
       });
-      setMessage({ tone: 'success', text: 'Graceful restart requested. Sign in again after the daemon returns.' });
+      onRestartAccepted();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onSessionExpired();
@@ -628,9 +620,11 @@ function conflictConfiguration(error: ApiError): ControlConfiguration | undefine
 function Agent({
   session,
   onSessionExpired,
+  onRestartAccepted,
 }: {
   session: Session;
   onSessionExpired(): void;
+  onRestartAccepted(): void;
 }) {
   const [configuration, setConfiguration] = useState<ControlConfiguration>();
   const [promptSnapshot, setPromptSnapshot] = useState<WorkspacePromptSnapshot>();
@@ -752,10 +746,7 @@ function Agent({
         method: 'POST',
         headers: { 'x-sky-csrf-token': session.csrfToken },
       });
-      setAction({
-        phase: 'idle',
-        message: 'Graceful restart requested. Sign in again after the daemon returns.',
-      });
+      onRestartAccepted();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         onSessionExpired();
@@ -912,19 +903,6 @@ function PromptCard({ prompt }: { prompt: WorkspacePrompt }) {
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(bytes % 1024 === 0 ? 0 : 1)} KiB`;
-}
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="page placeholder-page">
-      <p className="eyebrow">Sky admin</p>
-      <h1>{title}</h1>
-      <div className="placeholder-panel">
-        <span>Coming in the next admin slice</span>
-        <p>This area is wired into the application shell and ready for its management workflow.</p>
-      </div>
-    </div>
-  );
 }
 
 function ManagementHeader({
@@ -1451,7 +1429,10 @@ function AdminApp() {
   if (authentication.phase === 'unreachable') {
     return <ConnectionUnavailable onRetry={() => void authenticate()} />;
   }
-  return <Shell session={authentication.session} onSessionExpired={() => setAuthentication({ phase: 'anonymous', message: 'Your admin session expired. Sign in again.' })} />;
+  if (authentication.phase === 'restarting') {
+    return <RestartAccepted onContinue={() => setAuthentication({ phase: 'anonymous', message: 'The daemon was restarted. Sign in with a new token.' })} />;
+  }
+  return <Shell session={authentication.session} onSessionExpired={() => setAuthentication({ phase: 'anonymous', message: 'Your admin session expired. Sign in again.' })} onRestartAccepted={() => setAuthentication({ phase: 'restarting' })} />;
 }
 
 export function App() {

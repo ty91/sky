@@ -131,6 +131,7 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
     assert.equal(installedJson.ok, true);
     assert.equal(installedJson.changed, true);
     assert.equal(installedJson.status.control.status.runtime.state, 'ready');
+    assert.equal(installedJson.status.launchd.autostart, true);
 
     const plist = await parsePlist(context.plistFile);
     assert.deepEqual(Object.keys(plist).toSorted(), [
@@ -215,6 +216,7 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
 
     const uninstalled = await runCli(['service', 'uninstall', '--json'], context.env);
     assert.equal(uninstalled.code, 0, uninstalled.stderr || uninstalled.stdout);
+    assert.equal(JSON.parse(uninstalled.stdout).status.launchd.autostart, false);
     await assert.rejects(stat(context.plistFile), { code: 'ENOENT' });
     assert.equal(await readFile(settingsFile, 'utf8'), '{"preserved":true}\n');
   } finally {

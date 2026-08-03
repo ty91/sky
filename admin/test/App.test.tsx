@@ -1,14 +1,16 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { App } from '../src/App';
 import {
   configurationFixture,
   connectionsFixture,
   overviewFixture,
+  logHistoryFixture,
   promptSnapshotFixture,
   scheduledJobsFixture,
+  systemFixture,
 } from './fixtures';
 import { server } from './server';
 
@@ -494,8 +496,129 @@ test('saves settings with the revision and requests a protected graceful restart
   });
 
   await user.click(screen.getByRole('button', { name: 'Graceful restart' }));
-  expect(await screen.findByText(/Graceful restart requested/)).toBeInTheDocument();
+  expect(await screen.findByRole('status', { name: 'Restart accepted' })).toHaveTextContent(
+    'replacement daemon rejects this session',
+  );
   expect(restartCsrf).toBe('csrf-token');
+});
+
+test('filters log history and resumes from a rotated cursor without duplicates', async () => {
+  const user = userEvent.setup();
+  const sources: FakeEventSource[] = [];
+  class FakeEventSource {
+    readonly listeners = new Map<string, (event: Event) => void>();
+    readonly url: string;
+
+    constructor(url: string | URL) {
+      this.url = String(url);
+      sources.push(this);
+      queueMicrotask(() => this.listeners.get('open')?.(new Event('open')));
+    }
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (typeof listener === 'function') this.listeners.set(type, listener);
+    }
+
+    close() {}
+
+    emit(record: ReturnType<typeof logHistoryFixture>['records'][number]) {
+      this.listeners.get('log')?.(
+        new MessageEvent('log', { data: JSON.stringify(record), lastEventId: record.cursor }),
+      );
+    }
+
+    fail() {
+      this.listeners.get('error')?.(new Event('error'));
+    }
+  }
+  vi.stubGlobal('EventSource', FakeEventSource);
+  let rotatedRecovery = false;
+  server.use(
+    http.get('/api/logs', ({ request }) => {
+      const cursor = new URL(request.url).searchParams.get('cursor');
+      if (cursor === 'instance-1:3' && !rotatedRecovery) {
+        rotatedRecovery = true;
+        return HttpResponse.json({ error: { code: 'log_cursor_expired' } }, { status: 410 });
+      }
+      return HttpResponse.json(logHistoryFixture());
+    }),
+  );
+  renderApp('/logs');
+
+  expect(await screen.findByText('Control interface started.')).toBeInTheDocument();
+  expect(sources[0].url).toContain('cursor=instance-1%3A2');
+  sources[0].emit({
+    cursor: 'instance-1:3',
+    timestamp: '2026-08-03T00:00:02.000Z',
+    level: 'error',
+    scope: 'admin',
+    message: 'Admin listener stopped.',
+  });
+  expect(await screen.findByText('Admin listener stopped.')).toBeInTheDocument();
+
+  await user.selectOptions(screen.getByLabelText('Level'), 'error');
+  expect(screen.queryByText('Control interface started.')).not.toBeInTheDocument();
+  expect(screen.getByText('Admin listener stopped.')).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('Level'), 'all');
+
+  sources[0].fail();
+  expect(await screen.findByText(/Older log history rotated away/)).toBeInTheDocument();
+  expect(sources).toHaveLength(2);
+  expect(screen.getAllByText('Control interface started.')).toHaveLength(1);
+});
+
+test('shows system service state, unsupported package capabilities, and restart transition', async () => {
+  const user = userEvent.setup();
+  let csrf: string | null = null;
+  server.use(
+    http.get('/api/system', () => HttpResponse.json(systemFixture({
+      daemon: {
+        ...systemFixture().daemon,
+        recentErrors: [{ code: 'slack_disconnected', at: '2026-08-03T00:01:00.000Z' }],
+      },
+    }))),
+    http.post('/api/restart', ({ request }) => {
+      csrf = request.headers.get('x-sky-csrf-token');
+      return HttpResponse.json({ accepted: true }, { status: 202 });
+    }),
+  );
+  renderApp('/system');
+
+  expect(await screen.findByRole('heading', { name: 'LaunchAgent' })).toBeInTheDocument();
+  expect(screen.getByText('0.0.0.0:4815')).toBeInTheDocument();
+  expect(screen.getByText('slack_disconnected')).toBeInTheDocument();
+  expect(screen.getAllByText('unsupported')).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: /update|rollback/i })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Graceful restart' }));
+  expect(await screen.findByRole('status', { name: 'Restart accepted' })).toBeInTheDocument();
+  expect(csrf).toBe('csrf-token');
+  await user.click(screen.getByRole('button', { name: 'Sign in with a new token' }));
+  expect(await screen.findByRole('heading', { name: 'Sign in to Sky' })).toBeInTheDocument();
+});
+
+test('shows the daemon control error when graceful restart is unavailable', async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.get('/api/system', () => HttpResponse.json(systemFixture({
+      daemon: {
+        ...systemFixture().daemon,
+        supervision: { mode: 'foreground' },
+      },
+    }))),
+    http.post('/api/restart', () => HttpResponse.json({
+      error: {
+        code: 'restart_unsupported_foreground',
+        message: 'Restart is unavailable in foreground mode because no supervisor can replace skyd.',
+      },
+    }, { status: 409 })),
+  );
+  renderApp('/system');
+
+  await user.click(await screen.findByRole('button', { name: 'Graceful restart' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Restart is unavailable in foreground mode because no supervisor can replace skyd.',
+  );
 });
 
 test('loads the latest values after a revision conflict and lets the user reapply', async () => {

@@ -3,10 +3,12 @@ import { setupServer } from 'msw/node';
 import {
   configurationFixture,
   connectionsFixture,
+  logHistoryFixture,
   overviewFixture,
   promptSnapshotFixture,
   scheduledJobsFixture,
   sessionsFixture,
+  systemFixture,
 } from './fixtures';
 
 export const handlers = [
@@ -23,6 +25,8 @@ export const handlers = [
     }),
   ),
   http.get('/api/overview', () => HttpResponse.json(overviewFixture())),
+  http.get('/api/system', () => HttpResponse.json(systemFixture())),
+  http.get('/api/logs', () => HttpResponse.json(logHistoryFixture())),
   http.get('/api/configuration', () => HttpResponse.json(configurationFixture())),
   http.get('/api/connections', () => HttpResponse.json(connectionsFixture())),
   http.post('/api/connections/check', () => HttpResponse.json(connectionsFixture())),

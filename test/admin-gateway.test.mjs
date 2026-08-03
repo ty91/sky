@@ -49,12 +49,57 @@ function tcpRequest(port, method, requestPath, options = {}) {
   });
 }
 
+function firstSseEvent(port, requestPath, options = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        method: 'GET',
+        path: requestPath,
+        headers: options.headers,
+      },
+      (response) => {
+        response.setEncoding('utf8');
+        let body = '';
+        response.on('data', (chunk) => {
+          body += chunk;
+          for (const block of body.split('\n\n')) {
+            if (!block.includes('event: log')) continue;
+            const id = block.match(/^id: (.+)$/m)?.[1];
+            const data = block.match(/^data: (.+)$/m)?.[1];
+            if (!id || !data) continue;
+            resolve({ statusCode: response.statusCode, headers: response.headers, id, data });
+            request.destroy();
+            return;
+          }
+        });
+        response.on('end', () => reject(new Error(`SSE ended before a log event: ${body}`)));
+      },
+    );
+    request.once('error', (error) => {
+      if (error.code !== 'ECONNRESET') reject(error);
+    });
+    request.end();
+  });
+}
+
 test('admin login exchanges a UDS-issued token for an authenticated TCP session', async () => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-admin-gateway-'));
   const daemon = await startSkyd({
     homeDir,
     productVersion: 'admin-test',
     admin: { host: '127.0.0.1', port: 0 },
+    inspectLaunchAgent: async () => ({
+      label: 'com.ty91.skyd',
+      plistFile: '/Users/test/Library/LaunchAgents/com.ty91.skyd.plist',
+      installed: true,
+      loaded: true,
+      autostart: true,
+      state: 'running',
+      pid: process.pid,
+      lastExitStatus: 0,
+    }),
   });
   try {
     const scheduler = openScheduledJobStore(daemon.paths);
@@ -165,6 +210,70 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
       failed: 0,
       nextRunAt: '2026-08-04T02:00:00.000Z',
     });
+
+    const systemResponse = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/system', {
+      headers: { cookie },
+    });
+    assert.equal(systemResponse.statusCode, 200, systemResponse.body);
+    const system = JSON.parse(systemResponse.body);
+    assert.equal(system.schemaVersion, 1);
+    assert.equal(system.daemon.productVersion, 'admin-test');
+    assert.deepEqual(
+      {
+        installed: system.launchAgent.installed,
+        loaded: system.launchAgent.loaded,
+        autostart: system.launchAgent.autostart,
+      },
+      { installed: true, loaded: true, autostart: true },
+    );
+    assert.deepEqual(system.capabilities, {
+      update: 'unsupported',
+      rollback: 'unsupported',
+    });
+
+    const logHistoryResponse = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/logs?limit=100',
+      { headers: { cookie } },
+    );
+    assert.equal(logHistoryResponse.statusCode, 200, logHistoryResponse.body);
+    const logHistory = JSON.parse(logHistoryResponse.body);
+    assert.ok(logHistory.records.length >= 2);
+    const firstCursor = logHistory.records[0].cursor;
+    const nextHistoryResponse = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      `/api/logs?cursor=${encodeURIComponent(firstCursor)}&limit=100`,
+      { headers: { cookie } },
+    );
+    const nextHistory = JSON.parse(nextHistoryResponse.body);
+    assert.equal(nextHistoryResponse.statusCode, 200, nextHistoryResponse.body);
+    assert.deepEqual(nextHistory.records, logHistory.records.slice(1));
+
+    const streamEvent = await firstSseEvent(daemonStatus.admin.port, '/api/logs/stream', {
+      headers: { cookie, 'last-event-id': firstCursor },
+    });
+    assert.equal(streamEvent.statusCode, 200);
+    assert.match(streamEvent.headers['content-type'], /^text\/event-stream/);
+    assert.equal(streamEvent.id, logHistory.records[1].cursor);
+    assert.equal(JSON.parse(streamEvent.data).cursor, streamEvent.id);
+
+    const expiredCursor = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/logs?cursor=rotated-away&limit=100',
+      { headers: { cookie } },
+    );
+    assert.equal(expiredCursor.statusCode, 410, expiredCursor.body);
+    assert.deepEqual(JSON.parse(expiredCursor.body), { error: { code: 'log_cursor_expired' } });
+    const expiredStreamCursor = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/logs/stream?cursor=rotated-away',
+      { headers: { cookie } },
+    );
+    assert.equal(expiredStreamCursor.statusCode, 410, expiredStreamCursor.body);
 
     const authenticatedMissingApi = await tcpRequest(
       daemonStatus.admin.port,

@@ -1,4 +1,5 @@
 import type { DiagnosticsReport } from '../diagnostics.js';
+import type { LaunchdStatus } from '../service/launch-agent.js';
 
 export type RuntimeState =
   | 'starting'
@@ -68,5 +69,17 @@ export type AdminOverview = {
     running: number;
     failed: number;
     nextRunAt: string | null;
+  };
+};
+
+export type SystemSnapshot = {
+  schemaVersion: 1;
+  daemon: DaemonStatus;
+  launchAgent: LaunchdStatus & {
+    supported: boolean;
+  };
+  capabilities: {
+    update: 'unsupported';
+    rollback: 'unsupported';
   };
 };

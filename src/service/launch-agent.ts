@@ -55,6 +55,7 @@ export type LaunchdStatus = {
   plistFile: string;
   installed: boolean;
   loaded: boolean;
+  autostart: boolean;
   state: string | null;
   pid: number | null;
   lastExitStatus: number | null;
@@ -317,18 +318,33 @@ function parseNumber(output: string, field: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+function hasAutostart(plist: string | null): boolean {
+  return (
+    plist !== null &&
+    /<key>KeepAlive<\/key>\s*<true\s*\/>/.test(plist)
+  );
+}
+
 async function launchdStatus(paths: LaunchAgentPaths): Promise<LaunchdStatus> {
-  const output = await rawLaunchdPrint();
+  const output = process.platform === 'darwin' ? await rawLaunchdPrint() : null;
+  const plist = readExistingPlist(paths);
   const state = output?.match(/^\s*state\s*=\s*(.+?)\s*$/m)?.[1] ?? null;
   return {
     label: LAUNCH_AGENT_LABEL,
     plistFile: paths.plistFile,
-    installed: existsSync(paths.plistFile),
+    installed: plist !== null,
     loaded: output !== null,
+    autostart: hasAutostart(plist),
     state,
     pid: output === null ? null : parseNumber(output, 'pid'),
     lastExitStatus: output === null ? null : parseNumber(output, 'last exit code'),
   };
+}
+
+export async function inspectLaunchAgent(
+  options: { skyHome?: SkyHome; homeDir?: string } = {},
+): Promise<LaunchdStatus> {
+  return launchdStatus(launchAgentPaths(options.skyHome, options.homeDir));
 }
 
 async function controlStatus(socketFile: string): Promise<ServiceStatus['control']> {

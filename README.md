@@ -230,11 +230,17 @@ skyd --foreground
 sky admin --no-open
 ```
 
+Tailscale에서 직접 접속할 때는 출력된 hostname 대신 daemon host의 MagicDNS 이름이나 Tailscale IP를 사용할 수 있습니다. 예를 들어 `http://sky-mac:4815` 또는 `http://100.x.y.z:4815`를 연 뒤 같은 일회용 token을 입력합니다. 이 경로도 Sky 자체로는 TLS를 추가하지 않으며 평문 HTTP입니다.
+
 Admin gateway는 기본적으로 `0.0.0.0:4815`의 **평문 HTTP**로 LAN과 tailnet에 노출됩니다. 인터넷에 공개하지 마세요. Network 위치나 Tailscale header는 인증으로 취급하지 않으며, admin data는 session cookie를 요구하고 변경 요청은 같은 origin과 session-bound CSRF token을 함께 검증합니다. Cookie에는 `HttpOnly`, `SameSite=Strict`, `Path=/`가 적용되지만 평문 HTTP 지원 때문에 `Secure`는 적용되지 않습니다.
 
 Admin의 Agent 화면은 `GET /api/configuration`과 optimistic revision을 사용하는 `PATCH /api/configuration`으로 다음 실행 설정을 관리합니다. 저장은 현재 runtime을 부분 변경하지 않으며, 응답의 `restartRequired`가 참일 때 CSRF로 보호된 `POST /api/restart`로 graceful restart를 요청합니다. `GET /api/prompts`는 client path 입력 없이 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`만 읽는 read-only snapshot입니다. 각 role은 entry/symlink target 상태, byte size, 수정 시각과 최대 256 KiB의 UTF-8 content를 제공하며 모든 응답은 `no-store`입니다.
 
 Connections 화면은 credential 원문을 읽지 않고 `configured`, `source`, `updatedAt`, `displayHint` metadata만 표시합니다. 각 credential은 keep, replace, delete를 명시적으로 선택한 뒤 적용하며 replace input은 기존 값으로 채워지지 않습니다. 저장 변경은 active runtime에 즉시 섞이지 않고 `restartRequired`를 만들며, 환경의 `CLAUDE_CODE_OAUTH_TOKEN`이 effective credential이면 stored Claude token보다 우선한다는 점을 화면에 표시합니다.
+
+Logs 화면은 authenticated `GET /api/logs` history와 `GET /api/logs/stream` SSE를 사용합니다. SSE의 `id`는 structured log cursor이며 browser reconnect의 `Last-Event-ID` 또는 `cursor` query 이후부터 중복 없이 이어집니다. Rotation으로 cursor가 만료되면 `410 log_cursor_expired`를 확인하고 최신 history tail로 복구했다는 안내를 표시합니다. Level과 scope filter는 browser에 이미 전달된 safe log record에만 적용됩니다.
+
+System 화면의 `GET /api/system`은 product version, admin listener, supervision mode, LaunchAgent 설치/load/autostart 상태, 최근 daemon error와 package capability를 함께 반환합니다. Update와 rollback은 `unsupported`이며 action button이 없습니다. Graceful restart가 `202`로 수락되면 잠깐의 connection loss를 정상으로 취급하고, replacement daemon이 이전 in-memory session을 거부하므로 새 `sky admin` token으로 로그인해야 합니다.
 
 명시적 연결 검사는 저장 상태와 별도로 daemon memory에 마지막 결과만 보관합니다. Slack bot은 `auth.test` 응답 identity와 `x-oauth-scopes`를 Sky 필수 scope와 비교하고, Slack app token은 `apps.connections.open` 성공만 확인한 뒤 발급된 WebSocket URL을 즉시 버립니다. Claude Agent SDK는 prompt나 turn 없이 bounded `accountInfo()` smoke를 실행하고 subprocess를 정리하며, Pi는 `sky doctor`와 같은 local model registry·provider credential·effort compatibility 규칙을 사용합니다. timeout, rate limit, invalid credential, missing scope는 서로 다른 안정된 결과 code로 반환되며 raw credential과 Socket Mode URL은 응답이나 log에 포함되지 않습니다.
 
@@ -303,7 +309,7 @@ daemon control socket에 연결할 수 없으면 Sky home의 `logs/skyd.jsonl`�
 
 ## Package 검증과 release
 
-`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다. `pnpm test:launchd`는 GitHub-hosted macOS runner에서만 실제 LaunchAgent lifecycle을 검증하며 로컬 실행에서는 skip됩니다.
+`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin, admin asset, login bootstrap, authenticated overview, secret 비노출과 configure → connection check → restart → 새 session reconnect 흐름을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다. `pnpm test:launchd`는 GitHub-hosted macOS runner에서만 실제 LaunchAgent lifecycle을 검증하며 로컬 실행에서는 skip됩니다.
 
 ```bash
 pnpm test:package
