@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { startSkyd } from '../dist/skyd/app.js';
-import { getDaemonStatus } from '../dist/skyd/control.js';
+import { getDaemonStatus } from '../dist/skyd/control-uds.js';
 import { SlackStartupError } from '../dist/bot.js';
 import { runDiagnostics } from '../dist/diagnostics.js';
 import { openConversationStore } from '../dist/conversation/store.js';

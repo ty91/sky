@@ -14,7 +14,8 @@ import {
   prepareSkyHome,
   type SkyHome,
 } from '../sky-home.js';
-import { startControlServer, type ControlServer } from './control.js';
+import { createDaemonControl, type DaemonControl } from './control.js';
+import { startControlServer, type ControlServer } from './control-uds.js';
 import { createJsonlLogger, type JsonlLoggerOptions } from './logger.js';
 import { createMaintenanceOperationRunner } from './maintenance.js';
 import {
@@ -60,6 +61,7 @@ export type StartSkydOptions = {
 
 export type Skyd = {
   paths: SkyHome;
+  control: DaemonControl;
   status(): DaemonStatus;
   finished: Promise<void>;
   close(): Promise<void>;
@@ -159,44 +161,47 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     recentErrors: [...mutable.recentErrors],
   });
 
+  const control = createDaemonControl({
+    getStatus: status,
+    requestRestart: () => {
+      const result = runtimeController.requestRestart(() => {
+        try {
+          configuration.resolveRuntime();
+          return undefined;
+        } catch (error) {
+          if (error instanceof ConfigurationError) {
+            return { code: error.code, message: error.message };
+          }
+          throw error;
+        }
+      });
+      return result.ok
+        ? { ok: true, instanceId }
+        : { ok: false, code: result.code, message: result.message };
+    },
+    operations,
+    logger,
+    getDiagnostics: () =>
+      runDiagnostics(paths, {
+        daemonStatus: status(),
+        activeSettings,
+        homeDir: options.homeDir,
+      }),
+    configuration: {
+      get: () => controlConfiguration(configuration.inspect()),
+      patch: (expectedRevision, patch) =>
+        controlConfiguration(configuration.patch(expectedRevision, patch)),
+      setSecret: (name, value) => {
+        logger.protect([value]);
+        return controlConfiguration(configuration.setSecret(name, value));
+      },
+      deleteSecret: (name) => controlConfiguration(configuration.deleteSecret(name)),
+    },
+  });
+
   let controlServer: ControlServer;
   try {
-    controlServer = await startControlServer(paths.socketFile, status, {
-      requestRestart: () => {
-        const result = runtimeController.requestRestart(() => {
-          try {
-            configuration.resolveRuntime();
-            return undefined;
-          } catch (error) {
-            if (error instanceof ConfigurationError) {
-              return { code: error.code, message: error.message };
-            }
-            throw error;
-          }
-        });
-        return result.ok
-          ? { ok: true, instanceId }
-          : { ok: false, code: result.code, message: result.message, statusCode: 409 };
-      },
-      operations,
-      logger,
-      getDiagnostics: () =>
-        runDiagnostics(paths, {
-          daemonStatus: status(),
-          activeSettings,
-          homeDir: options.homeDir,
-        }),
-      configuration: {
-        get: () => controlConfiguration(configuration.inspect()),
-        patch: (expectedRevision, patch) =>
-          controlConfiguration(configuration.patch(expectedRevision, patch)),
-        setSecret: (name, value) => {
-          logger.protect([value]);
-          return controlConfiguration(configuration.setSecret(name, value));
-        },
-        deleteSecret: (name) => controlConfiguration(configuration.deleteSecret(name)),
-      },
-    });
+    controlServer = await startControlServer(paths.socketFile, control);
   } catch (error) {
     logger.log('error', 'control', error instanceof Error ? error.message : String(error));
     throw error;
@@ -298,6 +303,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
   return {
     paths,
+    control,
     status,
     finished: lifecycleTask,
     close() {

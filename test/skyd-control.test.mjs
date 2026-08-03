@@ -18,6 +18,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SlackStartupError } from '../dist/bot.js';
 import { startSkyd } from '../dist/skyd/app.js';
+import { ControlError } from '../dist/skyd/control.js';
 import {
   ControlRequestError,
   DaemonAlreadyRunningError,
@@ -28,7 +29,7 @@ import {
   requestDaemonRestart,
   streamLogRecords,
   watchOperation,
-} from '../dist/skyd/control.js';
+} from '../dist/skyd/control-uds.js';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
 
 function permissions(stats) {
@@ -135,6 +136,21 @@ test('GET /status stays available without settings and exposes stable control er
       assert.deepEqual(status.recentErrors.map(({ code }) => code), ['settings_missing']);
       assert.ok(status.instanceId);
       assert.ok(status.process.uptimeMs >= 0);
+
+      const directStatus = await daemon.control.execute({ type: 'status' });
+      assert.equal(directStatus.instanceId, status.instanceId);
+      await assert.rejects(
+        daemon.control.execute({ type: 'logs.history', limit: 0 }),
+        (error) =>
+          error instanceof ControlError &&
+          error.code === 'invalid_limit' &&
+          error.statusCode === 400,
+      );
+      const directLogs = daemon.control.subscribe({ type: 'logs.stream' })[Symbol.asyncIterator]();
+      const directLog = await directLogs.next();
+      await directLogs.return();
+      assert.equal(directLog.done, false);
+      assert.ok(directLog.value.cursor);
 
       const missing = await rawControlRequest(daemon.paths.socketFile, 'GET', '/missing');
       assert.equal(missing.statusCode, 404);

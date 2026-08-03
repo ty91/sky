@@ -5,7 +5,7 @@ import {
   ControlRequestError,
   getLogHistory,
   streamLogRecords,
-} from '../skyd/control.js';
+} from '../skyd/control-uds.js';
 import {
   LogCursorNotFoundError,
   readLogRecords,

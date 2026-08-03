@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { runDiagnostics, type DiagnosticsReport } from '../diagnostics.js';
 import { createSkyHome } from '../sky-home.js';
-import { ControlRequestError, getDaemonDiagnostics } from '../skyd/control.js';
+import { ControlRequestError, getDaemonDiagnostics } from '../skyd/control-uds.js';
 
 function controlUnavailable(error: unknown): boolean {
   if (error instanceof ControlRequestError || error instanceof SyntaxError) return false;

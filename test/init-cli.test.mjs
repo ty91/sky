@@ -23,7 +23,7 @@ import {
   patchConfiguration,
   putSecret,
   requestDaemonRestart,
-} from '../dist/skyd/control.js';
+} from '../dist/skyd/control-uds.js';
 import { startSkyd } from '../dist/skyd/app.js';
 import { bootstrapWorkspace, WorkspaceBootstrapError } from '../dist/workspace-bootstrap.js';
 

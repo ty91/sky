@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { getOperation, watchOperation } from '../dist/skyd/control.js';
+import { getOperation, watchOperation } from '../dist/skyd/control-uds.js';
 import { startSkyd } from '../dist/skyd/app.js';
 
 const execFileAsync = promisify(execFile);

@@ -18,8 +18,8 @@ import {
   patchConfiguration,
   putSecret,
   requestDaemonRestart,
-  type ControlConfiguration,
-} from '../skyd/control.js';
+} from '../skyd/control-uds.js';
+import type { ControlConfiguration } from '../skyd/control.js';
 import { createSkyHome } from '../sky-home.js';
 import { restartLaunchAgent, ServiceLifecycleError } from '../service/launch-agent.js';
 import {

@@ -1,4 +1,9 @@
-import { ControlRequestError, createOperation, getOperation, watchOperation } from '../skyd/control.js';
+import {
+  ControlRequestError,
+  createOperation,
+  getOperation,
+  watchOperation,
+} from '../skyd/control-uds.js';
 import type { OperationEvent, OperationRecord, OperationRequest } from '../skyd/operations.js';
 import { createSkyHome } from '../sky-home.js';
 

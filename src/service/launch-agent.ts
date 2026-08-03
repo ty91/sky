@@ -25,7 +25,7 @@ import {
   ControlRequestError,
   getDaemonStatus,
   requestDaemonRestart,
-} from '../skyd/control.js';
+} from '../skyd/control-uds.js';
 import type { DaemonStatus, RuntimeState } from '../skyd/types.js';
 
 const execFileAsync = promisify(execFile);
