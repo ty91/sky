@@ -6,7 +6,8 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  # contents: write creates the GitHub Release whose asset the Homebrew formula pins.
+  contents: write
   packages: write
 
 concurrency:
@@ -16,6 +17,8 @@ concurrency:
 jobs:
   publish:
     runs-on: macos-15
+    outputs:
+      version: ${{ steps.release_asset.outputs.version }}
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v4
@@ -68,3 +71,64 @@ jobs:
           "$sky_bin" --help | grep -q 'Usage: sky'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack the release asset
+        id: release_asset
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir -p "$RUNNER_TEMP/release"
+          pnpm pack --pack-destination "$RUNNER_TEMP/release"
+          # The formula pins this exact name; test/package-release.smoke.mjs guards it.
+          tarball="$RUNNER_TEMP/release/ty91-sky-$version.tgz"
+          test -f "$tarball"
+          {
+            echo "version=$version"
+            echo "tarball=$tarball"
+            echo "sha256=$(shasum -a 256 "$tarball" | cut -d ' ' -f 1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" "$TARBALL" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARBALL: ${{ steps.release_asset.outputs.tarball }}
+
+      - name: Point the Homebrew tap at this release
+        run: |
+          node scripts/render-homebrew-formula.mjs \
+            --sha256 "$SHA256" --version "$VERSION" --out "$RUNNER_TEMP/sky.rb"
+          git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/ty91/homebrew-tap.git" \
+            "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Formula"
+          cp "$RUNNER_TEMP/sky.rb" "$RUNNER_TEMP/tap/Formula/sky.rb"
+          git -C "$RUNNER_TEMP/tap" add Formula/sky.rb
+          if git -C "$RUNNER_TEMP/tap" diff --cached --quiet; then
+            echo "The tap already pins $VERSION."
+            exit 0
+          fi
+          git -C "$RUNNER_TEMP/tap" \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "sky $VERSION"
+          git -C "$RUNNER_TEMP/tap" push
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+          SHA256: ${{ steps.release_asset.outputs.sha256 }}
+          VERSION: ${{ steps.release_asset.outputs.version }}
+
+  # Installs the tap the way a user would, so it has to wait for the formula bump.
+  homebrew-smoke:
+    needs: publish
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+
+      - name: Verify macOS arm64 runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Smoke the published tap
+        run: pnpm test:homebrew
+        env:
+          SKY_HOMEBREW_SMOKE: '1'
+          SKY_HOMEBREW_VERSION: ${{ needs.publish.outputs.version }}

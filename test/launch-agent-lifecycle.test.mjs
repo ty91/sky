@@ -284,6 +284,43 @@ test('unhealthy startup states are reported as completed but non-zero', { timeou
   }
 });
 
+// Homebrew's node@24 is keg-only and process.execPath is realpathed, so recording
+// the running interpreter's directory would pin a Cellar path that disappears on
+// `brew upgrade node@24`. The plist has to keep the stable PATH entry instead.
+test('the plist records the PATH entry for node, not the realpathed interpreter', { timeout: 30_000 }, async () => {
+  const context = await setup();
+  const nodeDir = path.join(context.homeDir, 'stable-node-bin');
+  try {
+    await mkdir(nodeDir, { recursive: true });
+    await symlink(process.execPath, path.join(nodeDir, 'node'));
+
+    const installed = await runCli(['service', 'install', '--json'], {
+      ...context.env,
+      PATH: [nodeDir, context.binDir, context.env.PATH].join(path.delimiter),
+    });
+    assert.equal(installed.code, 0, installed.stderr || installed.stdout);
+
+    const plist = await parsePlist(context.plistFile);
+    assert.deepEqual(plist.EnvironmentVariables.PATH.split(path.delimiter), [
+      nodeDir,
+      context.binDir,
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ]);
+    assert.ok(
+      !plist.EnvironmentVariables.PATH.split(path.delimiter).includes(
+        path.dirname(process.execPath),
+      ),
+      'the realpathed interpreter directory must not be recorded',
+    );
+  } finally {
+    await cleanup(context);
+  }
+});
+
 test('a failed changed plist restores and reboots the previous LaunchAgent', { timeout: 30_000 }, async () => {
   const context = await setup();
   const oldWrapper = '/opt/sky/old-skyd';

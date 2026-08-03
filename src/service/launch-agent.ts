@@ -187,7 +187,7 @@ async function run(command: string, args: string[]): Promise<string> {
   }
 }
 
-function resolveExecutable(name: string, searchPath = process.env.PATH): string {
+function findExecutable(name: string, searchPath = process.env.PATH): string | null {
   for (const directory of searchPath?.split(path.delimiter) ?? []) {
     if (!directory) continue;
     const candidate = path.resolve(directory, name);
@@ -198,9 +198,15 @@ function resolveExecutable(name: string, searchPath = process.env.PATH): string 
       // Keep searching PATH. The wrapper path itself is preserved; it is not realpathed.
     }
   }
+  return null;
+}
+
+function resolveExecutable(name: string, searchPath = process.env.PATH): string {
+  const found = findExecutable(name, searchPath);
+  if (found) return found;
   throw new ServiceLifecycleError(
     'skyd_wrapper_not_found',
-    'Could not find the skyd package wrapper on PATH. Reinstall or relink @ty91/sky globally.',
+    'Could not find the skyd package wrapper on PATH. Reinstall Sky with `brew install ty91/tap/sky`.',
   );
 }
 
@@ -213,9 +219,17 @@ function xml(value: string): string {
     .replaceAll("'", '&apos;');
 }
 
+// process.execPath is realpathed, so under Homebrew it is a version-pinned Cellar
+// directory that disappears on `brew upgrade node@24`. The PATH entry is the
+// stable symlink (/opt/homebrew/opt/node@24/bin), so record that instead.
+function nodeDirectory(): string {
+  const onPath = findExecutable('node');
+  return path.dirname(onPath ?? process.execPath);
+}
+
 function launchAgentPathValue(skydWrapper: string): string {
   const entries = [
-    path.dirname(process.execPath),
+    nodeDirectory(),
     path.dirname(skydWrapper),
     '/usr/local/bin',
     '/usr/bin',

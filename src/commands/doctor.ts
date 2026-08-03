@@ -1,7 +1,11 @@
 import { Command } from 'commander';
-import { runDiagnostics, type DiagnosticsReport } from '../diagnostics.js';
+import { runDiagnostics, withDaemonVersionDrift, type DiagnosticsReport } from '../diagnostics.js';
 import { createSkyHome } from '../sky-home.js';
-import { ControlRequestError, getDaemonDiagnostics } from '../skyd/control-uds.js';
+import {
+  ControlRequestError,
+  getDaemonDiagnostics,
+  getDaemonStatus,
+} from '../skyd/control-uds.js';
 
 function controlUnavailable(error: unknown): boolean {
   if (error instanceof ControlRequestError || error instanceof SyntaxError) return false;
@@ -9,6 +13,14 @@ function controlUnavailable(error: unknown): boolean {
   return ['ENOENT', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ENOTSOCK'].includes(
     String(error.code),
   );
+}
+
+async function daemonProductVersion(socketFile: string): Promise<string | null> {
+  try {
+    return (await getDaemonStatus(socketFile)).productVersion;
+  } catch {
+    return null;
+  }
 }
 
 function printHuman(report: DiagnosticsReport): void {
@@ -32,6 +44,10 @@ export const doctorCommand = new Command('doctor')
       let report: DiagnosticsReport;
       try {
         report = await getDaemonDiagnostics(home.socketFile);
+        // The daemon cannot detect that it is stale, so compare from here. A
+        // daemon predating this check still answers the status request.
+        const daemonVersion = await daemonProductVersion(home.socketFile);
+        if (daemonVersion) report = withDaemonVersionDrift(report, daemonVersion);
       } catch (error) {
         if (!controlUnavailable(error)) throw error;
         report = await runDiagnostics(home);

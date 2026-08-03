@@ -12,7 +12,7 @@ import type { DaemonStatus } from './skyd/types.js';
 import { inspectPiBackend } from './connections.js';
 import { slackManifestRemediation } from './slack/manifest.js';
 
-const { version: PRODUCT_VERSION } = JSON.parse(
+export const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
 
@@ -647,7 +647,9 @@ function installationChecks(
         ? `Node.js ${process.versions.node} is supported.`
         : `Node.js ${process.versions.node} is unsupported.`,
       'Sky requires Node.js >=24.16.0 <25.',
-      nodeSupported ? null : 'Install the Node.js version pinned by this Sky release.',
+      nodeSupported
+        ? null
+        : 'Install Sky with `brew install ty91/tap/sky`, which pins a supported Node.js.',
     ),
     check('installation.product', 'pass', `Sky package version is ${PRODUCT_VERSION}.`),
     check(
@@ -655,7 +657,7 @@ function installationChecks(
       wrapper ? 'pass' : 'warn',
       wrapper ? 'The skyd package wrapper is executable.' : 'The skyd package wrapper is not on PATH.',
       null,
-      wrapper ? null : 'Reinstall or relink @ty91/sky globally.',
+      wrapper ? null : 'Reinstall Sky with `brew install ty91/tap/sky`.',
     ),
   ];
 
@@ -794,16 +796,14 @@ function runtimeChecks(daemon: DaemonStatus | undefined): DiagnosticCheck[] {
       : daemon.slack.state === 'not_configured'
         ? 'fail'
         : 'warn';
-  const versionsMatch = daemon.productVersion === PRODUCT_VERSION;
   return [
+    // Version drift lives in installation.drift, not here: these checks run
+    // inside the daemon, so comparing PRODUCT_VERSION against daemon.productVersion
+    // would only ever compare the daemon against itself.
     check(
       'runtime.control',
-      versionsMatch ? 'pass' : 'fail',
-      versionsMatch
-        ? `The daemon control interface is reachable (Sky ${daemon.productVersion}).`
-        : 'CLI and daemon product versions differ.',
-      null,
-      versionsMatch ? null : 'Restart the installed daemon using the same Sky package as the CLI.',
+      'pass',
+      `The daemon control interface is reachable (Sky ${daemon.productVersion}).`,
     ),
     check(
       'runtime.state',
@@ -1004,4 +1004,41 @@ export async function runDiagnostics(
     overall: overallStatus(checks),
     checks,
   };
+}
+
+// Only the CLI can see both sides of this. `sky doctor` asks the daemon to run
+// diagnostics, so every check above compares the daemon against itself. An
+// upgrade replaces the installed files without touching the running daemon, and
+// the old files are deleted, so the stale daemon keeps serving admin assets from
+// a directory that no longer exists.
+export function withDaemonVersionDrift(
+  report: DiagnosticsReport,
+  daemonVersion: string,
+): DiagnosticsReport {
+  const drifted = daemonVersion !== PRODUCT_VERSION;
+  const driftCheck = check(
+    'installation.drift',
+    drifted ? 'fail' : 'pass',
+    drifted
+      ? `The installed Sky is ${PRODUCT_VERSION} but the running daemon is ${daemonVersion}.`
+      : `The installed Sky and the running daemon are both ${PRODUCT_VERSION}.`,
+    drifted ? 'The daemon still runs code from the replaced installation.' : null,
+    drifted ? 'Run `sky restart` to put the daemon on the installed version.' : null,
+  );
+  // Keep it beside the other installation checks rather than after the
+  // filesystem and workspace ones.
+  let position = report.checks.length;
+  for (let index = report.checks.length - 1; index >= 0; index -= 1) {
+    const candidate = report.checks[index];
+    if (candidate?.id.startsWith('installation.')) {
+      position = index + 1;
+      break;
+    }
+  }
+  const checks = [
+    ...report.checks.slice(0, position),
+    driftCheck,
+    ...report.checks.slice(position),
+  ];
+  return { ...report, overall: overallStatus(checks), checks };
 }

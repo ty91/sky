@@ -138,6 +138,16 @@ test('the release package installs globally and completes the admin restart flow
     assert.equal(packedManifest.publishConfig.registry, 'https://npm.pkg.github.com');
     assert.equal(packedManifest.repository.url, 'git+https://github.com/ty91/sky.git');
 
+    // The Homebrew formula pins this exact asset name, and the release workflow
+    // uploads whatever pnpm pack produced. Drift here would 404 every brew install.
+    const formula = run('node', [
+      path.join(repositoryRoot, 'scripts', 'render-homebrew-formula.mjs'),
+      '--sha256',
+      'd8751ade93f441b1f666c87c4d86154de942d4b6b7946282118537e9154ff8a8',
+    ]);
+    const formulaUrl = formula.match(/url "([^"]+)"/)?.[1];
+    assert.equal(path.basename(formulaUrl ?? ''), path.basename(tarball));
+
     for (const [dependency, version] of Object.entries(packedManifest.dependencies)) {
       assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, `${dependency} must use an exact version`);
     }

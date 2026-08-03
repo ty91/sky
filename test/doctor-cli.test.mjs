@@ -10,7 +10,7 @@ import http from 'node:http';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
 import { SlackStartupError } from '../dist/bot.js';
-import { runDiagnostics } from '../dist/diagnostics.js';
+import { PRODUCT_VERSION, runDiagnostics, withDaemonVersionDrift } from '../dist/diagnostics.js';
 import { openConversationStore } from '../dist/conversation/store.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 
@@ -114,10 +114,43 @@ test('doctor gets the assembled report from a live daemon over its real UDS', as
     assert.equal(report.mode, 'daemon');
     assert.equal(report.checks.find((check) => check.id === 'runtime.control')?.status, 'pass');
     assert.equal(report.checks.find((check) => check.id === 'runtime.state')?.status, 'pass');
+    assert.equal(report.checks.find((check) => check.id === 'installation.drift')?.status, 'pass');
   } finally {
     await daemon.close();
     await rm(homeDir, { recursive: true, force: true });
   }
+});
+
+// `brew upgrade sky` replaces the files without touching the running daemon. The
+// daemon assembles the report, so it can only ever compare its own version
+// against itself; the CLI has to contribute this one.
+test('doctor reports the stale daemon an upgrade leaves behind', () => {
+  const report = {
+    schemaVersion: 1,
+    mode: 'daemon',
+    overall: 'pass',
+    checks: [
+      { id: 'installation.node', status: 'pass', summary: '', detail: null, remediation: null },
+      { id: 'runtime.control', status: 'pass', summary: '', detail: null, remediation: null },
+    ],
+  };
+
+  const drifted = withDaemonVersionDrift(report, '0.0.1-stale');
+  const check = drifted.checks.find(({ id }) => id === 'installation.drift');
+  assert.equal(check.status, 'fail');
+  assert.match(check.summary, /0\.0\.1-stale/);
+  assert.match(check.summary, new RegExp(PRODUCT_VERSION.replaceAll('.', '\\.')));
+  assert.match(check.remediation, /sky restart/);
+  assert.equal(drifted.overall, 'fail');
+  assert.deepEqual(
+    drifted.checks.map(({ id }) => id),
+    ['installation.node', 'installation.drift', 'runtime.control'],
+  );
+  assert.equal(report.checks.length, 2, 'the report the daemon sent must not be mutated');
+
+  const aligned = withDaemonVersionDrift(report, PRODUCT_VERSION);
+  assert.equal(aligned.checks.find(({ id }) => id === 'installation.drift').status, 'pass');
+  assert.equal(aligned.overall, 'pass');
 });
 
 test('local fallback validates a healthy private filesystem, settings, and workspace', async () => {

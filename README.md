@@ -26,52 +26,42 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 
 ## 준비물
 
-- [mise](https://mise.jdx.dev/)
+- [Homebrew](https://brew.sh/)
+- Apple Silicon macOS
 - Slack workspace에 앱을 설치할 수 있는 권한
 - 선택한 backend에서 사용할 모델 인증 설정
 
+Node.js는 따로 준비하지 않아도 됩니다. formula가 `node@24`를 의존성으로 함께 설치하고, `sky`와 `skyd` wrapper가 그 Node를 PATH에 올린 뒤 실행하므로 사용자의 Node 설치 상태와 무관하게 동작합니다.
+
 Slack app은 `slack-app-manifest.json` 한 장으로 만듭니다. scope와 event를 콘솔에서 하나씩 체크할 필요가 없습니다. 자세한 절차는 [Slack app 만들기](#slack-app-만들기)를 참고하세요.
-
-Sky의 개발 및 package release toolchain은 `mise.toml`에 고정되어 있습니다.
-
-```bash
-mise install
-mise exec -- node --version
-mise exec -- pnpm --version
-```
-
-각각 Node.js `24.16.0`, pnpm `11.10.0`이 출력되어야 합니다.
 
 ## 설치
 
-### Private GitHub Package
+```bash
+brew install ty91/tap/sky
+sky --version
+sky service install
+sky slack manifest --open
+sky init
+sky status
+```
 
-소스 clone 없이 설치하려면 Node.js와 pnpm을 mise의 전역 toolchain으로 준비합니다.
+의존성을 설치 시점에 공개 npm registry에서 받으므로 첫 설치는 몇 분 걸리고 디스크를 약 500 MB 사용합니다. 대부분은 Claude Agent SDK와 Pi coding agent의 플랫폼 바이너리입니다.
+
+Homebrew는 배포만 담당합니다. LaunchAgent는 Sky가 계속 소유하므로 `brew services`가 아니라 `sky service install`로 등록합니다.
+
+### 업그레이드
 
 ```bash
-mise use --global node@24.16.0 pnpm@11.10.0
-mise exec -- pnpm setup
+brew upgrade sky
+sky restart
 ```
 
-새 shell을 연 뒤 `read:packages` 권한이 있는 GitHub personal access token(classic)을 준비합니다. 실제 token을 파일에 쓰지 않도록 `~/.npmrc`에는 환경변수 참조만 추가합니다.
-
-```ini
-@ty91:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
-```
-
-token을 현재 install 명령에만 주입해 package를 전역 설치합니다.
-
-```bash
-NODE_AUTH_TOKEN=<github-pat-classic> mise exec -- pnpm add --global @ty91/sky
-mise exec -- sky --version
-mise exec -- sky service install
-mise exec -- sky slack manifest --open
-mise exec -- sky init
-mise exec -- sky status
-```
+`brew upgrade`는 파일만 교체하고 실행 중인 daemon은 이전 코드를 그대로 유지합니다. 이때 이전 설치 디렉터리는 삭제되므로 daemon이 디스크에서 읽는 admin 자산이 먼저 깨집니다. `sky doctor`는 이 상태를 `installation.drift` FAIL로 보고하며, `sky restart`가 유일한 해결책입니다.
 
 ### 개발 checkout
+
+개발 및 package release toolchain은 `mise.toml`에 고정되어 있습니다.
 
 ```bash
 git clone https://github.com/ty91/sky.git
@@ -79,6 +69,8 @@ cd sky
 mise install
 mise exec -- pnpm install --frozen-lockfile
 ```
+
+`mise exec -- node --version`과 `mise exec -- pnpm --version`이 각각 Node.js `24.16.0`, pnpm `11.10.0`을 출력해야 합니다.
 
 ## Sky home과 private filesystem
 
@@ -294,6 +286,8 @@ curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/conf
 
 `sky doctor`는 하나의 구조화된 check 목록에서 사람용 출력과 `--json` 출력을 만듭니다. 각 check는 안정적인 `id`, `pass`/`warn`/`fail` status, summary, 선택적 detail과 remediation을 가집니다. 설치된 Node/Sky version과 package wrapper, LaunchAgent, control socket, daemon runtime/Slack state, 최근 stable error code, 설정·credential metadata, managed path의 owner/mode/type, SQLite sidecar, workspace와 네 prompt file을 검사합니다.
 
+`installation.drift`는 CLI만 판단할 수 있어 CLI 쪽에서 붙입니다. daemon이 진단 목록을 조립하므로 daemon 안에서 version을 비교하면 자기 자신과 비교하게 되고, 업그레이드가 남긴 stale daemon을 절대 감지하지 못합니다. 이 check가 FAIL이면 `sky restart`로 해소합니다.
+
 ```bash
 sky doctor
 sky doctor --json
@@ -343,7 +337,7 @@ daemon control socket에 연결할 수 없으면 Sky home의 `logs/skyd.jsonl`�
 
 ## Package 검증과 release
 
-`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin, admin asset, login bootstrap, authenticated overview, secret 비노출과 configure → connection check → restart → 새 session reconnect 흐름을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다. `pnpm test:launchd`는 GitHub-hosted macOS runner에서만 실제 LaunchAgent lifecycle을 검증하며 로컬 실행에서는 skip됩니다.
+`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin, admin asset, login bootstrap, authenticated overview, secret 비노출과 configure → connection check → restart → 새 session reconnect 흐름을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다. `pnpm test:launchd`는 GitHub-hosted macOS runner에서만 실제 LaunchAgent lifecycle을 검증하며 로컬 실행에서는 skip됩니다. `pnpm test:homebrew`는 릴리스가 tap을 갱신한 뒤에만 의미가 있어 `SKY_HOMEBREW_SMOKE=1`이 있을 때만 실행됩니다.
 
 ```bash
 pnpm test:package
@@ -363,6 +357,10 @@ git push origin v<version>
 ```
 
 tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스트와 package smoke를 검증한 뒤 `@ty91/sky`를 private GitHub Packages에 publish합니다. tag와 `package.json` version이 다르면 publish하지 않습니다.
+
+이어서 `pnpm pack` tarball을 GitHub Release 에셋으로 올리고, 그 sha256으로 `packaging/homebrew/sky.rb.tmpl`을 렌더링해 `ty91/homebrew-tap`의 `Formula/sky.rb`를 갱신합니다. tap 갱신은 `TAP_REPO_TOKEN` secret을 사용합니다. `GITHUB_TOKEN`은 다른 repository에 push할 수 없기 때문입니다. 마지막 job은 갱신된 tap을 실제로 `brew install`하고, 이전 formula revision이 있으면 `brew upgrade`까지 거쳐 `sky restart`가 drift를 해소하는지 확인합니다.
+
+formula는 `dist`가 이미 들어 있는 `pnpm pack` tarball을 받으므로 설치 시점에 TypeScript build를 하지 않고 runtime 의존성만 `npm install`합니다. lockfile을 함께 배포하지 않으므로 transitive 의존성은 설치 시점에 다시 해석됩니다. 또 Homebrew가 설치한 Mach-O를 ad-hoc 재서명하면서 `darwin-universal` clipboard slice를 손상시키고 napi가 그 slice를 `darwin-arm64`보다 먼저 로드해 프로세스가 SIGKILL되므로, formula는 arm64가 아닌 prebuild를 모두 제거합니다.
 
 ## 운영 메모
 
