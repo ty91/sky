@@ -1,6 +1,6 @@
 {
   "name": "@ty91/sky",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Slack chatbot with per-thread Pi AgentSession conversations",
   "type": "module",
   "files": [
