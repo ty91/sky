@@ -34,7 +34,7 @@ CLI는 목적이 다른 두 adapter를 사용한다.
 1. LaunchAgent 설치, start, stop, 강제 restart와 service 상태는 `launchctl` adapter가 담당한다.
 2. 실행 중 runtime의 상태, graceful restart, maintenance operation과 log stream은 Unix domain socket의 control interface가 담당한다.
 
-Control interface는 Sky home의 `run/skyd.sock`(기본 `~/.sky/run/skyd.sock`)에서 HTTP/1.1과 JSON을 사용한다. filesystem 권한으로 동일 사용자만 접근하게 하며 별도 bearer token은 두지 않는다. TCP listener와 browser 인증은 admin web 작업에서 별도 adapter로 추가하고, daemon의 control module과 요청/응답 의미는 재사용한다.
+Control interface는 Sky home의 `run/skyd.sock`(기본 `~/.sky/run/skyd.sock`)에서 HTTP/1.1과 JSON을 사용한다. filesystem 권한으로 동일 사용자만 접근하게 하며 별도 bearer token은 두지 않는다. TCP listener와 browser 인증은 admin web 작업에서 별도 adapter로 추가하고, daemon의 control module과 요청/응답 의미는 재사용한다. Admin TCP adapter의 bind와 인증 결정은 후속 [ADR-0004](./0004-expose-authenticated-admin-gateway.md)가 구체화한다.
 
 Package version과 control protocol version의 negotiation은 현재 도입하지 않는다. `sky`와 `skyd`는 함께 설치·업데이트하는 것을 운영 전제로 삼고 product version은 진단 정보로만 노출한다.
 
