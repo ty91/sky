@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { SettingsPatch } from '../configuration.js';
+import type { SecretName, SettingsPatch } from '../configuration.js';
+import type { ConnectionTarget } from '../connections.js';
 import type { AdminAuthentication, AuthenticatedAdminSession } from './admin-auth.js';
 import { ControlError, type DaemonControl } from './control.js';
 
@@ -290,6 +291,62 @@ async function handleRequest(
       await control.execute({
         type: 'configuration.patch',
         body: body as { expectedRevision: number; patch: SettingsPatch },
+      }),
+    );
+    return;
+  }
+
+  const secretMatch = url.pathname.match(/^\/api\/secrets\/([^/]+)$/);
+  if (secretMatch) {
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      return methodNotAllowed(response, 'PUT, DELETE');
+    }
+    if (!requireMutationProtection(request, response, session)) return;
+    let name: string;
+    try {
+      name = decodeURIComponent(secretMatch[1]);
+    } catch {
+      writeError(response, 400, 'invalid_request');
+      return;
+    }
+    if (request.method === 'DELETE') {
+      writeJson(
+        response,
+        200,
+        await control.execute({ type: 'secret.delete', name: name as SecretName }),
+      );
+      return;
+    }
+    const body = await readJsonBody(request);
+    writeJson(
+      response,
+      200,
+      await control.execute({
+        type: 'secret.put',
+        name: name as SecretName,
+        body: body as { value: string },
+      }),
+    );
+    return;
+  }
+
+  if (url.pathname === '/api/connections') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    writeJson(response, 200, await control.execute({ type: 'connections.get' }));
+    return;
+  }
+
+  if (url.pathname === '/api/connections/check') {
+    if (request.method !== 'POST') return methodNotAllowed(response, 'POST');
+    if (!requireMutationProtection(request, response, session)) return;
+    const body = await readJsonBody(request);
+    const target = isRecord(body) ? body.target : undefined;
+    writeJson(
+      response,
+      200,
+      await control.execute({
+        type: 'connections.check',
+        target: target as ConnectionTarget,
       }),
     );
     return;

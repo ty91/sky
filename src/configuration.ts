@@ -129,6 +129,7 @@ export type SettingsPatch = Partial<{
 export type Configuration = {
   inspect(): ConfigurationInspection;
   resolveRuntime(): RuntimeConfiguration;
+  resolveSecret(name: SecretName): { value: string | undefined; source: SecretMetadata['source'] };
   patch(expectedRevision: number, patch: SettingsPatch): ConfigurationInspection;
   setSecret(name: SecretName, value: string): ConfigurationInspection;
   deleteSecret(name: SecretName): ConfigurationInspection;
@@ -548,6 +549,17 @@ export function createConfiguration(
 
   return {
     inspect,
+
+    resolveSecret(name) {
+      if (!isSecretName(name)) throw new ConfigurationError('unknown_secret', 'Unknown secret name.');
+      const { secrets } = loadDocuments();
+      const environmentValue =
+        name === 'claudeAgentSdk.oauthToken' ? environmentOauth() : undefined;
+      return {
+        value: environmentValue ?? secrets.values[name],
+        source: environmentValue ? 'environment' : secrets.metadata[name].source,
+      };
+    },
 
     resolveRuntime() {
       const { settings, secrets } = loadDocuments();

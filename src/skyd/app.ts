@@ -42,6 +42,11 @@ import { runDiagnostics } from '../diagnostics.js';
 import { openScheduledJobStore } from '../scheduler/store.js';
 import type { ScheduledJobStore } from '../scheduler/types.js';
 import { inspectWorkspacePrompts } from '../workspace-prompts.js';
+import {
+  connectionTargetForSecret,
+  createConnections,
+  type ConnectionsOptions,
+} from '../connections.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -81,6 +86,8 @@ export type StartSkydOptions = {
         port?: number;
         now?: () => Date;
       };
+  connections?: Omit<ConnectionsOptions, 'homeDir'>;
+  configurationEnv?: NodeJS.ProcessEnv;
 };
 
 export type Skyd = {
@@ -149,7 +156,11 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   let activeConfigurationRevision: number | null = null;
   let activeConfigurationIdentity: string | undefined;
   let runtime: BotRuntime | undefined;
-  const configuration = createConfiguration(paths);
+  const configuration = createConfiguration(paths, { env: options.configurationEnv });
+  const connections = createConnections(configuration, {
+    homeDir: options.homeDir ?? os.homedir(),
+    ...options.connections,
+  });
   const scheduledJobStore = openScheduledJobStore(paths);
   const controlConfiguration = (inspection: ConfigurationInspection) => ({
     ...inspection.public,
@@ -261,6 +272,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     },
     operations,
     logger,
+    protectSensitiveValues: (values) => logger.protect(values),
     getDiagnostics: () =>
       runDiagnostics(paths, {
         daemonStatus: status(),
@@ -269,15 +281,24 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       }),
     getWorkspacePrompts: () =>
       inspectWorkspacePrompts(configuration.inspect().public.settings.workspace),
+    connections,
     configuration: {
       get: () => controlConfiguration(configuration.inspect()),
-      patch: (expectedRevision, patch) =>
-        controlConfiguration(configuration.patch(expectedRevision, patch)),
-      setSecret: (name, value) => {
-        logger.protect([value]);
-        return controlConfiguration(configuration.setSecret(name, value));
+      patch: (expectedRevision, patch) => {
+        const updated = controlConfiguration(configuration.patch(expectedRevision, patch));
+        connections.invalidate('agent');
+        return updated;
       },
-      deleteSecret: (name) => controlConfiguration(configuration.deleteSecret(name)),
+      setSecret: (name, value) => {
+        const updated = controlConfiguration(configuration.setSecret(name, value));
+        connections.invalidate(connectionTargetForSecret(name));
+        return updated;
+      },
+      deleteSecret: (name) => {
+        const updated = controlConfiguration(configuration.deleteSecret(name));
+        connections.invalidate(connectionTargetForSecret(name));
+        return updated;
+      },
     },
   });
 

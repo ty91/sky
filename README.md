@@ -234,6 +234,10 @@ Admin gateway는 기본적으로 `0.0.0.0:4815`의 **평문 HTTP**로 LAN과 tai
 
 Admin의 Agent 화면은 `GET /api/configuration`과 optimistic revision을 사용하는 `PATCH /api/configuration`으로 다음 실행 설정을 관리합니다. 저장은 현재 runtime을 부분 변경하지 않으며, 응답의 `restartRequired`가 참일 때 CSRF로 보호된 `POST /api/restart`로 graceful restart를 요청합니다. `GET /api/prompts`는 client path 입력 없이 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`만 읽는 read-only snapshot입니다. 각 role은 entry/symlink target 상태, byte size, 수정 시각과 최대 256 KiB의 UTF-8 content를 제공하며 모든 응답은 `no-store`입니다.
 
+Connections 화면은 credential 원문을 읽지 않고 `configured`, `source`, `updatedAt`, `displayHint` metadata만 표시합니다. 각 credential은 keep, replace, delete를 명시적으로 선택한 뒤 적용하며 replace input은 기존 값으로 채워지지 않습니다. 저장 변경은 active runtime에 즉시 섞이지 않고 `restartRequired`를 만들며, 환경의 `CLAUDE_CODE_OAUTH_TOKEN`이 effective credential이면 stored Claude token보다 우선한다는 점을 화면에 표시합니다.
+
+명시적 연결 검사는 저장 상태와 별도로 daemon memory에 마지막 결과만 보관합니다. Slack bot은 `auth.test` 응답 identity와 `x-oauth-scopes`를 Sky 필수 scope와 비교하고, Slack app token은 `apps.connections.open` 성공만 확인한 뒤 발급된 WebSocket URL을 즉시 버립니다. Claude Agent SDK는 prompt나 turn 없이 bounded `accountInfo()` smoke를 실행하고 subprocess를 정리하며, Pi는 `sky doctor`와 같은 local model registry·provider credential·effort compatibility 규칙을 사용합니다. timeout, rate limit, invalid credential, missing scope는 서로 다른 안정된 결과 code로 반환되며 raw credential과 Socket Mode URL은 응답이나 log에 포함되지 않습니다.
+
 `skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. `sky restart`는 진행 중인 Slack turn과 scheduler dispatch를 최대 120초 drain한 뒤 종료하고, launchd가 시작한 새 daemon이 startup 상태에 도달할 때까지 기다립니다. daemon이 응답하지 않을 때는 자동으로 강제 교체하지 않으며, 사용자가 `sky restart --force`를 명시한 경우에만 `launchctl kickstart -k`를 사용합니다.
 
 ```bash

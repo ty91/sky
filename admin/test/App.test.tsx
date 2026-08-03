@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { expect, test } from 'vitest';
 import { App } from '../src/App';
-import { configurationFixture, overviewFixture, promptSnapshotFixture } from './fixtures';
+import { configurationFixture, connectionsFixture, overviewFixture, promptSnapshotFixture } from './fixtures';
 import { server } from './server';
 
 function renderApp(route = '/') {
@@ -44,6 +44,147 @@ test('shows the full application shell and uses the real router', async () => {
   await user.click(screen.getByRole('link', { name: 'Connections' }));
   expect(screen.getByRole('heading', { name: 'Connections' })).toBeInTheDocument();
   expect(window.location.pathname).toBe('/connections');
+});
+
+test('keeps credential values write-only and makes keep, replace, and delete explicit', async () => {
+  const user = userEvent.setup();
+  let putRequest: { body: unknown; csrf: string | null } | undefined;
+  server.use(
+    http.put('/api/secrets/:name', async ({ request, params }) => {
+      expect(params.name).toBe('slack.botToken');
+      putRequest = {
+        body: await request.json(),
+        csrf: request.headers.get('x-sky-csrf-token'),
+      };
+      return HttpResponse.json(configurationFixture({ restartRequired: true }));
+    }),
+  );
+  renderApp('/connections');
+
+  const heading = await screen.findByRole('heading', { name: 'Slack bot token' });
+  const card = heading.closest('article');
+  expect(card).not.toBeNull();
+  expect(within(card!).getByText('xoxb-…test')).toBeInTheDocument();
+  expect(within(card!).queryByLabelText('New Slack bot token')).not.toBeInTheDocument();
+  expect(within(card!).getByRole('radio', { name: 'Keep' })).toBeChecked();
+
+  await user.click(within(card!).getByRole('button', { name: 'Apply keep' }));
+  expect(await screen.findByText('The current credential was kept unchanged.')).toBeInTheDocument();
+  expect(putRequest).toBeUndefined();
+
+  await user.click(within(card!).getByRole('radio', { name: 'Replace' }));
+  const replacement = within(card!).getByLabelText('New Slack bot token');
+  expect(replacement).toHaveValue('');
+  await user.type(replacement, 'xoxb-replacement-secret');
+  await user.click(within(card!).getByRole('button', { name: 'Apply replace' }));
+
+  expect(putRequest).toEqual({
+    body: { value: 'xoxb-replacement-secret' },
+    csrf: 'csrf-token',
+  });
+  expect(await screen.findByRole('status', { name: 'Restart required' })).toBeInTheDocument();
+  expect(screen.queryByDisplayValue('xoxb-replacement-secret')).not.toBeInTheDocument();
+});
+
+test('explains environment precedence while allowing stored Claude credential deletion', async () => {
+  const user = userEvent.setup();
+  let deleted = false;
+  const environmentConfiguration = configurationFixture({
+    secrets: {
+      ...configurationFixture().secrets,
+      'claudeAgentSdk.oauthToken': {
+        configured: true,
+        source: 'environment',
+        updatedAt: null,
+        displayHint: null,
+      },
+    },
+  });
+  server.use(
+    http.get('/api/configuration', () => HttpResponse.json(environmentConfiguration)),
+    http.delete('/api/secrets/:name', ({ params }) => {
+      deleted = params.name === 'claudeAgentSdk.oauthToken';
+      return HttpResponse.json({ ...environmentConfiguration, restartRequired: false });
+    }),
+  );
+  renderApp('/connections');
+
+  const heading = await screen.findByRole('heading', { name: 'Claude OAuth token' });
+  const card = heading.closest('article');
+  expect(card).not.toBeNull();
+  expect(within(card!).getByRole('note')).toHaveTextContent('is the effective credential');
+  await user.click(within(card!).getByRole('radio', { name: 'Delete' }));
+  await user.click(within(card!).getByRole('button', { name: 'Apply delete' }));
+
+  expect(deleted).toBe(true);
+  expect(within(card!).getByText('Environment')).toBeInTheDocument();
+});
+
+test('shows explicit Slack and backend check results separately from saved state', async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.post('/api/connections/check', async ({ request }) => {
+      const { target } = (await request.json()) as { target: string };
+      if (target === 'slack.bot') {
+        return HttpResponse.json(connectionsFixture({
+          'slack.bot': {
+            target: 'slack.bot',
+            status: 'missing_scope',
+            checkedAt: '2026-08-03T01:00:00.000Z',
+            summary: 'Slack bot authentication succeeded, but required scopes are missing.',
+            details: { missingScopes: ['files:write'] },
+          },
+        }));
+      }
+      return HttpResponse.json(connectionsFixture({
+        agent: {
+          target: 'agent',
+          status: 'ok',
+          checkedAt: '2026-08-03T01:01:00.000Z',
+          summary: 'The Pi model, provider credential, and effort are compatible.',
+          details: {
+            backend: {
+              name: 'pi',
+              provider: 'anthropic',
+              model: 'anthropic/claude-sonnet-4-5',
+              effort: 'high',
+              credentialSource: 'oauth',
+            },
+          },
+        },
+      }));
+    }),
+  );
+  renderApp('/connections');
+
+  const botCard = (await screen.findByRole('heading', { name: 'Slack bot token' })).closest('article');
+  await user.click(within(botCard!).getByRole('button', { name: 'Run connection check' }));
+  expect(await within(botCard!).findByText(/required scopes are missing/)).toBeInTheDocument();
+  expect(within(botCard!).getByText(/files:write/)).toBeInTheDocument();
+  expect(within(botCard!).getByText('Configured')).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Run backend check' }));
+  expect(await screen.findByText(/Pi model, provider credential, and effort are compatible/)).toBeInTheDocument();
+});
+
+test('recovers from a connections load error and announces pending loading', async () => {
+  const user = userEvent.setup();
+  let requests = 0;
+  server.use(
+    http.get('/api/connections', async () => {
+      requests += 1;
+      if (requests === 1) return HttpResponse.error();
+      await delay(20);
+      return HttpResponse.json(connectionsFixture());
+    }),
+  );
+  renderApp('/connections');
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not load connections');
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(screen.getByRole('status', { name: 'Loading connections' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Credentials' })).toBeInTheDocument();
+  expect(screen.getAllByText('Not checked in this daemon session.')).toHaveLength(3);
 });
 
 test('supports keyboard sign-in with a pasted one-time token', async () => {

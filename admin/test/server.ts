@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { configurationFixture, overviewFixture, promptSnapshotFixture } from './fixtures';
+import { configurationFixture, connectionsFixture, overviewFixture, promptSnapshotFixture } from './fixtures';
 
 export const handlers = [
   http.get('/api/auth/session', () =>
@@ -17,6 +17,14 @@ export const handlers = [
   ),
   http.get('/api/overview', () => HttpResponse.json(overviewFixture())),
   http.get('/api/configuration', () => HttpResponse.json(configurationFixture())),
+  http.get('/api/connections', () => HttpResponse.json(connectionsFixture())),
+  http.post('/api/connections/check', () => HttpResponse.json(connectionsFixture())),
+  http.put('/api/secrets/:name', () =>
+    HttpResponse.json(configurationFixture({ restartRequired: true })),
+  ),
+  http.delete('/api/secrets/:name', () =>
+    HttpResponse.json(configurationFixture({ restartRequired: true })),
+  ),
   http.patch('/api/configuration', async ({ request }) => {
     const body = (await request.json()) as { expectedRevision: number };
     return HttpResponse.json(

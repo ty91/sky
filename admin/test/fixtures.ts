@@ -1,6 +1,7 @@
 import type { AdminOverview } from '../../src/skyd/types';
 import type { ControlConfiguration } from '../../src/skyd/control';
 import type { WorkspacePrompt, WorkspacePromptSnapshot } from '../../src/workspace-prompts';
+import type { ConnectionsSnapshot } from '../../src/connections';
 
 export function overviewFixture(
   overrides: Partial<AdminOverview> = {},
@@ -90,6 +91,20 @@ export function configurationFixture(
     },
     complete: true,
     ...overrides,
+  };
+}
+
+export function connectionsFixture(
+  overrides: Partial<ConnectionsSnapshot['checks']> = {},
+): ConnectionsSnapshot {
+  return {
+    schemaVersion: 1,
+    checks: {
+      'slack.bot': null,
+      'slack.app': null,
+      agent: null,
+      ...overrides,
+    },
   };
 }
 

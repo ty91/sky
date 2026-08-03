@@ -1,7 +1,6 @@
 import { accessSync, constants, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ModelRuntime as PiModelRuntime, readStoredCredential } from '@earendil-works/pi-coding-agent';
 import type { Settings } from './settings.js';
 import {
   createConfiguration,
@@ -10,8 +9,7 @@ import {
 import { getServiceStatus, type ServiceStatus } from './service/launch-agent.js';
 import type { SkyHome } from './sky-home.js';
 import type { DaemonStatus } from './skyd/types.js';
-
-type PiRuntimeOptions = NonNullable<Parameters<typeof PiModelRuntime.create>[0]>;
+import { inspectPiBackend } from './connections.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -382,62 +380,25 @@ async function credentialChecks(
       ),
     ];
   }
-  const provider = model.slice(0, slash);
-  const modelId = model.slice(slash + 1);
-  const agentDir = path.join(homeDir, '.pi', 'agent');
-  const authPath = path.join(agentDir, 'auth.json');
   try {
-    let storedCredential = readStoredCredential(provider, authPath);
-    const credentials: NonNullable<PiRuntimeOptions['credentials']> = {
-      async read(providerId) {
-        return providerId === provider ? storedCredential : undefined;
-      },
-      async list() {
-        return storedCredential
-          ? [{ providerId: provider, type: storedCredential.type }]
-          : [];
-      },
-      async modify(providerId, update) {
-        const current = providerId === provider ? storedCredential : undefined;
-        const next = await update(current);
-        if (providerId === provider && next !== undefined) storedCredential = next;
-        return providerId === provider ? storedCredential : next;
-      },
-      async delete(providerId) {
-        if (providerId === provider) storedCredential = undefined;
-      },
-    };
-    const modelsStore: NonNullable<PiRuntimeOptions['modelsStore']> = {
-      async read() {
-        return undefined;
-      },
-      async write() {},
-      async delete() {},
-    };
-    const runtime = await PiModelRuntime.create({
-      credentials,
-      modelsPath: path.join(agentDir, 'models.json'),
-      modelsStore,
-      allowModelNetwork: false,
-    });
-    const registryModel = runtime.getModel(provider, modelId);
-    const auth = runtime.getProviderAuthStatus(provider);
-    const configured = auth.configured;
-    const effortValid = !settings.effort || registryModel?.reasoning === true;
-    const valid = registryModel !== undefined && configured && effortValid;
+    const inspection = await inspectPiBackend(settings, homeDir);
+    const valid =
+      inspection.modelFound &&
+      inspection.credentialConfigured &&
+      inspection.effortCompatible;
     return [
       slack,
       check(
         'configuration.backend',
         valid ? 'pass' : 'fail',
         valid
-          ? `Pi backend, model, and ${auth.source ?? 'local'} credential are configured.`
+          ? `Pi backend, model, and ${inspection.credentialSource ?? 'local'} credential are configured.`
           : 'Pi backend configuration is incomplete or invalid.',
-        registryModel === undefined
+        !inspection.modelFound
           ? 'The model is not present in the local Pi model registry.'
-          : !configured
+          : !inspection.credentialConfigured
             ? 'No local credential is configured for the selected provider.'
-            : !effortValid
+            : !inspection.effortCompatible
               ? 'The selected model does not support the configured effort level.'
               : null,
         valid ? null : 'Configure a locally available model and provider credential.',

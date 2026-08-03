@@ -6,6 +6,10 @@ import {
   type SettingsPatch,
 } from '../configuration.js';
 import type { DiagnosticsReport } from '../diagnostics.js';
+import type {
+  ConnectionTarget,
+  ConnectionsSnapshot,
+} from '../connections.js';
 import { LogCursorNotFoundError, type JsonlLogger, type LogHistory, type LogRecord } from './logger.js';
 import type {
   OperationEvent,
@@ -39,8 +43,13 @@ export type ControlDependencies = {
   requestRestart?: () => ControlRestartResult;
   operations?: OperationRegistry;
   logger?: JsonlLogger;
+  protectSensitiveValues?: (values: readonly string[]) => void;
   getDiagnostics?: () => DiagnosticsReport | Promise<DiagnosticsReport>;
   getWorkspacePrompts?: () => WorkspacePromptSnapshot | Promise<WorkspacePromptSnapshot>;
+  connections?: {
+    get(): ConnectionsSnapshot;
+    check(target: ConnectionTarget): Promise<ConnectionsSnapshot>;
+  };
   configuration?: {
     get(): ControlConfiguration;
     patch(expectedRevision: number, patch: SettingsPatch): ControlConfiguration;
@@ -64,6 +73,8 @@ export type ControlExecuteRequest =
   | { type: 'admin.login.issue' }
   | { type: 'diagnostics' }
   | { type: 'workspace.prompts.get' }
+  | { type: 'connections.get' }
+  | { type: 'connections.check'; target: ConnectionTarget }
   | { type: 'configuration.get' }
   | { type: 'configuration.patch'; body: ConfigurationPatchBody }
   | { type: 'secret.put'; name: SecretName; body: SecretValueBody }
@@ -88,6 +99,8 @@ export type ControlExecuteResult<Request extends ControlExecuteRequest> =
           ? DiagnosticsReport
           : Request extends { type: 'workspace.prompts.get' }
             ? WorkspacePromptSnapshot
+          : Request extends { type: 'connections.get' } | { type: 'connections.check' }
+            ? ConnectionsSnapshot
           : Request extends
               | { type: 'configuration.get' }
               | { type: 'configuration.patch' }
@@ -310,6 +323,13 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
       request: Request,
     ): Promise<ControlExecuteResult<Request>> {
       try {
+        if (
+          request.type === 'secret.put' &&
+          isRecord(request.body) &&
+          typeof request.body.value === 'string'
+        ) {
+          dependencies.protectSensitiveValues?.([request.body.value]);
+        }
         switch (request.type) {
           case 'status':
             return asResult<Request>(dependencies.getStatus());
@@ -325,6 +345,19 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
           case 'workspace.prompts.get':
             if (!dependencies.getWorkspacePrompts) throw new ControlError('not_found');
             return asResult<Request>(await dependencies.getWorkspacePrompts());
+          case 'connections.get':
+            if (!dependencies.connections) throw new ControlError('not_found');
+            return asResult<Request>(dependencies.connections.get());
+          case 'connections.check':
+            if (!dependencies.connections) throw new ControlError('not_found');
+            if (
+              request.target !== 'slack.bot' &&
+              request.target !== 'slack.app' &&
+              request.target !== 'agent'
+            ) {
+              throw new ControlError('invalid_value');
+            }
+            return asResult<Request>(await dependencies.connections.check(request.target));
           case 'configuration.get':
             if (!dependencies.configuration) throw new ControlError('not_found');
             return asResult<Request>(dependencies.configuration.get());

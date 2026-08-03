@@ -3,6 +3,12 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
 import type { ControlConfiguration } from '../../src/skyd/control';
 import type { AdminOverview } from '../../src/skyd/types';
 import type {
+  ConnectionCheck,
+  ConnectionTarget,
+  ConnectionsSnapshot,
+} from '../../src/connections';
+import type { SecretName, SecretMetadata } from '../../src/configuration';
+import type {
   WorkspacePrompt,
   WorkspacePromptSnapshot,
 } from '../../src/workspace-prompts';
@@ -190,6 +196,15 @@ function Shell({
         <Routes>
           <Route path="/" element={<Dashboard onSessionExpired={onSessionExpired} />} />
           <Route
+            path="/connections"
+            element={
+              <ConnectionsPage
+                session={session}
+                onSessionExpired={onSessionExpired}
+              />
+            }
+          />
+          <Route
             path="/agent"
             element={
               <Agent
@@ -198,12 +213,360 @@ function Shell({
               />
             }
           />
-          {navigation.filter(([path]) => path !== '/' && path !== '/agent').map(([path, label]) => (
+          {navigation.filter(([path]) => path !== '/' && path !== '/connections' && path !== '/agent').map(([path, label]) => (
             <Route key={path} path={path} element={<Placeholder title={label} />} />
           ))}
           <Route path="*" element={<Dashboard onSessionExpired={onSessionExpired} />} />
         </Routes>
       </main>
+    </div>
+  );
+}
+
+type SecretAction = 'keep' | 'replace' | 'delete';
+
+const secretDefinitions: Array<{
+  name: SecretName;
+  label: string;
+  description: string;
+  placeholder: string;
+  target?: ConnectionTarget;
+}> = [
+  {
+    name: 'slack.botToken',
+    label: 'Slack bot token',
+    description: 'Authenticates Web API calls and identifies the workspace bot.',
+    placeholder: 'xoxb-…',
+    target: 'slack.bot',
+  },
+  {
+    name: 'slack.appToken',
+    label: 'Slack app token',
+    description: 'Opens the Socket Mode connection used to receive Slack events.',
+    placeholder: 'xapp-…',
+    target: 'slack.app',
+  },
+  {
+    name: 'claudeAgentSdk.oauthToken',
+    label: 'Claude OAuth token',
+    description: 'Authenticates Claude Agent SDK when that backend is selected.',
+    placeholder: 'Paste a new OAuth token',
+  },
+];
+
+function secretSource(metadata: SecretMetadata): string {
+  if (!metadata.configured) return 'Not configured';
+  return metadata.source === 'environment' ? 'Environment' : 'Stored by Sky';
+}
+
+function checkTone(status: ConnectionCheck['status']): string {
+  return status === 'ok' ? 'good' : status === 'not_configured' ? 'muted' : 'warn';
+}
+
+function CheckResult({ check }: { check: ConnectionCheck | null }) {
+  if (!check) {
+    return <div className="connection-check empty-check">Not checked in this daemon session.</div>;
+  }
+  return (
+    <div className={`connection-check ${checkTone(check.status)}`} role="status">
+      <div className="check-title">
+        <strong>{check.status.replaceAll('_', ' ')}</strong>
+        <time dateTime={check.checkedAt}>{formatDate(check.checkedAt)}</time>
+      </div>
+      <p>{check.summary}</p>
+      {check.details.workspace && (
+        <p>Workspace: {check.details.workspace.name ?? 'Unknown'} ({check.details.workspace.id ?? 'unknown id'})</p>
+      )}
+      {check.details.bot && (
+        <p>Bot: {check.details.bot.name ?? 'Unknown'} ({check.details.bot.userId ?? check.details.bot.id ?? 'unknown id'})</p>
+      )}
+      {check.details.missingScopes && check.details.missingScopes.length > 0 && (
+        <p>Missing scopes: <code>{check.details.missingScopes.join(', ')}</code></p>
+      )}
+      {check.details.account && (
+        <p>Account: {check.details.account.email ?? check.details.account.organization ?? 'Authenticated account'}</p>
+      )}
+      {check.details.backend && (
+        <p>Backend: {check.details.backend.name} · {check.details.backend.model ?? 'No model'}</p>
+      )}
+      {check.details.retryAfterSeconds !== undefined && check.details.retryAfterSeconds !== null && (
+        <p>Retry after {check.details.retryAfterSeconds} seconds.</p>
+      )}
+    </div>
+  );
+}
+
+function ConnectionsHeader() {
+  return (
+    <header className="page-header">
+      <div>
+        <p className="eyebrow">Credentials and verification</p>
+        <h1>Connections</h1>
+        <p>Manage saved credentials and run explicit checks without starting an agent turn.</p>
+      </div>
+    </header>
+  );
+}
+
+function ConnectionsPage({
+  session,
+  onSessionExpired,
+}: {
+  session: Session;
+  onSessionExpired(): void;
+}) {
+  const [configuration, setConfiguration] = useState<ControlConfiguration>();
+  const [connections, setConnections] = useState<ConnectionsSnapshot>();
+  const [actions, setActions] = useState<Record<SecretName, SecretAction>>({
+    'slack.botToken': 'keep',
+    'slack.appToken': 'keep',
+    'claudeAgentSdk.oauthToken': 'keep',
+  });
+  const [values, setValues] = useState<Record<SecretName, string>>({
+    'slack.botToken': '',
+    'slack.appToken': '',
+    'claudeAgentSdk.oauthToken': '',
+  });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [busy, setBusy] = useState<string>();
+  const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string }>();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [nextConfiguration, nextConnections] = await Promise.all([
+        requestJson<ControlConfiguration>('/api/configuration'),
+        requestJson<ConnectionsSnapshot>('/api/connections'),
+      ]);
+      setConfiguration(nextConfiguration);
+      setConnections(nextConnections);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const updateAction = (name: SecretName, action: SecretAction) => {
+    setActions((current) => ({ ...current, [name]: action }));
+    setMessage(undefined);
+  };
+
+  const applySecret = async (name: SecretName) => {
+    if (!configuration) return;
+    const action = actions[name];
+    if (action === 'keep') {
+      setMessage({ tone: 'success', text: 'The current credential was kept unchanged.' });
+      return;
+    }
+    const value = values[name];
+    if (action === 'replace' && !value) {
+      setMessage({ tone: 'error', text: 'Enter a replacement credential first.' });
+      return;
+    }
+    setBusy(`secret:${name}`);
+    setMessage(undefined);
+    try {
+      const updated = await requestJson<ControlConfiguration>(`/api/secrets/${encodeURIComponent(name)}`, {
+        method: action === 'delete' ? 'DELETE' : 'PUT',
+        headers: {
+          'x-sky-csrf-token': session.csrfToken,
+          ...(action === 'replace' ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(action === 'replace' ? { body: JSON.stringify({ value }) } : {}),
+      });
+      setConfiguration(updated);
+      setConnections(await requestJson<ConnectionsSnapshot>('/api/connections'));
+      setActions((current) => ({ ...current, [name]: 'keep' }));
+      setValues((current) => ({ ...current, [name]: '' }));
+      setMessage({
+        tone: 'success',
+        text: updated.restartRequired
+          ? action === 'delete'
+            ? 'The stored credential was deleted. Restart Sky to apply the change.'
+            : 'The credential was saved. Restart Sky to apply the change.'
+          : action === 'delete'
+            ? 'The stored credential was deleted; the active credential is unchanged.'
+            : 'The credential was saved; the active credential is unchanged.',
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setMessage({ tone: 'error', text: 'The credential was not changed. Review the value and try again.' });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const runCheck = async (target: ConnectionTarget) => {
+    setBusy(`check:${target}`);
+    setMessage(undefined);
+    try {
+      setConnections(await requestJson<ConnectionsSnapshot>('/api/connections/check', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-sky-csrf-token': session.csrfToken,
+        },
+        body: JSON.stringify({ target }),
+      }));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setMessage({ tone: 'error', text: 'The connection check could not be started. Try again.' });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const restart = async () => {
+    setBusy('restart');
+    setMessage(undefined);
+    try {
+      await requestJson<{ accepted: true }>('/api/restart', {
+        method: 'POST',
+        headers: { 'x-sky-csrf-token': session.csrfToken },
+      });
+      setMessage({ tone: 'success', text: 'Graceful restart requested. Sign in again after the daemon returns.' });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setMessage({ tone: 'error', text: 'Sky could not start a graceful restart. Saved credentials are unchanged.' });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="page connections-page">
+        <ConnectionsHeader />
+        <section className="loading-panel" role="status" aria-label="Loading connections">
+          <span className="loading-orbit" aria-hidden="true" />
+          <div><strong>Reading connection settings</strong><p>No credential values are loaded into the browser.</p></div>
+        </section>
+      </div>
+    );
+  }
+
+  if (loadError || !configuration || !connections) {
+    return (
+      <div className="page connections-page">
+        <ConnectionsHeader />
+        <section className="error-panel" role="alert">
+          <p className="eyebrow">Connection failed</p>
+          <h2>Could not load connections</h2>
+          <p>No credential was changed.</p>
+          <button className="secondary-button" type="button" onClick={() => void load()}>Retry</button>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page connections-page">
+      <ConnectionsHeader />
+      {configuration.restartRequired && (
+        <section className="restart-banner" role="status" aria-label="Restart required">
+          <div>
+            <p className="eyebrow">Pending runtime change</p>
+            <strong>Restart required</strong>
+            <span>Saved credentials differ from the active runtime. Connection checks use the saved values.</span>
+          </div>
+          <button className="primary-button" type="button" disabled={busy === 'restart'} onClick={() => void restart()}>
+            {busy === 'restart' ? 'Restarting…' : 'Graceful restart'}
+          </button>
+        </section>
+      )}
+
+      {message && (
+        <p className={message.tone === 'error' ? 'connection-message form-error' : 'connection-message form-success'} role={message.tone === 'error' ? 'alert' : 'status'}>
+          {message.text}
+        </p>
+      )}
+
+      <section aria-labelledby="stored-connections-heading">
+        <header className="prompt-section-header">
+          <div><p className="eyebrow">Saved state</p><h2 id="stored-connections-heading">Credentials</h2></div>
+          <span>Values are write-only</span>
+        </header>
+        <div className="connections-grid">
+          {secretDefinitions.map((definition) => {
+            const metadata = configuration.secrets[definition.name];
+            const action = actions[definition.name];
+            const fieldName = definition.name.replaceAll('.', '-');
+            return (
+              <article className="connection-secret-card" key={definition.name}>
+                <header>
+                  <div><p className="eyebrow">{secretSource(metadata)}</p><h3>{definition.label}</h3></div>
+                  <span className={metadata.configured ? 'secret-badge configured' : 'secret-badge'}>{metadata.configured ? 'Configured' : 'Missing'}</span>
+                </header>
+                <p className="connection-description">{definition.description}</p>
+                <dl className="connection-metadata">
+                  <div><dt>Hint</dt><dd className="mono">{metadata.displayHint ?? 'Not available'}</dd></div>
+                  <div><dt>Updated</dt><dd>{metadata.updatedAt ? formatDate(metadata.updatedAt) : 'Not stored by Sky'}</dd></div>
+                </dl>
+                {definition.name === 'claudeAgentSdk.oauthToken' && metadata.source === 'environment' && (
+                  <p className="environment-notice" role="note">
+                    CLAUDE_CODE_OAUTH_TOKEN is the effective credential. Replacing or deleting the stored value will not override this runtime environment.
+                  </p>
+                )}
+                <fieldset className="secret-actions">
+                  <legend>Credential action</legend>
+                  {(['keep', 'replace', 'delete'] as const).map((choice) => (
+                    <label key={choice}>
+                      <input type="radio" name={`${fieldName}-action`} value={choice} checked={action === choice} onChange={() => updateAction(definition.name, choice)} />
+                      {choice[0].toUpperCase() + choice.slice(1)}
+                    </label>
+                  ))}
+                </fieldset>
+                {action === 'replace' && (
+                  <label className="secret-input">
+                    <span>New {definition.label}</span>
+                    <input type="password" aria-label={`New ${definition.label}`} value={values[definition.name]} placeholder={definition.placeholder} autoComplete="new-password" spellCheck="false" onChange={(event) => setValues((current) => ({ ...current, [definition.name]: event.target.value }))} />
+                  </label>
+                )}
+                <div className="connection-card-actions">
+                  <button className="secondary-button" type="button" disabled={busy === `secret:${definition.name}`} onClick={() => void applySecret(definition.name)}>
+                    {busy === `secret:${definition.name}` ? 'Applying…' : `Apply ${action}`}
+                  </button>
+                  {definition.target && (
+                    <button className="text-button" type="button" disabled={busy === `check:${definition.target}`} onClick={() => void runCheck(definition.target!)}>
+                      {busy === `check:${definition.target}` ? 'Checking…' : 'Run connection check'}
+                    </button>
+                  )}
+                </div>
+                {definition.target && <CheckResult check={connections.checks[definition.target]} />}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="panel backend-check-panel" aria-labelledby="backend-check-heading">
+        <PanelHeader eyebrow="Explicit verification" title="Backend and model" id="backend-check-heading" />
+        <p>Checks {configuration.settings.agentBackend === 'pi' ? 'the local Pi registry, provider credential, and effort compatibility' : 'Claude Agent SDK authenticated account information without creating a prompt or turn'}.</p>
+        <button className="secondary-button" type="button" disabled={busy === 'check:agent'} onClick={() => void runCheck('agent')}>
+          {busy === 'check:agent' ? 'Checking…' : 'Run backend check'}
+        </button>
+        <CheckResult check={connections.checks.agent} />
+      </section>
     </div>
   );
 }
