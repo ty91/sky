@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
-import { SlackStartupError, startBotRuntime, type BotRuntime } from '../bot.js';
+import {
+  SlackStartupError,
+  startBotRuntime,
+  type BotRuntime,
+  type BotRuntimeObservability,
+} from '../bot.js';
 import { createConfiguration, type ConfigurationInspection } from '../configuration.js';
 import {
   createRuntimeController,
@@ -48,6 +53,7 @@ import {
   type ConnectionsOptions,
 } from '../connections.js';
 import { inspectLaunchAgent, type LaunchdStatus } from '../service/launch-agent.js';
+import { createSkydClaudeDiagnostics } from './claude-diagnostics.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -58,6 +64,7 @@ export type RuntimeStarter = (
   runtimeController: RuntimeController,
   skyHome: SkyHome,
   scheduledJobStore: ScheduledJobStore,
+  observability?: BotRuntimeObservability,
 ) => Promise<BotRuntime>;
 
 export type StartSkydOptions = {
@@ -136,6 +143,11 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     restartTimeoutMs: options.restartDrainTimeoutMs,
     stopTimeoutMs: options.stopDrainTimeoutMs,
   });
+  const claudeDiagnostics = createSkydClaudeDiagnostics({
+    paths,
+    logger,
+    supervisionMode: runtimeController.supervisionMode,
+  });
   const adminOptions = options.admin === false ? undefined : (options.admin ?? {});
   const adminHost = adminOptions?.host ?? DEFAULT_ADMIN_HOST;
   const adminPort = adminOptions?.port ?? DEFAULT_ADMIN_PORT;
@@ -162,6 +174,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const connections = createConnections(configuration, {
     homeDir: options.homeDir ?? os.homedir(),
     ...options.connections,
+    claudeDiagnostics,
   });
   const scheduledJobStore = openScheduledJobStore(paths);
   const controlConfiguration = (inspection: ConfigurationInspection) => ({
@@ -175,7 +188,9 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const operations: OperationRegistry = createOperationRegistry({
     runtimeController,
     logger,
-    run: options.runOperation ?? createMaintenanceOperationRunner(paths, logger, configuration),
+    run:
+      options.runOperation ??
+      createMaintenanceOperationRunner(paths, logger, configuration, claudeDiagnostics),
     ...options.operationRegistry,
   });
   const adminAuthentication = createAdminAuthentication({
@@ -401,7 +416,9 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       mutable.nextRetryAt = null;
 
       try {
-        runtime = await startRuntime(settings, runtimeController, paths, scheduledJobStore);
+        runtime = await startRuntime(settings, runtimeController, paths, scheduledJobStore, {
+          claudeDiagnostics,
+        });
       } catch (error) {
         if (!(error instanceof SlackStartupError)) throw error;
         attempt += 1;

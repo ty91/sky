@@ -246,6 +246,23 @@ test('service install records an absolute SKY_HOME override for launchd', { time
   }
 });
 
+test('service install preserves only the explicit Claude diagnostics opt-in', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  try {
+    const installed = await runCli(['service', 'install', '--json'], {
+      ...context.env,
+      SKY_CLAUDE_DIAGNOSTICS: '1',
+    });
+    assert.equal(installed.code, 0, installed.stderr || installed.stdout);
+
+    const plist = await parsePlist(context.plistFile);
+    assert.equal(plist.EnvironmentVariables.SKY_CLAUDE_DIAGNOSTICS, '1');
+    assert.doesNotMatch(JSON.stringify(plist), /CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY/);
+  } finally {
+    await cleanup(context);
+  }
+});
+
 test('unhealthy startup states are reported as completed but non-zero', { timeout: 30_000 }, async (t) => {
   for (const runtimeState of ['needs_configuration', 'degraded']) {
     await t.test(runtimeState, async () => {

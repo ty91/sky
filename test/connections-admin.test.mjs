@@ -148,16 +148,20 @@ test('admin connection flow keeps secrets write-only and normalizes external che
           { headers: { 'x-oauth-scopes': granted.join(',') } },
         );
       },
-      claudeAccountInfo: async ({ token }) => {
-        if (token === secrets.invalidClaude) throw new Error('authentication failed');
-        return {
-          email: 'sky@example.com',
-          organization: 'Sky',
-          subscriptionType: 'max',
-          tokenSource: 'CLAUDE_CODE_OAUTH_TOKEN',
-          apiProvider: 'firstParty',
-        };
-      },
+      claudeQuery: ({ options }) => ({
+        accountInfo: async () => {
+          const token = options.env.CLAUDE_CODE_OAUTH_TOKEN;
+          if (token === secrets.invalidClaude) throw new Error('authentication failed');
+          return {
+            email: 'sky@example.com',
+            organization: 'Sky',
+            subscriptionType: 'max',
+            tokenSource: 'CLAUDE_CODE_OAUTH_TOKEN',
+            apiProvider: 'firstParty',
+          };
+        },
+        close() {},
+      }),
     },
   });
 
@@ -257,6 +261,10 @@ test('admin connection flow keeps secrets write-only and normalizes external che
 
     assert.ok(seenAuthorization.includes(secrets.goodBot));
     const combinedOutput = `${responseBodies.join('\n')}\n${await readFile(daemon.paths.logFile, 'utf8')}`;
+    assert.match(combinedOutput, /"scope":"claude-query"/);
+    assert.match(combinedOutput, /connection_check/);
+    assert.match(combinedOutput, /query_created/);
+    assert.match(combinedOutput, /query_completed/);
     for (const value of [...Object.values(secrets), socketUrl]) {
       assert.equal(combinedOutput.includes(value), false, `sensitive value escaped: ${value}`);
     }

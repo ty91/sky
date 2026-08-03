@@ -6,11 +6,13 @@ import type { Configuration } from '../configuration.js';
 import type { SkyHome } from '../sky-home.js';
 import type { JsonlLogger } from './logger.js';
 import type { OperationRunner } from './operations.js';
+import type { ClaudeQueryDiagnostics } from '../agents/backend/claude-observability.js';
 
 export function createMaintenanceOperationRunner(
   skyHome: SkyHome,
   logger: JsonlLogger,
   configuration: Configuration,
+  claudeDiagnostics?: ClaudeQueryDiagnostics,
 ): OperationRunner {
   return async (request, context) => {
     const settings = configuration.resolveRuntime().settings;
@@ -21,6 +23,7 @@ export function createMaintenanceOperationRunner(
     ]);
     const createSession = resolveAgentSessionFactory(settings.agentBackend, {
       claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
+      claudeDiagnostics,
     });
     const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,

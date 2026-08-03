@@ -1,12 +1,14 @@
 import { createClaudeAgentSdkSessionFactory } from './claude.js';
 import { createPiSessionFactory } from './pi.js';
 import type { AgentBackend, AgentSessionFactory } from './types.js';
+import type { ClaudeQueryDiagnostics } from './claude-observability.js';
 
 export const createDefaultAgentSessionFactory: AgentSessionFactory = createPiSessionFactory;
 
 export type ResolveAgentSessionFactoryOptions = {
   /** OAuth token from settings.json, used as a fallback when no env var is set. */
   claudeCodeOauthToken?: string;
+  claudeDiagnostics?: ClaudeQueryDiagnostics;
 };
 
 export function resolveAgentSessionFactory(
@@ -24,7 +26,10 @@ export function resolveAgentSessionFactory(
       // the backend throws its helpful "token required" error at session start.
       const token = process.env.CLAUDE_CODE_OAUTH_TOKEN ?? options.claudeCodeOauthToken;
       return createClaudeAgentSdkSessionFactory(
-        token ? { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token } } : {},
+        {
+          ...(token ? { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token } } : {}),
+          ...(options.claudeDiagnostics ? { diagnostics: options.claudeDiagnostics } : {}),
+        },
       );
     }
   }

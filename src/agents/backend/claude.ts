@@ -12,6 +12,11 @@ import {
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentConfig } from '../types.js';
 import { Pushable } from '../../session/pushable.js';
+import {
+  claudeDebugQueryOptions,
+  startClaudeQueryAttempt,
+  type ClaudeQueryDiagnostics,
+} from './claude-observability.js';
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -52,11 +57,13 @@ type ClaudeAgentSdkDeps = {
   createSdkMcpServer: typeof sdkCreateSdkMcpServer;
   tool: typeof sdkTool;
   env?: NodeJS.ProcessEnv;
+  diagnostics?: ClaudeQueryDiagnostics;
 };
 
 type ActiveTurn = {
   query: ClaudeQuery;
   input: Pushable<SDKUserMessage>;
+  observation: ReturnType<typeof startClaudeQueryAttempt>;
   interrupted: boolean;
 };
 
@@ -297,27 +304,43 @@ class ClaudeAgentSdkSession implements AgentSession {
     }
 
     const input = new Pushable<SDKUserMessage>();
-    const query = this.deps.query({
-      prompt: input,
-      options: this.createQueryOptions(),
+    const observation = startClaudeQueryAttempt({
+      diagnostics: this.deps.diagnostics,
+      purpose: 'conversation_turn',
+      cwd: this.options.cwd,
+      env: this.env,
     });
+    let query: ClaudeQuery;
+    try {
+      query = this.deps.query({
+        prompt: input,
+        options: this.createQueryOptions(),
+      });
+      observation.queryCreated();
+    } catch (error) {
+      observation.failed(error);
+      throw error;
+    }
     const turn: ActiveTurn = {
       query,
       input,
+      observation,
       interrupted: false,
     };
     this.activeTurn = turn;
 
-    input.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-    });
-
     let resultError: Error | undefined;
 
     try {
+      input.push({
+        type: 'user',
+        message: { role: 'user', content: text },
+        parent_tool_use_id: null,
+      });
+      observation.inputEnqueued();
+
       for await (const message of query) {
+        observation.sdkMessage(message);
         if (message.type === 'system' && message.subtype === 'init') {
           this.sessionIdValue = message.session_id;
           continue;
@@ -346,7 +369,9 @@ class ClaudeAgentSdkSession implements AgentSession {
           }
         }
       }
+      observation.completed();
     } catch (error) {
+      observation.failed(error);
       if (turn.interrupted && isEdeDiagnostic(error)) {
         return;
       }
@@ -370,6 +395,7 @@ class ClaudeAgentSdkSession implements AgentSession {
     }
 
     turn.interrupted = true;
+    turn.observation.aborted();
     try {
       await turn.query.interrupt();
     } catch (error) {
@@ -383,6 +409,7 @@ class ClaudeAgentSdkSession implements AgentSession {
     const turn = this.activeTurn;
     if (turn) {
       turn.interrupted = true;
+      turn.observation.aborted();
       turn.input.end();
       turn.query.close();
     }
@@ -417,6 +444,7 @@ class ClaudeAgentSdkSession implements AgentSession {
       includePartialMessages: true,
       thinking: { type: 'adaptive' },
       env: this.env,
+      ...claudeDebugQueryOptions(this.deps.diagnostics),
       mcpServers: {
         [CLAUDE_MCP_SERVER_NAME]: this.mcpServer,
       },

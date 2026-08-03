@@ -6,6 +6,11 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import {
+  claudeDebugQueryOptions,
+  startClaudeQueryAttempt,
+  type ClaudeQueryDiagnostics,
+} from './agents/backend/claude-observability.js';
+import {
   ModelRuntime as PiModelRuntime,
   readStoredCredential,
 } from '@earendil-works/pi-coding-agent';
@@ -92,6 +97,8 @@ export type ConnectionsOptions = {
     workspace: string;
     timeoutMs: number;
   }) => Promise<AccountInfo>;
+  claudeQuery?: typeof claudeQuery;
+  claudeDiagnostics?: ClaudeQueryDiagnostics;
   homeDir: string;
   now?: () => Date;
   timeoutMs?: number;
@@ -298,26 +305,41 @@ async function defaultClaudeAccountInfo(input: {
   token: string;
   workspace: string;
   timeoutMs: number;
+}, deps: {
+  query: typeof claudeQuery;
+  diagnostics?: ClaudeQueryDiagnostics;
 }): Promise<AccountInfo> {
   const abortController = new AbortController();
   let query: ClaudeQuery | undefined;
+  const env = claudeEnvironment(input.token);
+  const observation = startClaudeQueryAttempt({
+    diagnostics: deps.diagnostics,
+    purpose: 'connection_check',
+    cwd: input.workspace,
+    env,
+  });
   const timeout = setTimeout(() => abortController.abort(), input.timeoutMs);
   timeout.unref?.();
   try {
-    query = claudeQuery({
+    query = deps.query({
       prompt: pendingInput(abortController.signal),
       options: {
         abortController,
         cwd: input.workspace,
-        env: claudeEnvironment(input.token),
+        env,
         settingSources: [],
         settings: { disableBundledSkills: true },
         tools: [],
         persistSession: false,
+        ...claudeDebugQueryOptions(deps.diagnostics),
       },
     });
-    return await query.accountInfo();
+    observation.queryCreated();
+    const account = await query.accountInfo();
+    observation.completed();
+    return account;
   } catch (error) {
+    observation.failed(error);
     if (
       abortController.signal.aborted ||
       (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'))
@@ -441,7 +463,13 @@ export function createConnections(
   options: ConnectionsOptions,
 ): Connections {
   const fetcher = options.fetch ?? fetch;
-  const accountInfo = options.claudeAccountInfo ?? defaultClaudeAccountInfo;
+  const accountInfo =
+    options.claudeAccountInfo ??
+    ((input: { token: string; workspace: string; timeoutMs: number }) =>
+      defaultClaudeAccountInfo(input, {
+        query: options.claudeQuery ?? claudeQuery,
+        diagnostics: options.claudeDiagnostics,
+      }));
   const now = options.now ?? (() => new Date());
   const timeoutMs = options.timeoutMs ?? 8_000;
   const checks: Record<ConnectionTarget, ConnectionCheck | null> = {

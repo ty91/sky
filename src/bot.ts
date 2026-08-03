@@ -22,6 +22,7 @@ import {
 } from './slack/files.js';
 import type { Settings } from './settings.js';
 import { createSkyHome, type SkyHome } from './sky-home.js';
+import type { ClaudeQueryDiagnostics } from './agents/backend/claude-observability.js';
 
 export class SlackStartupError extends Error {
   constructor(cause: unknown) {
@@ -33,6 +34,10 @@ export class SlackStartupError extends Error {
 export type BotRuntime = {
   admin: RuntimeAdmin;
   close(): Promise<void>;
+};
+
+export type BotRuntimeObservability = {
+  claudeDiagnostics?: ClaudeQueryDiagnostics;
 };
 
 function safeRead(filePath: string): string {
@@ -83,6 +88,7 @@ export async function startBotRuntime(
   runtimeController: RuntimeController,
   skyHome: SkyHome = createSkyHome(),
   sharedScheduledJobStore?: ScheduledJobStore,
+  observability: BotRuntimeObservability = {},
 ): Promise<BotRuntime> {
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
@@ -91,6 +97,7 @@ export async function startBotRuntime(
   console.log(`[startup] workspace: ${settings.workspace}`);
   const createSession = resolveAgentSessionFactory(settings.agentBackend, {
     claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
+    claudeDiagnostics: observability.claudeDiagnostics,
   });
 
   const scheduledJobStore = sharedScheduledJobStore ?? openScheduledJobStore(skyHome);

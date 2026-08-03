@@ -36,6 +36,7 @@ const STOP_TIMEOUT_MS = 35_000;
 const RESTART_TIMEOUT_MS = 155_000;
 const LEGACY_STOP_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 250;
+const CLAUDE_DIAGNOSTICS_ENV = 'SKY_CLAUDE_DIAGNOSTICS';
 
 type LaunchAgentPaths = {
   skyHome: SkyHome;
@@ -233,6 +234,12 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
     <string>${xml(paths.skyHome.rootDir)}</string>
 `
       : '';
+  const claudeDiagnosticsEnvironment =
+    process.env[CLAUDE_DIAGNOSTICS_ENV] === '1'
+      ? `    <key>${CLAUDE_DIAGNOSTICS_ENV}</key>
+    <string>1</string>
+`
+      : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -263,7 +270,7 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
     <string>${xml(paths.homeDir)}</string>
     <key>PATH</key>
     <string>${xml(environmentPath)}</string>
-${skyHomeEnvironment}   </dict>
+${skyHomeEnvironment}${claudeDiagnosticsEnvironment}   </dict>
 </dict>
 </plist>
 `;

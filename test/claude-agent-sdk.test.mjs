@@ -76,13 +76,14 @@ function errorResult(sessionId) {
   };
 }
 
-function createFakeDeps({ env, query }) {
+function createFakeDeps({ env, query, diagnostics }) {
   const toolCalls = [];
   const mcpServerCalls = [];
   return {
     deps: {
       env,
       query,
+      diagnostics,
       tool: (name, description, inputSchema, handler, extras) => {
         const toolDef = { name, description, inputSchema, handler, extras };
         toolCalls.push(toolDef);
@@ -116,6 +117,92 @@ test('claude agent sdk factory fails fast without an OAuth token', async () => {
       }),
     /CLAUDE_CODE_OAUTH_TOKEN/,
   );
+});
+
+test('claude agent sdk reports bounded startup stalls without exposing prompt or credentials', async () => {
+  const releaseFirstMessage = deferred();
+  const scheduled = [];
+  const records = [];
+  let elapsed = 0;
+  const { deps } = createFakeDeps({
+    env: {
+      HOME: '/Users/tester',
+      PATH: '/secret/bin',
+      SHELL: '/bin/zsh',
+      TERM: 'xterm-256color',
+      LANG: 'ko_KR.UTF-8',
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token-must-not-leak',
+    },
+    diagnostics: {
+      supervisionMode: 'launchd',
+      createAttemptId: () => 'attempt-1',
+      clock: () => elapsed,
+      schedule: (delayMs, callback) => {
+        const timer = { delayMs, callback, cancelled: false };
+        scheduled.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+      sink: (level, event, fields) => records.push({ level, event, fields }),
+    },
+    query: (params) =>
+      createQuery(async function* () {
+        const input = params.prompt[Symbol.asyncIterator]();
+        await input.next();
+        await releaseFirstMessage.promise;
+        yield initMessage('claude-session-stall');
+        yield successResult('claude-session-stall');
+        await input.next();
+      }),
+  });
+  const createSession = createClaudeAgentSdkSessionFactory(deps);
+  const session = await createSession({
+    key: 'thread-stall',
+    cwd: '/tmp/workspace',
+    agent: {
+      name: 'main',
+      systemPrompt: 'system',
+      model: 'anthropic/claude-opus-4-7',
+    },
+  });
+
+  const prompt = session.prompt('prompt-must-not-leak');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(scheduled.map(({ delayMs }) => delayMs), [5_000, 15_000]);
+
+  elapsed = 5_000;
+  scheduled[0].callback();
+  elapsed = 15_000;
+  scheduled[1].callback();
+  releaseFirstMessage.resolve();
+  await prompt;
+
+  assert.deepEqual(
+    records.map(({ event }) => event),
+    [
+      'query_created',
+      'input_enqueued',
+      'first_message_stalled',
+      'first_message_stalled',
+      'first_sdk_message',
+      'system_init',
+      'result_received',
+      'query_completed',
+    ],
+  );
+  assert.deepEqual(
+    records.filter(({ event }) => event === 'first_message_stalled').map(({ level }) => level),
+    ['warn', 'error'],
+  );
+  assert.equal(records[2].fields.shell, '/bin/zsh');
+  assert.equal(records[2].fields.term, 'xterm-256color');
+  assert.equal(records[2].fields.lang, 'ko_KR.UTF-8');
+  assert.equal(records[2].fields.path, undefined);
+  assert.equal(records[3].fields.shell, undefined);
+  assert.ok(scheduled.every(({ cancelled }) => cancelled));
+  const serialized = JSON.stringify(records);
+  assert.doesNotMatch(serialized, /prompt-must-not-leak|oauth-token-must-not-leak|secret\/bin/);
 });
 
 test('claude agent sdk session streams text and passes isolated per-turn query options', async (t) => {
