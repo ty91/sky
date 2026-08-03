@@ -57,6 +57,9 @@ test('the release package installs globally and exposes the sky and skyd CLIs', 
 
     assert.ok(packedPaths.includes('dist/index.js'));
     assert.ok(packedPaths.includes('dist/skyd.js'));
+    assert.ok(packedPaths.includes('dist/admin/index.html'));
+    assert.ok(packedPaths.some((packedPath) => /^dist\/admin\/assets\/index-[\w-]+\.js$/.test(packedPath)));
+    assert.ok(packedPaths.some((packedPath) => /^dist\/admin\/assets\/index-[\w-]+\.css$/.test(packedPath)));
     assert.ok(!packedPaths.includes('dist/stale-package-output.js'));
     assert.ok(
       packedPaths.every(
@@ -95,6 +98,24 @@ test('the release package installs globally and exposes the sky and skyd CLIs', 
     assert.equal(run(skyd, ['--version'], { env: isolatedEnv }).trim(), repositoryManifest.version);
     assert.match(run(skyd, ['--help'], { env: isolatedEnv }), /Usage: skyd/);
     assert.equal((await lstat(skyd)).mode & 0o111, 0o111);
+
+    const globalPackages = JSON.parse(
+      run('pnpm', ['list', '--global', '--json', '--depth', '0'], { env: isolatedEnv }),
+    );
+    const installedPackageRoot = globalPackages[0]?.dependencies?.['@ty91/sky']?.path;
+    assert.ok(installedPackageRoot);
+    const installedAdminHtml = await readFile(
+      path.join(installedPackageRoot, 'dist', 'admin', 'index.html'),
+      'utf8',
+    );
+    const installedAssetPath = installedAdminHtml.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
+    assert.ok(installedAssetPath, installedAdminHtml);
+    const installedAdminScript = await readFile(
+      path.join(installedPackageRoot, 'dist', 'admin', installedAssetPath.replace(/^\//, '')),
+      'utf8',
+    );
+    assert.match(installedAdminScript, /Sign in to Sky/);
+    assert.match(installedAdminScript, /Dashboard/);
   } finally {
     await rm(staleOutput, { force: true });
     await rm(tempDir, { recursive: true, force: true });

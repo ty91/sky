@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import os from 'node:os';
 import { SlackStartupError, startBotRuntime, type BotRuntime } from '../bot.js';
 import { createConfiguration, type ConfigurationInspection } from '../configuration.js';
 import {
@@ -38,6 +39,8 @@ import type {
   SlackConnectionState,
 } from './types.js';
 import { runDiagnostics } from '../diagnostics.js';
+import { openScheduledJobStore } from '../scheduler/store.js';
+import type { ScheduledJobStore } from '../scheduler/types.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -47,6 +50,7 @@ export type RuntimeStarter = (
   settings: Settings,
   runtimeController: RuntimeController,
   skyHome: SkyHome,
+  scheduledJobStore: ScheduledJobStore,
 ) => Promise<BotRuntime>;
 
 export type StartSkydOptions = {
@@ -145,6 +149,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   let activeConfigurationIdentity: string | undefined;
   let runtime: BotRuntime | undefined;
   const configuration = createConfiguration(paths);
+  const scheduledJobStore = openScheduledJobStore(paths);
   const controlConfiguration = (inspection: ConfigurationInspection) => ({
     ...inspection.public,
     activeRevision: activeConfigurationRevision,
@@ -200,6 +205,35 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
   const control = createDaemonControl({
     getStatus: status,
+    getOverview: async () => {
+      const diagnostics = await runDiagnostics(paths, {
+        daemonStatus: status(),
+        activeSettings,
+        homeDir: options.homeDir,
+      });
+      const jobs = scheduledJobStore.list();
+      const pending = jobs.filter(({ status: jobStatus }) => jobStatus === 'pending');
+      return {
+        schemaVersion: 1,
+        host: {
+          hostname: os.hostname(),
+          platform: process.platform,
+          architecture: process.arch,
+        },
+        daemon: status(),
+        diagnostics,
+        scheduler: {
+          total: jobs.length,
+          pending: pending.length,
+          running: jobs.filter(({ status: jobStatus }) => jobStatus === 'running').length,
+          failed: jobs.filter(({ status: jobStatus }) => jobStatus === 'failed').length,
+          nextRunAt:
+            pending.length === 0
+              ? null
+              : new Date(Math.min(...pending.map(({ nextRunAt }) => nextRunAt))).toISOString(),
+        },
+      };
+    },
     issueAdminLogin: () => {
       if (mutable.admin.state !== 'listening') throw new ControlError('admin_unavailable');
       return {
@@ -326,7 +360,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       mutable.nextRetryAt = null;
 
       try {
-        runtime = await startRuntime(settings, runtimeController, paths);
+        runtime = await startRuntime(settings, runtimeController, paths, scheduledJobStore);
       } catch (error) {
         if (!(error instanceof SlackStartupError)) throw error;
         attempt += 1;
@@ -377,6 +411,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     }
     await runtime?.close();
     runtime = undefined;
+    scheduledJobStore.close();
     mutable.slackState = 'stopped';
     if (adminServer) {
       await adminServer.close();

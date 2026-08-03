@@ -1,5 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { SettingsPatch } from '../configuration.js';
 import type { AdminAuthentication, AuthenticatedAdminSession } from './admin-auth.js';
 import { ControlError, type DaemonControl } from './control.js';
@@ -10,53 +13,7 @@ export const DEFAULT_ADMIN_PORT = 4815;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const SESSION_COOKIE = 'sky_admin_session';
 const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
-
-const LOGIN_HTML = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Sky Admin</title>
-  </head>
-  <body>
-    <main>
-      <h1>Sky Admin</h1>
-      <form id="login-form">
-        <label for="login-token">Login token</label>
-        <input id="login-token" name="token" autocomplete="off" required>
-        <button type="submit">Sign in</button>
-      </form>
-      <p id="login-status" role="status"></p>
-    </main>
-    <script src="/login.js"></script>
-  </body>
-</html>
-`;
-
-const LOGIN_SCRIPT = `const form = document.querySelector('#login-form');
-const input = document.querySelector('#login-token');
-const status = document.querySelector('#login-status');
-const params = new URLSearchParams(window.location.hash.slice(1));
-const fragmentToken = params.get('token');
-if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
-
-async function exchangeToken(token) {
-  status.textContent = 'Signing in…';
-  const response = await fetch('/api/auth/exchange', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token }),
-  });
-  status.textContent = response.ok ? 'Signed in.' : 'The login token is invalid or expired.';
-  if (response.ok) form.hidden = true;
-}
-
-form.addEventListener('submit', (event) => {
-  event.preventDefault();
-  void exchangeToken(input.value);
-});
-if (fragmentToken) void exchangeToken(fragmentToken);
-`;
+const ADMIN_ASSET_DIRECTORY = fileURLToPath(new URL('../admin/', import.meta.url));
 
 export type AdminHttpServer = {
   host: string;
@@ -91,11 +48,11 @@ function applySecurityHeaders(response: ServerResponse): void {
 function writeBody(
   response: ServerResponse,
   statusCode: number,
-  contentType: string,
-  body: string,
+  mediaType: string,
+  body: string | Buffer,
 ): void {
   response.writeHead(statusCode, {
-    'content-type': contentType,
+    'content-type': mediaType,
     'content-length': Buffer.byteLength(body),
   });
   response.end(body);
@@ -112,6 +69,84 @@ function writeError(response: ServerResponse, statusCode: number, code: string):
 function methodNotAllowed(response: ServerResponse, allow: string): void {
   response.setHeader('allow', allow);
   writeError(response, 405, 'method_not_allowed');
+}
+
+function contentType(filePath: string): string {
+  switch (path.extname(filePath)) {
+    case '.html':
+      return 'text/html; charset=utf-8';
+    case '.js':
+      return 'text/javascript; charset=utf-8';
+    case '.css':
+      return 'text/css; charset=utf-8';
+    case '.json':
+      return 'application/json; charset=utf-8';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.png':
+      return 'image/png';
+    case '.ico':
+      return 'image/x-icon';
+    case '.woff2':
+      return 'font/woff2';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'EISDIR')
+  );
+}
+
+async function readAdminAsset(requestPath: string): Promise<{ filePath: string; body: Buffer }> {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(requestPath);
+  } catch {
+    throw new ControlError('invalid_request');
+  }
+  if (decoded.includes('\0')) throw new ControlError('invalid_request');
+  const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
+  const candidate = path.resolve(ADMIN_ASSET_DIRECTORY, relative);
+  const assetRoot = path.resolve(ADMIN_ASSET_DIRECTORY);
+  if (candidate !== assetRoot && !candidate.startsWith(`${assetRoot}${path.sep}`)) {
+    throw new ControlError('not_found');
+  }
+  try {
+    return { filePath: candidate, body: await readFile(candidate) };
+  } catch (error) {
+    if (!isMissingFile(error) || decoded.startsWith('/assets/')) throw error;
+    const indexPath = path.join(ADMIN_ASSET_DIRECTORY, 'index.html');
+    return { filePath: indexPath, body: await readFile(indexPath) };
+  }
+}
+
+async function serveAdminAsset(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestPath: string,
+): Promise<void> {
+  if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+  try {
+    const asset = await readAdminAsset(requestPath);
+    response.setHeader(
+      'cache-control',
+      requestPath.startsWith('/assets/')
+        ? 'public, max-age=31536000, immutable'
+        : 'no-store',
+    );
+    writeBody(response, 200, contentType(asset.filePath), asset.body);
+  } catch (error) {
+    if (isMissingFile(error) || (error instanceof ControlError && error.code === 'not_found')) {
+      writeError(response, 404, 'not_found');
+      return;
+    }
+    throw error;
+  }
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -191,15 +226,8 @@ async function handleRequest(
   applySecurityHeaders(response);
   const url = new URL(request.url ?? '/', 'http://localhost');
 
-  if (url.pathname === '/') {
-    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
-    writeBody(response, 200, 'text/html; charset=utf-8', LOGIN_HTML);
-    return;
-  }
-
-  if (url.pathname === '/login.js') {
-    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
-    writeBody(response, 200, 'text/javascript; charset=utf-8', LOGIN_SCRIPT);
+  if (!url.pathname.startsWith('/api/')) {
+    await serveAdminAsset(request, response, url.pathname);
     return;
   }
 
@@ -239,6 +267,12 @@ async function handleRequest(
   if (url.pathname === '/api/status') {
     if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
     writeJson(response, 200, await control.execute({ type: 'status' }));
+    return;
+  }
+
+  if (url.pathname === '/api/overview') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    writeJson(response, 200, await control.execute({ type: 'overview' }));
     return;
   }
 

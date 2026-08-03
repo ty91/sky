@@ -13,7 +13,7 @@ import type {
   OperationRegistry,
   OperationRequest,
 } from './operations.js';
-import type { DaemonStatus } from './types.js';
+import type { AdminOverview, DaemonStatus } from './types.js';
 
 export type ControlConfiguration = PublicConfiguration & {
   activeRevision: number | null;
@@ -33,6 +33,7 @@ export type AdminLoginGrant = {
 
 export type ControlDependencies = {
   getStatus(): DaemonStatus;
+  getOverview?: () => AdminOverview | Promise<AdminOverview>;
   issueAdminLogin?: () => AdminLoginGrant;
   requestRestart?: () => ControlRestartResult;
   operations?: OperationRegistry;
@@ -57,6 +58,7 @@ type SecretValueBody = {
 
 export type ControlExecuteRequest =
   | { type: 'status' }
+  | { type: 'overview' }
   | { type: 'admin.login.issue' }
   | { type: 'diagnostics' }
   | { type: 'configuration.get' }
@@ -75,11 +77,13 @@ export type ControlSubscribeRequest =
 export type ControlExecuteResult<Request extends ControlExecuteRequest> =
   Request extends { type: 'status' }
     ? DaemonStatus
-    : Request extends { type: 'admin.login.issue' }
-      ? AdminLoginGrant
-      : Request extends { type: 'diagnostics' }
-        ? DiagnosticsReport
-        : Request extends
+    : Request extends { type: 'overview' }
+      ? AdminOverview
+      : Request extends { type: 'admin.login.issue' }
+        ? AdminLoginGrant
+        : Request extends { type: 'diagnostics' }
+          ? DiagnosticsReport
+          : Request extends
               | { type: 'configuration.get' }
               | { type: 'configuration.patch' }
               | { type: 'secret.put' }
@@ -304,6 +308,9 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
         switch (request.type) {
           case 'status':
             return asResult<Request>(dependencies.getStatus());
+          case 'overview':
+            if (!dependencies.getOverview) throw new ControlError('not_found');
+            return asResult<Request>(await dependencies.getOverview());
           case 'admin.login.issue':
             if (!dependencies.issueAdminLogin) throw new ControlError('admin_unavailable');
             return asResult<Request>(dependencies.issueAdminLogin());

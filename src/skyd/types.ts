@@ -1,3 +1,5 @@
+import type { DiagnosticsReport } from '../diagnostics.js';
+
 export type RuntimeState =
   | 'starting'
   | 'ready'
@@ -49,4 +51,22 @@ export type DaemonStatus = {
     code: string;
     at: string;
   }>;
+};
+
+export type AdminOverview = {
+  schemaVersion: 1;
+  host: {
+    hostname: string;
+    platform: string;
+    architecture: string;
+  };
+  daemon: DaemonStatus;
+  diagnostics: DiagnosticsReport;
+  scheduler: {
+    total: number;
+    pending: number;
+    running: number;
+    failed: number;
+    nextRunAt: string | null;
+  };
 };

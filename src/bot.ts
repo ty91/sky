@@ -12,6 +12,7 @@ import {
   type ScheduledJobScheduler,
 } from './scheduler/loop.js';
 import { openScheduledJobStore } from './scheduler/store.js';
+import type { ScheduledJobStore } from './scheduler/types.js';
 import { startSlackApp, stopSlackApp } from './slack/app.js';
 import {
   createSlackFileUploader,
@@ -79,6 +80,7 @@ export async function startBotRuntime(
   settings: Settings,
   runtimeController: RuntimeController,
   skyHome: SkyHome = createSkyHome(),
+  sharedScheduledJobStore?: ScheduledJobStore,
 ): Promise<BotRuntime> {
   const loadPrompt = () => loadSystemPrompt(settings.workspace);
   const initialPrompt = loadPrompt();
@@ -89,7 +91,7 @@ export async function startBotRuntime(
     claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
   });
 
-  const scheduledJobStore = openScheduledJobStore(skyHome);
+  const scheduledJobStore = sharedScheduledJobStore ?? openScheduledJobStore(skyHome);
   let slackApp: Awaited<ReturnType<typeof startSlackApp>> | undefined;
   let scheduledJobScheduler: ScheduledJobScheduler | undefined;
 
@@ -126,7 +128,7 @@ export async function startBotRuntime(
       }
       conversationStore.close();
       threadModelStore.close();
-      scheduledJobStore.close();
+      if (!sharedScheduledJobStore) scheduledJobStore.close();
     })();
     return closePromise;
   };

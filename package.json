@@ -13,7 +13,7 @@
   "scripts": {
     "dev": "tsx src/bot.ts",
     "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm clean && tsc -p tsconfig.json",
+    "build": "pnpm clean && tsc -p tsconfig.json && vite build --config admin/vite.config.ts --logLevel error",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "start": "node dist/index.js start",
@@ -21,12 +21,14 @@
     "restart": "node dist/index.js restart",
     "status": "node dist/index.js status",
     "foreground": "node dist/skyd.js --foreground",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p admin/tsconfig.json",
+    "test": "pnpm build && node --test test/*.test.mjs && vitest run --config admin/vite.config.ts",
     "test:package": "node --test test/package-release.smoke.mjs",
     "test:launchd": "node --test test/launchd-package.smoke.mjs",
     "release:check-tag": "node scripts/verify-release-tag.mjs",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "test:admin": "vitest run --config admin/vite.config.ts",
+    "dev:admin": "vite --config admin/vite.config.ts"
   },
   "engines": {
     "node": ">=24.16.0 <25"
@@ -41,10 +43,23 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^30.0.1",
+    "msw": "^2.15.0",
     "oxlint": "^1.63.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
     "tsx": "^4.20.6",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.219",

@@ -10,6 +10,7 @@ import {
   getDaemonStatus,
   issueAdminLogin,
 } from '../dist/skyd/control-uds.js';
+import { openScheduledJobStore } from '../dist/scheduler/store.js';
 
 function tcpRequest(port, method, requestPath, options = {}) {
   const body = options.body === undefined ? undefined : JSON.stringify(options.body);
@@ -56,6 +57,21 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
     admin: { host: '127.0.0.1', port: 0 },
   });
   try {
+    const scheduler = openScheduledJobStore(daemon.paths);
+    scheduler.create({
+      id: 'admin-overview-job',
+      title: 'Admin overview job',
+      kind: 'once',
+      nextRunAt: Date.parse('2026-08-04T02:00:00.000Z'),
+      timezone: 'Asia/Seoul',
+      targetChannel: 'D123',
+      threadStrategy: 'new-root',
+      deliveryMode: 'agent',
+      prompt: 'Run from the scheduler.',
+      createdAt: Date.parse('2026-08-03T00:00:00.000Z'),
+    });
+    scheduler.close();
+
     const daemonStatus = await getDaemonStatus(daemon.paths.socketFile);
     assert.equal(daemonStatus.admin.state, 'listening');
     assert.equal(daemonStatus.admin.host, '127.0.0.1');
@@ -70,9 +86,25 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
     assert.equal(shell.headers['referrer-policy'], 'no-referrer');
     assert.match(shell.headers['content-security-policy'], /frame-ancestors 'none'/);
     assert.equal(shell.headers['access-control-allow-origin'], undefined);
+    const assetPath = shell.body.match(/<script[^>]+src="(\/assets\/[^"]+\.js)"/)?.[1];
+    assert.ok(assetPath, shell.body);
+
+    const asset = await tcpRequest(daemonStatus.admin.port, 'GET', assetPath);
+    assert.equal(asset.statusCode, 200);
+    assert.match(asset.headers['content-type'], /^text\/javascript/);
+    assert.equal(asset.headers['cache-control'], 'public, max-age=31536000, immutable');
+
+    const spaFallback = await tcpRequest(daemonStatus.admin.port, 'GET', '/connections');
+    assert.equal(spaFallback.statusCode, 200);
+    assert.equal(spaFallback.body, shell.body);
+
+    const missingApi = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/not-real');
+    assert.equal(missingApi.statusCode, 401);
 
     const anonymous = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/status');
     assert.equal(anonymous.statusCode, 401);
+    const anonymousOverview = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/overview');
+    assert.equal(anonymousOverview.statusCode, 401);
 
     const login = await issueAdminLogin(daemon.paths.socketFile);
     assert.match(login.token, /^[A-Za-z0-9_-]{43}$/);
@@ -113,6 +145,35 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
     });
     assert.equal(authenticated.statusCode, 200, authenticated.body);
     assert.equal(JSON.parse(authenticated.body).instanceId, daemonStatus.instanceId);
+
+    const overviewResponse = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/overview', {
+      headers: { cookie },
+    });
+    assert.equal(overviewResponse.statusCode, 200, overviewResponse.body);
+    const overview = JSON.parse(overviewResponse.body);
+    assert.equal(overview.schemaVersion, 1);
+    assert.equal(overview.host.hostname, os.hostname());
+    assert.equal(overview.host.platform, process.platform);
+    assert.equal(overview.host.architecture, process.arch);
+    assert.equal(overview.daemon.instanceId, daemonStatus.instanceId);
+    assert.equal(overview.diagnostics.overall, 'fail');
+    assert.ok(overview.diagnostics.checks.some(({ id }) => id === 'workspace.path'));
+    assert.deepEqual(overview.scheduler, {
+      total: 1,
+      pending: 1,
+      running: 0,
+      failed: 0,
+      nextRunAt: '2026-08-04T02:00:00.000Z',
+    });
+
+    const authenticatedMissingApi = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/not-real',
+      { headers: { cookie } },
+    );
+    assert.equal(authenticatedMissingApi.statusCode, 404);
+    assert.deepEqual(JSON.parse(authenticatedMissingApi.body), { error: { code: 'not_found' } });
 
     const configuration = await tcpRequest(
       daemonStatus.admin.port,

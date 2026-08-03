@@ -1,6 +1,7 @@
 allowBuilds:
   '@google/genai': false
   esbuild: true
+  msw: true
   protobufjs: false
 minimumReleaseAgeExclude:
   - cron-parser@5.7.0
