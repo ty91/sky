@@ -1,6 +1,12 @@
 import { lstatSync, rmSync } from 'node:fs';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import net from 'node:net';
+import {
+  ConfigurationError,
+  type PublicConfiguration,
+  type SecretName,
+  type SettingsPatch,
+} from '../configuration.js';
 import { ensurePrivateSocket } from '../sky-home.js';
 import { LogCursorNotFoundError, type JsonlLogger, type LogRecord } from './logger.js';
 import type {
@@ -49,6 +55,17 @@ export type ControlServerOptions = {
   operations?: OperationRegistry;
   logger?: JsonlLogger;
   getDiagnostics?: () => DiagnosticsReport | Promise<DiagnosticsReport>;
+  configuration?: {
+    get(): ControlConfiguration;
+    patch(expectedRevision: number, patch: SettingsPatch): ControlConfiguration;
+    setSecret(name: SecretName, value: string): ControlConfiguration;
+    deleteSecret(name: SecretName): ControlConfiguration;
+  };
+};
+
+export type ControlConfiguration = PublicConfiguration & {
+  activeRevision: number | null;
+  restartRequired: boolean;
 };
 
 function closeHttpServer(server: http.Server): Promise<void> {
@@ -203,6 +220,97 @@ async function handleRequest(
   options: ControlServerOptions,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'http://localhost');
+
+  if (url.pathname === '/configuration') {
+    if (!options.configuration) {
+      writeJson(response, 404, { error: { code: 'not_found' } });
+      return;
+    }
+    if (request.method === 'GET') {
+      try {
+        writeJson(response, 200, options.configuration.get());
+      } catch (error) {
+        writeConfigurationError(response, error);
+      }
+      return;
+    }
+    if (request.method !== 'PATCH') {
+      response.setHeader('allow', 'GET, PATCH');
+      writeJson(response, 405, { error: { code: 'method_not_allowed' } });
+      return;
+    }
+    if (getStatus().runtime.state === 'draining') {
+      writeJson(response, 409, { error: { code: 'configuration_draining' } });
+      return;
+    }
+    try {
+      const body = await readJsonBody(request);
+      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        throw new ConfigurationError('invalid_value', 'The request is invalid.');
+      }
+      const candidate = body as Record<string, unknown>;
+      if (
+        Object.keys(candidate).some((key) => key !== 'expectedRevision' && key !== 'patch') ||
+        candidate.patch === null ||
+        typeof candidate.patch !== 'object' ||
+        Array.isArray(candidate.patch)
+      ) {
+        throw new ConfigurationError('invalid_value', 'The request is invalid.');
+      }
+      writeJson(
+        response,
+        200,
+        options.configuration.patch(
+          candidate.expectedRevision as number,
+          candidate.patch as SettingsPatch,
+        ),
+      );
+    } catch (error) {
+      writeConfigurationError(response, error);
+    }
+    return;
+  }
+
+  const secretMatch = url.pathname.match(/^\/secrets\/([^/]+)$/);
+  if (secretMatch) {
+    if (!options.configuration) {
+      writeJson(response, 404, { error: { code: 'not_found' } });
+      return;
+    }
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      response.setHeader('allow', 'PUT, DELETE');
+      writeJson(response, 405, { error: { code: 'method_not_allowed' } });
+      return;
+    }
+    if (getStatus().runtime.state === 'draining') {
+      writeJson(response, 409, { error: { code: 'configuration_draining' } });
+      return;
+    }
+    try {
+      const name = decodeURIComponent(secretMatch[1]) as SecretName;
+      if (request.method === 'DELETE') {
+        writeJson(response, 200, options.configuration.deleteSecret(name));
+        return;
+      }
+      const body = await readJsonBody(request);
+      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        throw new ConfigurationError('invalid_value', 'The request is invalid.');
+      }
+      const candidate = body as Record<string, unknown>;
+      if (Object.keys(candidate).some((key) => key !== 'value')) {
+        throw new ConfigurationError('unknown_field', 'The request contains an unknown field.');
+      }
+      writeJson(
+        response,
+        200,
+        options.configuration.setSecret(name, candidate.value as string),
+      );
+    } catch (error) {
+      writeConfigurationError(response, error);
+    }
+    return;
+  }
+
   if (url.pathname === '/status') {
     if (request.method !== 'GET') {
       response.setHeader('allow', 'GET');
@@ -348,6 +456,26 @@ async function handleRequest(
   writeJson(response, 404, { error: { code: 'not_found' } });
 }
 
+function writeConfigurationError(response: ServerResponse, error: unknown): void {
+  if (!(error instanceof ConfigurationError)) {
+    writeJson(response, 400, { error: { code: 'invalid_request' } });
+    return;
+  }
+  const statusCode =
+    error.code === 'revision_conflict'
+      ? 409
+      : error.code === 'unknown_secret'
+        ? 404
+        : error.code.endsWith('_unsafe') || error.code === 'migration_conflict'
+          ? 409
+          : error.code === 'configuration_incomplete'
+            ? 422
+            : 400;
+  writeJson(response, statusCode, {
+    error: { code: error.code, ...error.details },
+  });
+}
+
 async function prepareSocket(socketFile: string): Promise<void> {
   if (!ensurePrivateSocket(socketFile)) return;
   if (await probeSocket(socketFile)) {
@@ -419,7 +547,7 @@ export async function startControlServer(
 
 function requestJson<T>(
   socketFile: string,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE',
   requestPath: string,
   expectedStatus: number,
   timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
@@ -430,6 +558,7 @@ function requestJson<T>(
         socketPath: socketFile,
         path: requestPath,
         method,
+        agent: false,
         headers: { accept: 'application/json' },
       },
       (response) => {
@@ -496,7 +625,7 @@ export function createOperation(
 
 function requestJsonWithBody<T>(
   socketFile: string,
-  method: 'POST',
+  method: 'POST' | 'PATCH' | 'PUT',
   requestPath: string,
   expectedStatus: number,
   bodyValue: unknown,
@@ -508,6 +637,7 @@ function requestJsonWithBody<T>(
         socketPath: socketFile,
         path: requestPath,
         method,
+        agent: false,
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
@@ -545,6 +675,42 @@ export function getOperation(socketFile: string, operationId: string): Promise<O
   return requestJson(socketFile, 'GET', `/operations/${encodeURIComponent(operationId)}`, 200);
 }
 
+export function getConfiguration(socketFile: string): Promise<ControlConfiguration> {
+  return requestJson(socketFile, 'GET', '/configuration', 200);
+}
+
+export function patchConfiguration(
+  socketFile: string,
+  expectedRevision: number,
+  patch: SettingsPatch,
+): Promise<ControlConfiguration> {
+  return requestJsonWithBody(socketFile, 'PATCH', '/configuration', 200, {
+    expectedRevision,
+    patch,
+  });
+}
+
+export function putSecret(
+  socketFile: string,
+  name: SecretName,
+  value: string,
+): Promise<ControlConfiguration> {
+  return requestJsonWithBody(
+    socketFile,
+    'PUT',
+    `/secrets/${encodeURIComponent(name)}`,
+    200,
+    { value },
+  );
+}
+
+export function deleteSecret(
+  socketFile: string,
+  name: SecretName,
+): Promise<ControlConfiguration> {
+  return requestJson(socketFile, 'DELETE', `/secrets/${encodeURIComponent(name)}`, 200);
+}
+
 export function getLogHistory(
   socketFile: string,
   options: { cursor?: string; limit?: number } = {},
@@ -564,7 +730,7 @@ function streamNdjson<T>(
   const stream = async function* (): AsyncGenerator<T> {
     const response = await new Promise<IncomingMessage>((resolve, reject) => {
       const request = http.request(
-        { socketPath: socketFile, path: requestPath, method: 'GET' },
+        { socketPath: socketFile, path: requestPath, method: 'GET', agent: false },
         (candidate) => {
           if (candidate.statusCode !== 200) {
             candidate.setEncoding('utf8');

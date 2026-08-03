@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ModelRuntime as PiModelRuntime, readStoredCredential } from '@earendil-works/pi-coding-agent';
 import type { Settings } from './settings.js';
 import { parseSettings } from './settings.js';
+import { createConfiguration } from './configuration.js';
 import { getServiceStatus, type ServiceStatus } from './service/launch-agent.js';
 import type { SkyHome } from './sky-home.js';
 import type { DaemonStatus } from './skyd/types.js';
@@ -299,7 +300,9 @@ function inspectConfiguration(home: SkyHome): ConfigurationInspection {
     };
   }
   try {
-    const settings = parseSettings(raw, { defaultWorkspace: home.workspaceDir });
+    const settings = Object.hasOwn(raw, 'schemaVersion')
+      ? createConfiguration(home, { readOnly: true }).resolveRuntime().settings
+      : parseSettings(raw, { defaultWorkspace: home.workspaceDir });
     return {
       raw,
       settings,
@@ -336,13 +339,15 @@ function schemaCheck(configuration: ConfigurationInspection): DiagnosticCheck {
       'The installed Sky version supports the current legacy settings schema.',
     );
   }
-  return check(
-    'configuration.schema',
-    'fail',
-    'The settings schema version is unsupported by this Sky version.',
-    null,
-    'Upgrade Sky or restore a settings document supported by the installed version.',
-  );
+  return configuration.raw.schemaVersion === 1
+    ? check('configuration.schema', 'pass', 'Settings use supported schema version 1.')
+    : check(
+        'configuration.schema',
+        'fail',
+        'The settings schema version is unsupported by this Sky version.',
+        null,
+        'Upgrade Sky or restore a settings document supported by the installed version.',
+      );
 }
 
 async function credentialChecks(
@@ -373,7 +378,7 @@ async function credentialChecks(
     'configuration.slack_credentials',
     slackConfigured ? 'pass' : 'fail',
     slackConfigured
-      ? 'Slack bot and app credentials are configured from settings.'
+      ? 'Slack bot and app credentials are configured.'
       : 'One or more Slack credentials are missing.',
     null,
     slackConfigured ? null : 'Configure both Slack bot and app credentials.',
@@ -386,7 +391,7 @@ async function credentialChecks(
     const source = env.CLAUDE_CODE_OAUTH_TOKEN
       ? 'environment'
       : settings.claudeAgentSdk?.oauthToken
-        ? 'settings'
+        ? 'stored'
         : null;
     const valid = modelValid && source !== null;
     return [

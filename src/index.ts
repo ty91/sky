@@ -11,6 +11,7 @@ import { dreamCommand } from './commands/dream.js';
 import { serviceCommand } from './commands/service.js';
 import { operationCommand } from './commands/operation.js';
 import { doctorCommand } from './commands/doctor.js';
+import { initCommand } from './commands/init.js';
 
 const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -31,6 +32,7 @@ program.addCommand(memoryCommand);
 program.addCommand(dreamCommand);
 program.addCommand(operationCommand);
 program.addCommand(doctorCommand);
+program.addCommand(initCommand);
 
 program.parseAsync().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));

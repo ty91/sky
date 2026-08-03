@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { SlackStartupError, startBotRuntime, type BotRuntime } from '../bot.js';
+import { createConfiguration, type ConfigurationInspection } from '../configuration.js';
 import {
   createRuntimeController,
   type RuntimeController,
@@ -21,7 +22,7 @@ import {
   type OperationRegistry,
   type OperationRunner,
 } from './operations.js';
-import { ConfigurationError, loadSecureSettings } from './settings.js';
+import { ConfigurationError } from '../configuration.js';
 import type { DaemonStatus, RuntimeState, SlackConnectionState } from './types.js';
 import { runDiagnostics } from '../diagnostics.js';
 
@@ -109,11 +110,22 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     recentErrors: [],
   };
   let activeSettings: Settings | undefined;
+  let activeConfigurationRevision: number | null = null;
+  let activeConfigurationIdentity: string | undefined;
   let runtime: BotRuntime | undefined;
+  const configuration = createConfiguration(paths);
+  const controlConfiguration = (inspection: ConfigurationInspection) => ({
+    ...inspection.public,
+    activeRevision: activeConfigurationRevision,
+    restartRequired:
+      activeConfigurationIdentity === undefined
+        ? inspection.public.complete
+        : inspection.identity !== activeConfigurationIdentity,
+  });
   const operations: OperationRegistry = createOperationRegistry({
     runtimeController,
     logger,
-    run: options.runOperation ?? createMaintenanceOperationRunner(paths, logger),
+    run: options.runOperation ?? createMaintenanceOperationRunner(paths, logger, configuration),
     ...options.operationRegistry,
   });
 
@@ -153,7 +165,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       requestRestart: () => {
         const result = runtimeController.requestRestart(() => {
           try {
-            loadSecureSettings(paths);
+            configuration.resolveRuntime();
             return undefined;
           } catch (error) {
             if (error instanceof ConfigurationError) {
@@ -174,6 +186,16 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
           activeSettings,
           homeDir: options.homeDir,
         }),
+      configuration: {
+        get: () => controlConfiguration(configuration.inspect()),
+        patch: (expectedRevision, patch) =>
+          controlConfiguration(configuration.patch(expectedRevision, patch)),
+        setSecret: (name, value) => {
+          logger.protect([value]);
+          return controlConfiguration(configuration.setSecret(name, value));
+        },
+        deleteSecret: (name) => controlConfiguration(configuration.deleteSecret(name)),
+      },
     });
   } catch (error) {
     logger.log('error', 'control', error instanceof Error ? error.message : String(error));
@@ -185,7 +207,10 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const runtimeTask = (async () => {
     let settings: Settings;
     try {
-      settings = loadSecureSettings(paths);
+      const resolved = configuration.resolveRuntime();
+      settings = resolved.settings;
+      activeConfigurationRevision = resolved.revision;
+      activeConfigurationIdentity = resolved.identity;
     } catch (error) {
       if (!(error instanceof ConfigurationError)) throw error;
       mutable.runtimeState = 'needs_configuration';

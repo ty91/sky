@@ -13,6 +13,7 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - Slack 연결은 Bolt Socket Mode 기반 Assistant 레이어로 처리합니다.
 - `sky status`는 macOS LaunchAgent 상태와 daemon control 상태를 함께 보여주며 자동화를 위한 `--json`을 제공합니다.
 - `sky doctor`는 설치, runtime, configuration, credential metadata, Sky home 권한과 workspace prompt를 한 번에 진단합니다.
+- `sky init`은 실행 중인 daemon의 control interface를 통해 versioned configuration과 secret을 안전하게 설정하고 workspace prompt를 준비합니다.
 - `skyd`는 foreground daemon으로 실행되며 Sky home의 `run/skyd.sock`에 HTTP/JSON control interface를 제공합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
 - `memory`와 `dream`은 daemon operation으로 실행되며 CLI를 끊어도 계속 진행됩니다.
@@ -64,6 +65,8 @@ token을 현재 install 명령에만 주입해 package를 전역 설치합니다
 NODE_AUTH_TOKEN=<github-pat-classic> mise exec -- pnpm add --global @ty91/sky
 mise exec -- sky --version
 mise exec -- sky service install
+mise exec -- sky init
+mise exec -- sky status
 ```
 
 ### 개발 checkout
@@ -102,33 +105,48 @@ Sky home의 `settings.json`에 있는 `model` 값은 `<provider>/<model>` 형식
 
 인증이 없거나 모델 이름을 backend가 찾지 못하면 session 생성 단계의 model/auth 오류가 그대로 보고됩니다. 먼저 선택한 backend의 로컬 인증 상태와 모델 이름을 확인하세요.
 
-## 설정
+## 초기 설정
 
-Sky home에 `settings.json`을 만듭니다. Override가 없다면 경로는 `~/.sky/settings.json`입니다.
+새 설치에서는 LaunchAgent를 먼저 설치해 `needs_configuration` 상태의 daemon을 띄운 뒤 interactive wizard를 실행합니다. 설정 파일을 직접 만들거나 수정하지 않습니다.
+
+```bash
+sky service install
+sky init
+sky status
+```
+
+`sky init`은 backend, model, 선택적 effort와 workspace를 물어보고 Slack/Claude credential은 echo 없이 입력받습니다. 기존 secret 값은 읽거나 보여주지 않으며 keep, replace, delete 중 하나만 선택합니다. 설정을 저장한 뒤 기본적으로 graceful restart를 요청하고 새 startup 상태를 확인합니다. 저장만 하려면 `--no-restart`를 사용한 뒤 직접 `sky restart`를 실행합니다.
+
+자동화에서는 secret을 command-line argument나 shell history에 남기지 않고 stdin의 단일 JSON 문서로 전달합니다.
 
 ```json
 {
-  "slack": {
-    "botToken": "xoxb-your-slack-bot-token",
-    "appToken": "xapp-your-slack-app-token"
-  },
+  "backend": "pi",
   "model": "anthropic/claude-opus-4-7",
-  "agentBackend": "pi",
-  "claudeAgentSdk": {
-    "oauthToken": "your-claude-code-oauth-token"
-  },
-  "effort": "xhigh"
+  "effort": "xhigh",
+  "workspace": "/Users/me/.sky/workspace",
+  "secrets": {
+    "slack.botToken": "xoxb-your-slack-bot-token",
+    "slack.appToken": "xapp-your-slack-app-token",
+    "claudeAgentSdk.oauthToken": "your-claude-code-oauth-token"
+  }
 }
 ```
 
-- `slack.botToken`: Slack bot token.
-- `slack.appToken`: Socket Mode용 app token.
-- `model`: 필수. `<provider>/<model>` 형식입니다.
-- `agentBackend`: 선택. 기본값 `pi`. `pi` 또는 `claude-agent-sdk`를 지정합니다.
-- `claudeAgentSdk.oauthToken`: `claude-agent-sdk` backend용 선택 credential입니다. status와 structured log에는 노출되지 않습니다.
-- `effort`: 선택. `medium`, `high`, `xhigh` 중 하나입니다. 생략하면 backend 기본값을 사용합니다.
-- `workspace`: 선택. 기본값은 선택한 Sky home의 `workspace`입니다. 이 디렉토리 아래의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 에이전트 지침으로 사용합니다.
-- `slack` 설정은 필수입니다.
+```bash
+sky init --from-stdin --json < init.json
+```
+
+`secrets`에서 생략한 기존 값은 유지하고 `null`은 stored secret을 삭제합니다. `--json` 출력에는 전체 secret이 아니라 configured/source/updatedAt/displayHint metadata만 포함됩니다. daemon control socket이 없으면 `sky init`은 어떤 설정 파일도 직접 쓰지 않고 `sky service install` 또는 `sky start`를 안내합니다.
+
+Sky는 non-secret 설정을 schema version과 revision이 있는 `settings.json`에, credential을 private `secrets.json`에 분리해 저장합니다. 기존 inline-secret `settings.json`은 daemon이 credential 손실 없이 새 형식으로 migration합니다. 두 파일의 물리 형식은 public interface가 아니며, 설정 변경은 active runtime을 자동으로 바꾸지 않습니다. `GET /configuration`의 `activeRevision`과 `restartRequired`로 disk/active 차이를 확인합니다.
+
+- `model`: 필수 `<provider>/<model>` 값입니다.
+- `backend` 또는 `agentBackend`: `pi`(기본값) 또는 `claude-agent-sdk`입니다.
+- `effort`: 선택적인 `medium`, `high`, `xhigh`입니다. `null`은 기존 값을 제거합니다.
+- `workspace`: 선택적인 절대경로입니다. 기본값은 선택한 Sky home의 `workspace`입니다.
+- `slack.botToken`, `slack.appToken`: 필수 Slack credential입니다.
+- `claudeAgentSdk.oauthToken`: Claude Agent SDK backend에 필요합니다. `CLAUDE_CODE_OAUTH_TOKEN` 환경변수가 있으면 stored value보다 우선합니다.
 
 ## 실행
 
@@ -176,6 +194,7 @@ pnpm link --global
 
 ```bash
 sky service install
+sky init
 sky start
 sky stop
 sky restart
@@ -204,6 +223,7 @@ skyd --foreground
 ```bash
 skyd --foreground
 curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/status
+curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/configuration
 ```
 
 설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.

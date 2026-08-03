@@ -2,17 +2,18 @@ import { resolveAgentSessionFactory } from '../agents/backend/index.js';
 import { runDreamAgent, dreamDailyFilePath } from '../agents/dream/agent.js';
 import { runMemoryAgent } from '../agents/memory/agent.js';
 import { createConversationManager } from '../conversation/manager.js';
+import type { Configuration } from '../configuration.js';
 import type { SkyHome } from '../sky-home.js';
 import type { JsonlLogger } from './logger.js';
-import { loadSecureSettings } from './settings.js';
 import type { OperationRunner } from './operations.js';
 
 export function createMaintenanceOperationRunner(
   skyHome: SkyHome,
   logger: JsonlLogger,
+  configuration: Configuration,
 ): OperationRunner {
   return async (request, context) => {
-    const settings = loadSecureSettings(skyHome);
+    const settings = configuration.resolveRuntime().settings;
     logger.protect([
       settings.slack.botToken,
       settings.slack.appToken,
