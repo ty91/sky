@@ -70,7 +70,10 @@ test('doctor uses a read-only local fallback when Sky has not been initialized',
     ]);
     assert.equal(report.checks.some((check) => check.id === 'runtime.control'), true);
     assert.equal(report.checks.some((check) => check.id === 'filesystem.root'), true);
-    assert.equal(report.checks.some((check) => check.id === 'configuration.settings'), true);
+    assert.equal(
+      report.checks.find((check) => check.id === 'configuration.settings')?.status,
+      'fail',
+    );
     await assert.rejects(stat(skyHome), { code: 'ENOENT' });
   } finally {
     await rm(homeDir, { recursive: true, force: true });
@@ -518,6 +521,35 @@ test('doctor identifies an unsupported settings schema without echoing the docum
       /unsupported/,
     );
     assert.doesNotMatch(result.stdout + result.stderr, /schema-never-print-this|revision.*7/i);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('doctor distinguishes a valid settings document from missing secrets', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-doctor-missing-secrets-'));
+  const home = createSkyHome({ homeDir });
+  prepareSkyHome(home);
+  try {
+    await writeFile(
+      home.settingsFile,
+      JSON.stringify({
+        schemaVersion: 1,
+        revision: 3,
+        agentBackend: 'pi',
+        model: 'anthropic/test-model',
+        workspace: home.workspaceDir,
+      }),
+      { mode: 0o600 },
+    );
+
+    const report = await runDiagnostics(home, { homeDir });
+
+    assert.equal(report.checks.find((check) => check.id === 'configuration.settings')?.status, 'pass');
+    assert.equal(
+      report.checks.find((check) => check.id === 'configuration.slack_credentials')?.status,
+      'fail',
+    );
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

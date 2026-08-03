@@ -73,6 +73,7 @@ export type ConfigurationErrorCode =
   | 'unknown_field'
   | 'unknown_secret'
   | 'invalid_value'
+  | 'secret_missing'
   | 'configuration_incomplete';
 
 export class ConfigurationError extends Error {
@@ -104,6 +105,18 @@ type StoredSecret = { value: string; updatedAt: string };
 type SecretsDocument = {
   schemaVersion: 1;
   secrets: Partial<Record<SecretName, StoredSecret>>;
+};
+
+export type SecretStoreSnapshot = {
+  values: Partial<Record<SecretName, string>>;
+  metadata: Record<SecretName, SecretMetadata>;
+};
+
+export type SecretStore = {
+  read(): SecretStoreSnapshot;
+  set(name: SecretName, value: string): SecretStoreSnapshot;
+  delete(name: SecretName): SecretStoreSnapshot;
+  importLegacy(values: Partial<Record<SecretName, string>>): SecretStoreSnapshot;
 };
 
 export type SettingsPatch = Partial<{
@@ -151,8 +164,6 @@ function readPrivateJson(
     throw new ConfigurationError(
       kind === 'settings' ? 'settings_invalid' : 'secrets_invalid',
       `${kind === 'settings' ? 'Settings' : 'Secret storage'} is not valid.`,
-      {},
-      error,
     );
   }
 }
@@ -258,18 +269,103 @@ function assertSecretValue(name: SecretName, value: unknown): asserts value is s
   }
 }
 
-function settingsFromDocument(document: SettingsDocument, secrets: SecretsDocument): Settings {
+function snapshotFromSecrets(document: SecretsDocument): SecretStoreSnapshot {
+  return {
+    values: Object.fromEntries(
+      Object.entries(document.secrets).map(([name, stored]) => [name, stored.value]),
+    ) as Partial<Record<SecretName, string>>,
+    metadata: Object.fromEntries(
+      SECRET_NAMES.map((name) => {
+        const stored = document.secrets[name];
+        return [
+          name,
+          {
+            configured: stored !== undefined,
+            source: stored ? 'stored' : null,
+            updatedAt: stored?.updatedAt ?? null,
+            displayHint: stored ? displayHint(name, stored.value) : null,
+          } satisfies SecretMetadata,
+        ];
+      }),
+    ) as Record<SecretName, SecretMetadata>,
+  };
+}
+
+export function createSecureFileSecretStore(
+  home: SkyHome,
+  options: { now?: () => Date; readOnly?: boolean } = {},
+): SecretStore {
+  const now = options.now ?? (() => new Date());
+  const readDocument = () =>
+    parseSecretsDocument(
+      readPrivateJson(home.secretsFile, 'secrets', !options.readOnly),
+    );
+  const writeDocument = (document: SecretsDocument) => {
+    atomicWriteJson(home.secretsFile, document, 'secrets');
+    return snapshotFromSecrets(document);
+  };
+
+  return {
+    read() {
+      return snapshotFromSecrets(readDocument());
+    },
+
+    set(name, value) {
+      if (!isSecretName(name)) throw new ConfigurationError('unknown_secret', 'Unknown secret name.');
+      assertSecretValue(name, value);
+      const document = readDocument();
+      document.secrets[name] = { value, updatedAt: now().toISOString() };
+      return writeDocument(document);
+    },
+
+    delete(name) {
+      if (!isSecretName(name)) throw new ConfigurationError('unknown_secret', 'Unknown secret name.');
+      const document = readDocument();
+      if (!document.secrets[name]) return snapshotFromSecrets(document);
+      delete document.secrets[name];
+      return writeDocument(document);
+    },
+
+    importLegacy(values) {
+      const document = readDocument();
+      for (const [name, value] of Object.entries(values) as Array<[SecretName, string]>) {
+        if (!isSecretName(name)) {
+          throw new ConfigurationError('unknown_secret', 'Unknown secret name.');
+        }
+        assertSecretValue(name, value);
+        const existing = document.secrets[name];
+        if (existing && existing.value !== value) {
+          throw new ConfigurationError(
+            'migration_conflict',
+            'Legacy credentials conflict with the existing secret store.',
+          );
+        }
+      }
+      const importedAt = now().toISOString();
+      let changed = false;
+      for (const [name, value] of Object.entries(values) as Array<[SecretName, string]>) {
+        if (!document.secrets[name]) {
+          document.secrets[name] = { value, updatedAt: importedAt };
+          changed = true;
+        }
+      }
+      return changed ? writeDocument(document) : snapshotFromSecrets(document);
+    },
+  };
+}
+
+function settingsFromDocument(document: SettingsDocument, secrets: SecretStoreSnapshot): Settings {
   return {
     agentBackend: document.agentBackend,
     model: document.model,
     ...(document.effort ? { effort: document.effort } : {}),
     workspace: document.workspace,
     slack: {
-      botToken: secrets.secrets['slack.botToken']?.value ?? '',
-      appToken: secrets.secrets['slack.appToken']?.value ?? '',
+      botToken: secrets.values['slack.botToken'] ?? '',
+      appToken: secrets.values['slack.appToken'] ?? '',
     },
-    ...(secrets.secrets['claudeAgentSdk.oauthToken']
-      ? { claudeAgentSdk: { oauthToken: secrets.secrets['claudeAgentSdk.oauthToken'].value } }
+    ...(secrets.values['claudeAgentSdk.oauthToken']
+      ? { claudeAgentSdk: { oauthToken: secrets.values['claudeAgentSdk.oauthToken'] } }
       : {}),
   };
 }
@@ -289,16 +385,23 @@ function runtimeIdentity(settings: Settings, revision: number, environmentOauth?
 
 export function createConfiguration(
   home: SkyHome,
-  options: { env?: NodeJS.ProcessEnv; now?: () => Date; readOnly?: boolean } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    now?: () => Date;
+    readOnly?: boolean;
+    secretStore?: SecretStore;
+  } = {},
 ): Configuration {
   const env = options.env ?? process.env;
   const now = options.now ?? (() => new Date());
+  const environmentOauth = () => env.CLAUDE_CODE_OAUTH_TOKEN || undefined;
+  const secretStore =
+    options.secretStore ??
+    createSecureFileSecretStore(home, { now, readOnly: options.readOnly });
 
-  const loadDocuments = (): { settings?: SettingsDocument; secrets: SecretsDocument } => {
+  const loadDocuments = (): { settings?: SettingsDocument; secrets: SecretStoreSnapshot } => {
     const rawSettings = readPrivateJson(home.settingsFile, 'settings', !options.readOnly);
-    let secrets = parseSecretsDocument(
-      readPrivateJson(home.secretsFile, 'secrets', !options.readOnly),
-    );
+    let secrets = secretStore.read();
     if (rawSettings === undefined) return { secrets };
 
     if (
@@ -324,8 +427,8 @@ export function createConfiguration(
     let legacy: Settings;
     try {
       legacy = parseSettings(rawSettings, { defaultWorkspace: home.workspaceDir });
-    } catch (error) {
-      throw new ConfigurationError('settings_invalid', 'Settings are not valid.', {}, error);
+    } catch {
+      throw new ConfigurationError('settings_invalid', 'Settings are not valid.');
     }
     const migratedValues: Partial<Record<SecretName, string>> = {
       'slack.botToken': legacy.slack.botToken,
@@ -334,9 +437,18 @@ export function createConfiguration(
         ? { 'claudeAgentSdk.oauthToken': legacy.claudeAgentSdk.oauthToken }
         : {}),
     };
+    try {
+      for (const [name, value] of Object.entries(migratedValues) as Array<
+        [SecretName, string]
+      >) {
+        assertSecretValue(name, value);
+      }
+    } catch {
+      throw new ConfigurationError('settings_invalid', 'Settings are not valid.');
+    }
     for (const [name, value] of Object.entries(migratedValues) as Array<[SecretName, string]>) {
-      const existing = secrets.secrets[name];
-      if (existing && existing.value !== value) {
+      const existing = secrets.values[name];
+      if (existing && existing !== value) {
         throw new ConfigurationError(
           'migration_conflict',
           'Legacy credentials conflict with the existing secret store.',
@@ -344,14 +456,26 @@ export function createConfiguration(
       }
     }
     const migratedAt = now().toISOString();
-    let secretsChanged = false;
-    for (const [name, value] of Object.entries(migratedValues) as Array<[SecretName, string]>) {
-      if (!secrets.secrets[name]) {
-        secrets.secrets[name] = { value, updatedAt: migratedAt };
-        secretsChanged = true;
-      }
-    }
-    if (secretsChanged && !options.readOnly) atomicWriteJson(home.secretsFile, secrets, 'secrets');
+    secrets = options.readOnly
+      ? snapshotFromSecrets({
+          schemaVersion: 1,
+          secrets: Object.fromEntries(
+            SECRET_NAMES.flatMap((name) => {
+              const value = secrets.values[name] ?? migratedValues[name];
+              if (!value) return [];
+              return [
+                [
+                  name,
+                  {
+                    value,
+                    updatedAt: secrets.metadata[name].updatedAt ?? migratedAt,
+                  },
+                ],
+              ];
+            }),
+          ),
+        })
+      : secretStore.importLegacy(migratedValues);
     const settings: SettingsDocument = {
       schemaVersion: 1,
       revision: 1,
@@ -382,15 +506,15 @@ export function createConfiguration(
     const metadata = Object.fromEntries(
       SECRET_NAMES.map((name) => {
         const environmentValue =
-          name === 'claudeAgentSdk.oauthToken' ? env.CLAUDE_CODE_OAUTH_TOKEN : undefined;
-        const stored = secrets.secrets[name];
-        const effective = environmentValue ?? stored?.value;
+          name === 'claudeAgentSdk.oauthToken' ? environmentOauth() : undefined;
+        const stored = secrets.metadata[name];
+        const effective = environmentValue ?? secrets.values[name];
         return [
           name,
           {
             configured: effective !== undefined,
-            source: environmentValue ? 'environment' : stored ? 'stored' : null,
-            updatedAt: environmentValue ? null : stored?.updatedAt ?? null,
+            source: environmentValue ? 'environment' : stored.source,
+            updatedAt: environmentValue ? null : stored.updatedAt,
             displayHint: effective ? displayHint(name, effective) : null,
           } satisfies SecretMetadata,
         ];
@@ -418,7 +542,7 @@ export function createConfiguration(
         secrets: metadata,
         complete,
       },
-      identity: runtimeIdentity(runtimeSettings, settings?.revision ?? 0, env.CLAUDE_CODE_OAUTH_TOKEN),
+      identity: runtimeIdentity(runtimeSettings, settings?.revision ?? 0, environmentOauth()),
     };
   };
 
@@ -437,17 +561,18 @@ export function createConfiguration(
           !metadata['claudeAgentSdk.oauthToken'].configured)
       ) {
         throw new ConfigurationError(
-          'configuration_incomplete',
-          'Configuration is incomplete.',
+          'secret_missing',
+          'A required secret is missing.',
         );
       }
-      if (env.CLAUDE_CODE_OAUTH_TOKEN) {
-        resolved.claudeAgentSdk = { oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN };
+      const oauthToken = environmentOauth();
+      if (oauthToken) {
+        resolved.claudeAgentSdk = { oauthToken };
       }
       return {
         settings: resolved,
         revision: settings.revision,
-        identity: runtimeIdentity(resolved, settings.revision, env.CLAUDE_CODE_OAUTH_TOKEN),
+        identity: runtimeIdentity(resolved, settings.revision, oauthToken),
       };
     },
 
@@ -505,21 +630,12 @@ export function createConfiguration(
     },
 
     setSecret(name, value) {
-      if (!isSecretName(name)) throw new ConfigurationError('unknown_secret', 'Unknown secret name.');
-      assertSecretValue(name, value);
-      const secrets = parseSecretsDocument(readPrivateJson(home.secretsFile, 'secrets', true));
-      secrets.secrets[name] = { value, updatedAt: now().toISOString() };
-      atomicWriteJson(home.secretsFile, secrets, 'secrets');
+      secretStore.set(name, value);
       return inspect();
     },
 
     deleteSecret(name) {
-      if (!isSecretName(name)) throw new ConfigurationError('unknown_secret', 'Unknown secret name.');
-      const secrets = parseSecretsDocument(readPrivateJson(home.secretsFile, 'secrets', true));
-      if (secrets.secrets[name]) {
-        delete secrets.secrets[name];
-        atomicWriteJson(home.secretsFile, secrets, 'secrets');
-      }
+      secretStore.delete(name);
       return inspect();
     },
   };

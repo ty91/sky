@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { ModelRuntime as PiModelRuntime, readStoredCredential } from '@earendil-works/pi-coding-agent';
 import type { Settings } from './settings.js';
-import { parseSettings } from './settings.js';
-import { createConfiguration } from './configuration.js';
+import {
+  createConfiguration,
+  type PublicConfiguration,
+} from './configuration.js';
 import { getServiceStatus, type ServiceStatus } from './service/launch-agent.js';
 import type { SkyHome } from './sky-home.js';
 import type { DaemonStatus } from './skyd/types.js';
@@ -47,7 +49,8 @@ export type RunDiagnosticsOptions = {
 
 type ConfigurationInspection = {
   settings?: Settings;
-  raw?: Record<string, unknown>;
+  public?: PublicConfiguration;
+  errorCode?: string;
   check: DiagnosticCheck;
 };
 
@@ -238,92 +241,68 @@ function inspectTree(
 
 function inspectConfiguration(home: SkyHome): ConfigurationInspection {
   try {
-    const rootStats = lstatSync(home.rootDir);
-    const settingsStats = lstatSync(home.settingsFile);
-    if (
-      rootStats.isSymbolicLink() ||
-      !rootStats.isDirectory() ||
-      !ownedByCurrentUser(rootStats.uid) ||
-      settingsStats.isSymbolicLink() ||
-      !settingsStats.isFile() ||
-      !ownedByCurrentUser(settingsStats.uid)
-    ) {
+    const configuration = createConfiguration(home, { readOnly: true });
+    const inspection = configuration.inspect();
+    if (inspection.public.revision === 0) {
       return {
+        public: inspection.public,
+        errorCode: 'settings_missing',
         check: check(
           'configuration.settings',
           'fail',
-          'Settings are unsafe and were not read.',
-          'Sky home and settings must be current-user-owned real entries.',
-          'Review the unsafe entry before restoring a regular private settings file.',
+          'Settings are missing.',
+          null,
+          'Create settings through the supported Sky configuration flow.',
         ),
       };
     }
-  } catch (error) {
     return {
-      check: check(
-        'configuration.settings',
-        'fail',
-        errorCode(error) === 'ENOENT' ? 'Settings are missing.' : 'Settings cannot be inspected safely.',
-        null,
-        'Create or repair settings through the supported Sky configuration flow.',
-      ),
-    };
-  }
-  let rawText: string;
-  try {
-    rawText = readFileSync(home.settingsFile, 'utf8');
-  } catch (error) {
-    return {
-      check: check(
-        'configuration.settings',
-        'fail',
-        errorCode(error) === 'ENOENT' ? 'Settings are missing.' : 'Settings cannot be read.',
-        null,
-        'Create or repair settings through the supported Sky configuration flow.',
-      ),
-    };
-  }
-  let raw: Record<string, unknown> | undefined;
-  try {
-    const value = JSON.parse(rawText) as unknown;
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error();
-    raw = value as Record<string, unknown>;
-  } catch {
-    return {
-      check: check(
-        'configuration.settings',
-        'fail',
-        'Settings are invalid.',
-        'Raw parse and validation details are intentionally omitted.',
-        'Repair settings without copying credential values into logs or support messages.',
-      ),
-    };
-  }
-  try {
-    const settings = Object.hasOwn(raw, 'schemaVersion')
-      ? createConfiguration(home, { readOnly: true }).resolveRuntime().settings
-      : parseSettings(raw, { defaultWorkspace: home.workspaceDir });
-    return {
-      raw,
-      settings,
+      public: inspection.public,
+      ...(inspection.public.complete
+        ? { settings: configuration.resolveRuntime().settings }
+        : {}),
       check: check('configuration.settings', 'pass', 'Settings are valid.'),
     };
-  } catch {
+  } catch (error) {
+    const code = errorCode(error);
+    const unsafe = code === 'settings_unsafe' || code === 'secrets_unsafe';
+    const missing = code === 'settings_missing';
     return {
-      raw,
+      ...(code ? { errorCode: code } : {}),
       check: check(
         'configuration.settings',
         'fail',
-        'Settings are invalid.',
-        'Raw parse and validation details are intentionally omitted.',
-        'Repair settings without copying credential values into logs or support messages.',
+        unsafe
+          ? 'Settings are unsafe and were not read.'
+          : missing
+            ? 'Settings are missing.'
+            : 'Settings are invalid.',
+        unsafe
+          ? 'Sky home, settings, and secret storage must be current-user-owned real entries.'
+          : code === 'settings_invalid' || code === 'secrets_invalid'
+            ? 'Raw parse and validation details are intentionally omitted.'
+            : null,
+        unsafe
+          ? 'Review the unsafe entry before restoring regular private configuration files.'
+          : missing
+            ? 'Create settings through the supported Sky configuration flow.'
+            : 'Repair configuration without copying credential values into logs or support messages.',
       ),
     };
   }
 }
 
 function schemaCheck(configuration: ConfigurationInspection): DiagnosticCheck {
-  if (!configuration.raw) {
+  if (configuration.errorCode === 'settings_version_unsupported') {
+    return check(
+      'configuration.schema',
+      'fail',
+      'The settings schema version is unsupported by this Sky version.',
+      null,
+      'Upgrade Sky or restore a settings document supported by the installed version.',
+    );
+  }
+  if (configuration.errorCode || !configuration.public) {
     return check(
       'configuration.schema',
       'fail',
@@ -332,30 +311,14 @@ function schemaCheck(configuration: ConfigurationInspection): DiagnosticCheck {
       'Repair the settings document first.',
     );
   }
-  if (!Object.hasOwn(configuration.raw, 'schemaVersion')) {
-    return check(
-      'configuration.schema',
-      'pass',
-      'The installed Sky version supports the current legacy settings schema.',
-    );
-  }
-  return configuration.raw.schemaVersion === 1
-    ? check('configuration.schema', 'pass', 'Settings use supported schema version 1.')
-    : check(
-        'configuration.schema',
-        'fail',
-        'The settings schema version is unsupported by this Sky version.',
-        null,
-        'Upgrade Sky or restore a settings document supported by the installed version.',
-      );
+  return check('configuration.schema', 'pass', 'Settings use a supported schema.');
 }
 
 async function credentialChecks(
-  settings: Settings | undefined,
-  env: NodeJS.ProcessEnv,
+  configuration: ConfigurationInspection,
   homeDir: string,
 ): Promise<DiagnosticCheck[]> {
-  if (!settings) {
+  if (!configuration.public) {
     return [
       check(
         'configuration.slack_credentials',
@@ -373,7 +336,10 @@ async function credentialChecks(
       ),
     ];
   }
-  const slackConfigured = settings.slack.botToken.length > 0 && settings.slack.appToken.length > 0;
+  const settings = configuration.public.settings;
+  const slackConfigured =
+    configuration.public.secrets['slack.botToken'].configured &&
+    configuration.public.secrets['slack.appToken'].configured;
   const slack = check(
     'configuration.slack_credentials',
     slackConfigured ? 'pass' : 'fail',
@@ -384,15 +350,12 @@ async function credentialChecks(
     slackConfigured ? null : 'Configure both Slack bot and app credentials.',
   );
 
-  const slash = settings.model.indexOf('/');
-  const modelShapeValid = slash > 0 && slash < settings.model.length - 1;
+  const model = settings.model ?? '';
+  const slash = model.indexOf('/');
+  const modelShapeValid = slash > 0 && slash < model.length - 1;
   if (settings.agentBackend === 'claude-agent-sdk') {
-    const modelValid = modelShapeValid && settings.model.startsWith('anthropic/');
-    const source = env.CLAUDE_CODE_OAUTH_TOKEN
-      ? 'environment'
-      : settings.claudeAgentSdk?.oauthToken
-        ? 'stored'
-        : null;
+    const modelValid = modelShapeValid && model.startsWith('anthropic/');
+    const source = configuration.public.secrets['claudeAgentSdk.oauthToken'].source;
     const valid = modelValid && source !== null;
     return [
       slack,
@@ -419,8 +382,8 @@ async function credentialChecks(
       ),
     ];
   }
-  const provider = settings.model.slice(0, slash);
-  const modelId = settings.model.slice(slash + 1);
+  const provider = model.slice(0, slash);
+  const modelId = model.slice(slash + 1);
   const agentDir = path.join(homeDir, '.pi', 'agent');
   const authPath = path.join(agentDir, 'auth.json');
   try {
@@ -457,11 +420,11 @@ async function credentialChecks(
       modelsStore,
       allowModelNetwork: false,
     });
-    const model = runtime.getModel(provider, modelId);
+    const registryModel = runtime.getModel(provider, modelId);
     const auth = runtime.getProviderAuthStatus(provider);
     const configured = auth.configured;
-    const effortValid = !settings.effort || model?.reasoning === true;
-    const valid = model !== undefined && configured && effortValid;
+    const effortValid = !settings.effort || registryModel?.reasoning === true;
+    const valid = registryModel !== undefined && configured && effortValid;
     return [
       slack,
       check(
@@ -470,7 +433,7 @@ async function credentialChecks(
         valid
           ? `Pi backend, model, and ${auth.source ?? 'local'} credential are configured.`
           : 'Pi backend configuration is incomplete or invalid.',
-        model === undefined
+        registryModel === undefined
           ? 'The model is not present in the local Pi model registry.'
           : !configured
             ? 'No local credential is configured for the selected provider.'
@@ -988,7 +951,7 @@ export async function runDiagnostics(
 
   const configuration = inspectConfiguration(home);
   const homeDir = options.homeDir ?? os.homedir();
-  const credentials = await credentialChecks(configuration.settings, process.env, homeDir);
+  const credentials = await credentialChecks(configuration, homeDir);
   const rootExists = (() => {
     try {
       return lstatSync(home.rootDir).isDirectory();
@@ -1058,7 +1021,7 @@ export async function runDiagnostics(
     ...credentials,
     revisionCheck(configuration.settings, options.activeSettings, daemon),
     migrationCheck(home),
-    ...inspectWorkspace(configuration.settings?.workspace, home),
+    ...inspectWorkspace(configuration.public?.settings.workspace, home),
   ];
 
   return {

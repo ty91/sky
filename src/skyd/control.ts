@@ -468,7 +468,7 @@ function writeConfigurationError(response: ServerResponse, error: unknown): void
         ? 404
         : error.code.endsWith('_unsafe') || error.code === 'migration_conflict'
           ? 409
-          : error.code === 'configuration_incomplete'
+          : error.code === 'configuration_incomplete' || error.code === 'secret_missing'
             ? 422
             : 400;
   writeJson(response, statusCode, {
