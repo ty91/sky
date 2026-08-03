@@ -7,6 +7,11 @@ import {
 } from '../configuration.js';
 import type { DiagnosticsReport } from '../diagnostics.js';
 import type {
+  RuntimeAdmin,
+  RuntimeScheduledJobsSnapshot,
+  RuntimeSessionsSnapshot,
+} from '../runtime/admin.js';
+import type {
   ConnectionTarget,
   ConnectionsSnapshot,
 } from '../connections.js';
@@ -39,6 +44,7 @@ export type AdminLoginGrant = {
 export type ControlDependencies = {
   getStatus(): DaemonStatus;
   getOverview?: () => AdminOverview | Promise<AdminOverview>;
+  getRuntimeAdmin?: () => RuntimeAdmin | undefined;
   issueAdminLogin?: () => AdminLoginGrant;
   requestRestart?: () => ControlRestartResult;
   operations?: OperationRegistry;
@@ -70,6 +76,10 @@ type SecretValueBody = {
 export type ControlExecuteRequest =
   | { type: 'status' }
   | { type: 'overview' }
+  | { type: 'sessions.list' }
+  | { type: 'session.reset'; threadKey: string }
+  | { type: 'scheduler.jobs.list' }
+  | { type: 'scheduler.job.cancel'; jobId: string }
   | { type: 'admin.login.issue' }
   | { type: 'diagnostics' }
   | { type: 'workspace.prompts.get' }
@@ -93,6 +103,14 @@ export type ControlExecuteResult<Request extends ControlExecuteRequest> =
     ? DaemonStatus
     : Request extends { type: 'overview' }
       ? AdminOverview
+      : Request extends { type: 'sessions.list' }
+        ? RuntimeSessionsSnapshot
+        : Request extends { type: 'session.reset' }
+          ? { reset: boolean }
+          : Request extends { type: 'scheduler.jobs.list' }
+            ? RuntimeScheduledJobsSnapshot
+            : Request extends { type: 'scheduler.job.cancel' }
+              ? { cancelled: true }
       : Request extends { type: 'admin.login.issue' }
         ? AdminLoginGrant
         : Request extends { type: 'diagnostics' }
@@ -138,6 +156,7 @@ function errorStatus(code: string, context: ErrorContext): number {
     case 'not_found':
     case 'unknown_secret':
     case 'operation_not_found':
+    case 'scheduled_job_not_found':
       return 404;
     case 'method_not_allowed':
       return 405;
@@ -149,12 +168,14 @@ function errorStatus(code: string, context: ErrorContext): number {
     case 'migration_conflict':
     case 'configuration_draining':
     case 'operation_active':
+    case 'scheduled_job_status_conflict':
       return 409;
     case 'configuration_incomplete':
     case 'secret_missing':
       return 422;
     case 'daemon_draining':
     case 'admin_unavailable':
+    case 'runtime_unavailable':
       return 503;
     case 'internal_error':
       return 500;
@@ -318,6 +339,12 @@ function bufferedStream<T>(
 }
 
 export function createDaemonControl(dependencies: ControlDependencies): DaemonControl {
+  const runtimeAdmin = () => {
+    const admin = dependencies.getRuntimeAdmin?.();
+    if (!admin) throw new ControlError('runtime_unavailable');
+    return admin;
+  };
+
   return {
     async execute<Request extends ControlExecuteRequest>(
       request: Request,
@@ -336,6 +363,20 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
           case 'overview':
             if (!dependencies.getOverview) throw new ControlError('not_found');
             return asResult<Request>(await dependencies.getOverview());
+          case 'sessions.list':
+            return asResult<Request>({ sessions: await runtimeAdmin().listSessions() });
+          case 'session.reset':
+            if (!request.threadKey) throw new ControlError('invalid_request');
+            return asResult<Request>(await runtimeAdmin().resetSession(request.threadKey));
+          case 'scheduler.jobs.list':
+            return asResult<Request>({ jobs: runtimeAdmin().listScheduledJobs() });
+          case 'scheduler.job.cancel': {
+            if (!request.jobId) throw new ControlError('invalid_request');
+            const result = runtimeAdmin().cancelScheduledJob(request.jobId);
+            if (result.ok) return asResult<Request>({ cancelled: true });
+            if (result.reason === 'not_found') throw new ControlError('scheduled_job_not_found');
+            throw new ControlError('scheduled_job_status_conflict', { status: result.status });
+          }
           case 'admin.login.issue':
             if (!dependencies.issueAdminLogin) throw new ControlError('admin_unavailable');
             return asResult<Request>(dependencies.issueAdminLogin());

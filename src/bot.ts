@@ -6,6 +6,7 @@ import { createConversationManager, type ConversationManager } from './conversat
 import { openConversationStore } from './conversation/store.js';
 import { openThreadModelStore } from './conversation/thread-model-store.js';
 import type { RuntimeController } from './runtime/controller.js';
+import { createRuntimeAdmin, type RuntimeAdmin } from './runtime/admin.js';
 import { createScheduledJobDispatcher } from './scheduler/dispatcher.js';
 import {
   createScheduledJobScheduler,
@@ -30,6 +31,7 @@ export class SlackStartupError extends Error {
 }
 
 export type BotRuntime = {
+  admin: RuntimeAdmin;
   close(): Promise<void>;
 };
 
@@ -162,6 +164,7 @@ export async function startBotRuntime(
     await scheduledJobScheduler.start();
 
     return {
+      admin: createRuntimeAdmin(conversationManager, scheduledJobStore),
       close,
     };
   } catch (error) {

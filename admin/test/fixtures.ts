@@ -2,6 +2,10 @@ import type { AdminOverview } from '../../src/skyd/types';
 import type { ControlConfiguration } from '../../src/skyd/control';
 import type { WorkspacePrompt, WorkspacePromptSnapshot } from '../../src/workspace-prompts';
 import type { ConnectionsSnapshot } from '../../src/connections';
+import type {
+  RuntimeScheduledJobsSnapshot,
+  RuntimeSessionsSnapshot,
+} from '../../src/runtime/admin';
 
 export function overviewFixture(
   overrides: Partial<AdminOverview> = {},
@@ -162,6 +166,53 @@ export function promptSnapshotFixture(): WorkspacePromptSnapshot {
         },
         content: null,
       }),
+    ],
+  };
+}
+
+export function sessionsFixture(): RuntimeSessionsSnapshot {
+  return {
+    sessions: [
+      {
+        threadKey: 'D123:1777901000.000000',
+        backendSessionId: 'pi-session-1',
+        backend: 'pi',
+        model: 'anthropic/claude-sonnet-4-5',
+        agent: 'main',
+        createdAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T01:00:00.000Z',
+      },
+    ],
+  };
+}
+
+export function scheduledJobsFixture(): RuntimeScheduledJobsSnapshot {
+  return {
+    jobs: [
+      {
+        id: 'job-pending',
+        title: 'Pack passport',
+        kind: 'once',
+        nextRunAt: '2026-08-04T02:00:00.000Z',
+        timezone: 'Asia/Seoul',
+        target: 'D123',
+        status: 'pending',
+        lastRunAt: null,
+        runCount: 0,
+        errorSummary: null,
+      },
+      {
+        id: 'job-running',
+        title: 'Daily review',
+        kind: 'cron',
+        nextRunAt: '2026-08-04T03:00:00.000Z',
+        timezone: 'Asia/Seoul',
+        target: 'C456',
+        status: 'running',
+        lastRunAt: '2026-08-03T03:00:00.000Z',
+        runCount: 3,
+        errorSummary: 'The most recent run failed.',
+      },
     ],
   };
 }

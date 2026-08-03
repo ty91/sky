@@ -211,6 +211,35 @@ code, .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
 .backend-check-panel .secondary-button { margin-top: 6px; }
 .backend-check-panel .connection-check { min-height: 0; }
 
+.management-page { max-width: 1180px; }
+.management-message { margin: 0 0 18px; padding: 13px 16px; border: 1px solid #b8d1c2; background: #eef8f1; color: #276449; font-size: .82rem; }
+.confirmation-panel { display: flex; align-items: center; justify-content: space-between; gap: 28px; margin-bottom: 20px; padding: 22px 24px; border: 1px solid #d9ad9f; border-left: 4px solid #ad4e3b; background: #fff4f0; }
+.confirmation-panel .eyebrow { margin: 0 0 5px; color: #99503f; }
+.confirmation-panel h2 { margin: 0; font-size: 1.2rem; }
+.confirmation-panel p:last-child { max-width: 700px; margin: 7px 0 0; color: #705952; font-size: .8rem; line-height: 1.55; }
+.confirmation-actions { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.danger-button { border: 0; border-radius: 3px; padding: 11px 15px; cursor: pointer; background: #9d4433; color: #fff; font-weight: 700; }
+.danger-button:disabled { cursor: wait; opacity: .55; }
+.management-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
+.management-card { min-width: 0; padding: 22px; border: 1px solid var(--line); border-top: 3px solid var(--forest); background: var(--panel); }
+.management-card > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.management-card .eyebrow { margin: 0 0 5px; }
+.management-card h2 { overflow-wrap: anywhere; margin: 0; font-size: 1.05rem; letter-spacing: -.025em; }
+.status-badge { padding: 5px 8px; border-radius: 999px; background: #e3efe7; color: #2d674e; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: .62rem; text-transform: uppercase; white-space: nowrap; }
+.status-running { background: #e5edf3; color: #3c6175; }
+.status-done, .status-cancelled { background: #ecebe5; color: #68706c; }
+.status-failed { background: #f4dfd8; color: #8e4335; }
+.management-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 18px 0; border-top: 1px solid #e5e3da; }
+.management-details div { min-width: 0; padding: 10px 10px 10px 0; border-bottom: 1px solid #e5e3da; }
+.management-details dt { color: var(--muted); font-size: .67rem; text-transform: uppercase; letter-spacing: .06em; }
+.management-details dd { overflow: hidden; margin: 4px 0 0; font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.danger-text-button { border: 0; padding: 0; cursor: pointer; background: transparent; color: #984432; font-weight: 700; font-size: .74rem; text-decoration: underline; text-underline-offset: 3px; }
+.danger-text-button:disabled { cursor: not-allowed; color: #929895; text-decoration: none; }
+.management-empty { min-height: 280px; display: grid; place-content: center; justify-items: center; padding: 30px; border: 1px dashed #c9c8bf; background: rgba(251,250,246,.55); text-align: center; }
+.management-empty span { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid #b9cfbf; border-radius: 50%; color: #4f8a66; }
+.management-empty h2 { margin: 14px 0 0; font-size: 1.15rem; }
+.management-empty p { margin: 7px 0 0; color: var(--muted); font-size: .8rem; }
+
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 76px minmax(0, 1fr); }
   .sidebar { padding-inline: 14px; }
@@ -223,6 +252,7 @@ code, .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
   .sidebar-footer { justify-content: center; font-size: 0; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .connections-grid { grid-template-columns: 1fr; }
+  .management-list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -243,6 +273,8 @@ code, .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
   .metric-grid, .dashboard-columns { grid-template-columns: 1fr; }
   .settings-form, .prompt-grid { grid-template-columns: 1fr; }
   .restart-banner, .form-actions { align-items: stretch; flex-direction: column; }
+  .confirmation-panel { align-items: stretch; flex-direction: column; }
+  .confirmation-actions { justify-content: space-between; }
   .restart-banner .primary-button, .form-actions .primary-button { width: 100%; }
   .reconnect-banner { align-items: flex-start; flex-wrap: wrap; }
   .reconnect-banner .text-button { margin-left: 22px; }

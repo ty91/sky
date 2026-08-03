@@ -33,6 +33,7 @@ type ScheduledJobRow = {
 type StoreHandles = {
   db: DatabaseSync;
   createStmt: StatementSync;
+  getStmt: StatementSync;
   listStmt: StatementSync;
   cancelStmt: StatementSync;
   claimDueStmt: StatementSync;
@@ -108,6 +109,7 @@ export function openScheduledJobStore(
         last_run_at, run_count, last_error
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, 0, NULL)
     `),
+    getStmt: db.prepare('SELECT * FROM scheduled_jobs WHERE id = ?'),
     listStmt: db.prepare('SELECT * FROM scheduled_jobs ORDER BY next_run_at, created_at, id'),
     cancelStmt: db.prepare(
       "UPDATE scheduled_jobs SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
@@ -188,6 +190,11 @@ export function openScheduledJobStore(
         runCount: 0,
         lastError: null,
       };
+    },
+
+    get(id: string): ScheduledJob | undefined {
+      const row = handles.getStmt.get(id) as ScheduledJobRow | undefined;
+      return row ? toScheduledJob(row) : undefined;
     },
 
     list(): ScheduledJob[] {

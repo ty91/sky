@@ -217,6 +217,8 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
   const control = createDaemonControl({
     getStatus: status,
+    getRuntimeAdmin: () =>
+      status().runtime.state === 'ready' ? runtime?.admin : undefined,
     getOverview: async () => {
       const diagnostics = await runDiagnostics(paths, {
         daemonStatus: status(),

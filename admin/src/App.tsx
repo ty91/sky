@@ -3,6 +3,12 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
 import type { ControlConfiguration } from '../../src/skyd/control';
 import type { AdminOverview } from '../../src/skyd/types';
 import type {
+  RuntimeScheduledJobSummary,
+  RuntimeScheduledJobsSnapshot,
+  RuntimeSessionSummary,
+  RuntimeSessionsSnapshot,
+} from '../../src/runtime/admin';
+import type {
   ConnectionCheck,
   ConnectionTarget,
   ConnectionsSnapshot,
@@ -213,7 +219,19 @@ function Shell({
               />
             }
           />
-          {navigation.filter(([path]) => path !== '/' && path !== '/connections' && path !== '/agent').map(([path, label]) => (
+          <Route
+            path="/sessions"
+            element={
+              <SessionsPage session={session} onSessionExpired={onSessionExpired} />
+            }
+          />
+          <Route
+            path="/scheduler"
+            element={
+              <SchedulerPage session={session} onSessionExpired={onSessionExpired} />
+            }
+          />
+          {navigation.filter(([path]) => !['/', '/connections', '/agent', '/sessions', '/scheduler'].includes(path)).map(([path, label]) => (
             <Route key={path} path={path} element={<Placeholder title={label} />} />
           ))}
           <Route path="*" element={<Dashboard onSessionExpired={onSessionExpired} />} />
@@ -905,6 +923,269 @@ function Placeholder({ title }: { title: string }) {
         <span>Coming in the next admin slice</span>
         <p>This area is wired into the application shell and ready for its management workflow.</p>
       </div>
+    </div>
+  );
+}
+
+function ManagementHeader({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <header className="page-header">
+      <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{description}</p></div>
+    </header>
+  );
+}
+
+function SessionsPage({
+  session,
+  onSessionExpired,
+}: {
+  session: Session;
+  onSessionExpired(): void;
+}) {
+  const [sessions, setSessions] = useState<RuntimeSessionSummary[]>();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [confirming, setConfirming] = useState<RuntimeSessionSummary>();
+  const [resetting, setResetting] = useState(false);
+  const [message, setMessage] = useState<string>();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const snapshot = await requestJson<RuntimeSessionsSnapshot>('/api/sessions');
+      setSessions(snapshot.sessions);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const reset = async () => {
+    if (!confirming) return;
+    setResetting(true);
+    setMessage(undefined);
+    try {
+      const result = await requestJson<{ reset: boolean }>(
+        `/api/sessions/${encodeURIComponent(confirming.threadKey)}`,
+        {
+          method: 'DELETE',
+          headers: { 'x-sky-csrf-token': session.csrfToken },
+        },
+      );
+      setSessions((current) => current?.filter(({ threadKey }) => threadKey !== confirming.threadKey));
+      setMessage(
+        result.reset
+          ? `Session ${confirming.threadKey} was reset.`
+          : `Session ${confirming.threadKey} was already gone.`,
+      );
+      setConfirming(undefined);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setMessage('The session could not be reset. Its current state was kept.');
+      setConfirming(undefined);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div className="page management-page">
+      <ManagementHeader eyebrow="Conversation state" title="Sessions" description="Inspect backend sessions by Slack thread and reset them without deleting backend files." />
+      {loading ? (
+        <section className="loading-panel" role="status" aria-label="Loading sessions">
+          <span className="loading-orbit" aria-hidden="true" />
+          <div><strong>Reading runtime sessions</strong><p>Stored prompts, resume paths, and transcripts stay private.</p></div>
+        </section>
+      ) : loadError || !sessions ? (
+        <section className="error-panel" role="alert">
+          <p className="eyebrow">Runtime unavailable</p><h2>Could not load sessions</h2>
+          <p>The Slack runtime may still be starting or restarting.</p>
+          <button className="secondary-button" type="button" onClick={() => void load()}>Retry</button>
+        </section>
+      ) : (
+        <>
+          {message && <p className="management-message" role="status">{message}</p>}
+          {confirming && (
+            <section className="confirmation-panel" role="alertdialog" aria-labelledby="reset-session-title" aria-describedby="reset-session-description">
+              <div>
+                <p className="eyebrow">Destructive action</p>
+                <h2 id="reset-session-title">Reset this session?</h2>
+                <p id="reset-session-description">The active or pending turn will stop, and the saved mapping for <code>{confirming.threadKey}</code> will be removed. The backend session file is not deleted.</p>
+              </div>
+              <div className="confirmation-actions">
+                <button className="text-button" type="button" disabled={resetting} onClick={() => setConfirming(undefined)}>Keep session</button>
+                <button className="danger-button" type="button" disabled={resetting} onClick={() => void reset()}>{resetting ? 'Resetting…' : 'Confirm reset'}</button>
+              </div>
+            </section>
+          )}
+          {sessions.length === 0 ? (
+            <section className="management-empty"><span aria-hidden="true">○</span><h2>No sessions</h2><p>A session appears after Sky starts a conversation in a Slack thread.</p></section>
+          ) : (
+            <div className="management-list" aria-label="Runtime sessions">
+              {sessions.map((item) => (
+                <article className="management-card" key={`${item.threadKey}:${item.backend}`}>
+                  <header><div><p className="eyebrow">Slack thread</p><h2 className="mono">{item.threadKey}</h2></div><span className="status-badge">{item.backend}</span></header>
+                  <dl className="management-details">
+                    <div><dt>Backend session</dt><dd className="mono">{item.backendSessionId}</dd></div>
+                    <div><dt>Model</dt><dd>{item.model || 'Default model'}</dd></div>
+                    <div><dt>Agent</dt><dd>{item.agent}</dd></div>
+                    <div><dt>Created</dt><dd>{formatDate(item.createdAt)}</dd></div>
+                    <div><dt>Updated</dt><dd>{formatDate(item.updatedAt)}</dd></div>
+                  </dl>
+                  <button className="danger-text-button" type="button" onClick={() => { setMessage(undefined); setConfirming(item); }}>Reset session {item.threadKey}</button>
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SchedulerPage({
+  session,
+  onSessionExpired,
+}: {
+  session: Session;
+  onSessionExpired(): void;
+}) {
+  const [jobs, setJobs] = useState<RuntimeScheduledJobSummary[]>();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [confirming, setConfirming] = useState<RuntimeScheduledJobSummary>();
+  const [cancelling, setCancelling] = useState(false);
+  const [message, setMessage] = useState<string>();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const snapshot = await requestJson<RuntimeScheduledJobsSnapshot>('/api/scheduler/jobs');
+      setJobs(snapshot.jobs);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const cancel = async () => {
+    if (!confirming) return;
+    setCancelling(true);
+    setMessage(undefined);
+    try {
+      await requestJson<{ cancelled: true }>(
+        `/api/scheduler/jobs/${encodeURIComponent(confirming.id)}`,
+        {
+          method: 'DELETE',
+          headers: { 'x-sky-csrf-token': session.csrfToken },
+        },
+      );
+      setJobs((current) => current?.map((job) =>
+        job.id === confirming.id ? { ...job, status: 'cancelled' } : job,
+      ));
+      setMessage(`Job ${confirming.title} was cancelled.`);
+      setConfirming(undefined);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        setMessage(`Job ${confirming.title} is now ${String(error.details.status ?? 'unavailable')} and was not cancelled.`);
+        setConfirming(undefined);
+        await load();
+        return;
+      }
+      setMessage('The scheduled job could not be cancelled. Its current state was kept.');
+      setConfirming(undefined);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return (
+    <div className="page management-page">
+      <ManagementHeader eyebrow="Automation state" title="Scheduler" description="Inspect once and cron jobs. Pending jobs can be cancelled; prompts remain hidden." />
+      {loading ? (
+        <section className="loading-panel" role="status" aria-label="Loading scheduled jobs">
+          <span className="loading-orbit" aria-hidden="true" />
+          <div><strong>Reading scheduled jobs</strong><p>Waiting for the active runtime snapshot.</p></div>
+        </section>
+      ) : loadError || !jobs ? (
+        <section className="error-panel" role="alert">
+          <p className="eyebrow">Runtime unavailable</p><h2>Could not load scheduled jobs</h2>
+          <p>The scheduler may still be starting or the daemon may be restarting.</p>
+          <button className="secondary-button" type="button" onClick={() => void load()}>Retry</button>
+        </section>
+      ) : (
+        <>
+          {message && <p className="management-message" role="status">{message}</p>}
+          {confirming && (
+            <section className="confirmation-panel" role="alertdialog" aria-labelledby="cancel-job-title" aria-describedby="cancel-job-description">
+              <div>
+                <p className="eyebrow">Destructive action</p>
+                <h2 id="cancel-job-title">Cancel this scheduled job?</h2>
+                <p id="cancel-job-description"><strong>{confirming.title}</strong> will not run again. Only a job that is still pending can be cancelled.</p>
+              </div>
+              <div className="confirmation-actions">
+                <button className="text-button" type="button" disabled={cancelling} onClick={() => setConfirming(undefined)}>Keep job</button>
+                <button className="danger-button" type="button" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? 'Cancelling…' : 'Confirm cancel'}</button>
+              </div>
+            </section>
+          )}
+          {jobs.length === 0 ? (
+            <section className="management-empty"><span aria-hidden="true">○</span><h2>No scheduled jobs</h2><p>Jobs created by the agent will appear here.</p></section>
+          ) : (
+            <div className="management-list" aria-label="Scheduled jobs">
+              {jobs.map((job) => (
+                <article className="management-card" key={job.id}>
+                  <header><div><p className="eyebrow">{job.kind} job</p><h2>{job.title}</h2></div><span className={`status-badge status-${job.status}`}>{labelState(job.status)}</span></header>
+                  <dl className="management-details">
+                    <div><dt>Next run</dt><dd>{formatDate(job.nextRunAt)}</dd></div>
+                    <div><dt>Timezone</dt><dd>{job.timezone}</dd></div>
+                    <div><dt>Target</dt><dd className="mono">{job.target}</dd></div>
+                    <div><dt>Last run</dt><dd>{job.lastRunAt ? formatDate(job.lastRunAt) : 'Never'}</dd></div>
+                    <div><dt>Run count</dt><dd>{job.runCount}</dd></div>
+                    <div><dt>Last error</dt><dd>{job.errorSummary ?? 'None'}</dd></div>
+                  </dl>
+                  <button className="danger-text-button" type="button" disabled={job.status !== 'pending'} onClick={() => { setMessage(undefined); setConfirming(job); }}>{job.status === 'pending' ? `Cancel job ${job.title}` : 'Only pending jobs can be cancelled'}</button>
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

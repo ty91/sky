@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { expect, test } from 'vitest';
 import { App } from '../src/App';
-import { configurationFixture, connectionsFixture, overviewFixture, promptSnapshotFixture } from './fixtures';
+import {
+  configurationFixture,
+  connectionsFixture,
+  overviewFixture,
+  promptSnapshotFixture,
+  scheduledJobsFixture,
+} from './fixtures';
 import { server } from './server';
 
 function renderApp(route = '/') {
@@ -44,6 +50,98 @@ test('shows the full application shell and uses the real router', async () => {
   await user.click(screen.getByRole('link', { name: 'Connections' }));
   expect(screen.getByRole('heading', { name: 'Connections' })).toBeInTheDocument();
   expect(window.location.pathname).toBe('/connections');
+});
+
+test('lists safe session metadata and requires confirmation before reset', async () => {
+  const user = userEvent.setup();
+  let resetRequest: { threadKey: string; csrf: string | null } | undefined;
+  server.use(
+    http.delete('/api/sessions/:threadKey', ({ params, request }) => {
+      resetRequest = {
+        threadKey: String(params.threadKey),
+        csrf: request.headers.get('x-sky-csrf-token'),
+      };
+      return HttpResponse.json({ reset: true });
+    }),
+  );
+  renderApp('/sessions');
+
+  expect(await screen.findByText('pi-session-1')).toBeInTheDocument();
+  expect(screen.getByText('anthropic/claude-sonnet-4-5')).toBeInTheDocument();
+  expect(screen.queryByText(/resume/i)).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Reset session D123:1777901000.000000' }));
+
+  expect(resetRequest).toBeUndefined();
+  expect(screen.getByRole('alertdialog')).toHaveTextContent('active or pending turn will stop');
+  await user.click(screen.getByRole('button', { name: 'Confirm reset' }));
+
+  expect(resetRequest).toEqual({
+    threadKey: 'D123:1777901000.000000',
+    csrf: 'csrf-token',
+  });
+  expect(await screen.findByText('No sessions')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('was reset');
+});
+
+test('recovers from a sessions error into the empty state', async () => {
+  const user = userEvent.setup();
+  let requests = 0;
+  server.use(
+    http.get('/api/sessions', async () => {
+      requests += 1;
+      if (requests === 1) {
+        return HttpResponse.json({ error: { code: 'runtime_unavailable' } }, { status: 503 });
+      }
+      await delay(20);
+      return HttpResponse.json({ sessions: [] });
+    }),
+  );
+  renderApp('/sessions');
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not load sessions');
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(screen.getByRole('status', { name: 'Loading sessions' })).toBeInTheDocument();
+  expect(await screen.findByText('No sessions')).toBeInTheDocument();
+});
+
+test('lists scheduler state and only cancels a confirmed pending job', async () => {
+  const user = userEvent.setup();
+  let cancelRequest: { jobId: string; csrf: string | null } | undefined;
+  server.use(
+    http.delete('/api/scheduler/jobs/:jobId', ({ params, request }) => {
+      cancelRequest = {
+        jobId: String(params.jobId),
+        csrf: request.headers.get('x-sky-csrf-token'),
+      };
+      return HttpResponse.json({ cancelled: true });
+    }),
+  );
+  renderApp('/scheduler');
+
+  expect(await screen.findByRole('heading', { name: 'Pack passport' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Daily review' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Only pending jobs can be cancelled' })).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Cancel job Pack passport' }));
+
+  expect(cancelRequest).toBeUndefined();
+  expect(screen.getByRole('alertdialog')).toHaveTextContent('Only a job that is still pending');
+  await user.click(screen.getByRole('button', { name: 'Confirm cancel' }));
+
+  expect(cancelRequest).toEqual({ jobId: 'job-pending', csrf: 'csrf-token' });
+  expect(await screen.findByRole('status')).toHaveTextContent('was cancelled');
+  expect(screen.getAllByRole('button', { name: 'Only pending jobs can be cancelled' })).toHaveLength(2);
+});
+
+test('announces loading while scheduler data is pending', async () => {
+  server.use(
+    http.get('/api/scheduler/jobs', async () => {
+      await delay('infinite');
+      return HttpResponse.json(scheduledJobsFixture());
+    }),
+  );
+  renderApp('/scheduler');
+
+  expect(await screen.findByRole('status', { name: 'Loading scheduled jobs' })).toBeInTheDocument();
 });
 
 test('keeps credential values write-only and makes keep, replace, and delete explicit', async () => {

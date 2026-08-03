@@ -15,6 +15,12 @@ export type PersistedConversation = {
   systemPrompt?: string;
 };
 
+export type ConversationSummary = PersistedConversation & {
+  key: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 /**
  * Read side of the per-thread model override. Consulted on every turn so that
  * *all* entry points (Slack turns, scheduled reminders, post-restart triggers)
@@ -28,6 +34,7 @@ export interface ThreadModelReader {
 
 export interface ConversationStore {
   get(key: string, backend: string): PersistedConversation | undefined;
+  list(backend: string): ConversationSummary[];
   put(key: string, conversation: PersistedConversation): void;
   remove(key: string, backend: string): void;
   close(): void;
@@ -74,7 +81,8 @@ export type ConversationManager = {
    */
   rekey(oldKey: string, newKey: string): void;
   activeWorkCount(): number;
+  list(): Promise<ConversationSummary[]>;
   close(key: string): Promise<void>;
-  purge(key: string): Promise<void>;
+  purge(key: string): Promise<boolean>;
   closeAll(): Promise<void>;
 };

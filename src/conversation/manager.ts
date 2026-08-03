@@ -5,6 +5,7 @@ import type {
   ConversationHandle,
   ConversationManager,
   ConversationManagerOptions,
+  ConversationSummary,
   ConversationTurnOptions,
   ConversationTurnResult,
   PersistedConversation,
@@ -19,6 +20,7 @@ export type {
   ConversationTurnOptions,
   ConversationTurnResult,
   PersistedConversation,
+  ConversationSummary,
   ThreadModelReader,
 } from './types.js';
 
@@ -38,6 +40,8 @@ type ConversationEntry = {
   backend: string;
   agentName: string;
   model: string;
+  createdAt: number;
+  updatedAt: number;
   sessionPromise: Promise<AgentSession>;
   handle?: ConversationHandle;
   unsubscribe?: () => void;
@@ -282,6 +286,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
       ...(handle.sessionFile !== undefined ? { resumeRef: handle.sessionFile } : {}),
       ...(session.systemPrompt !== undefined ? { systemPrompt: session.systemPrompt } : {}),
     });
+    entry.updatedAt = Date.now();
   }
 
   async function getSession(entry: ConversationEntry): Promise<AgentSession> {
@@ -299,11 +304,14 @@ export function createConversationManager(options: ConversationManagerOptions): 
       if (!entry) {
         const cwd = agent.cwd ?? options.defaultCwd;
         const persisted = getPersistedConversation(key, agent);
+        const now = Date.now();
         entry = {
           key,
           backend: agentBackend,
           agentName: agent.name,
           model: resolveAgentModel(agent),
+          createdAt: now,
+          updatedAt: now,
           sessionPromise: createSession({
             key,
             agent,
@@ -325,6 +333,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
       }
 
       const deferred = createDeferred<ConversationTurnResult>();
+      entry.updatedAt = Date.now();
 
       if (entry.pending) {
         entry.pending.deferred.resolve({ kind: 'interrupted' });
@@ -418,6 +427,42 @@ export function createConversationManager(options: ConversationManagerOptions): 
       return count;
     },
 
+    async list() {
+      const persisted = new Map(
+        (options.store?.list(agentBackend) ?? []).map((conversation) => [
+          conversation.key,
+          conversation,
+        ]),
+      );
+      const summaries = new Map<string, ConversationSummary>(persisted);
+
+      await Promise.all(
+        [...sessions.values()].map(async (entry) => {
+          try {
+            const session = await entry.sessionPromise;
+            const stored = persisted.get(entry.key);
+            if (entry.closed || sessions.get(entry.key) !== entry) return;
+            summaries.set(entry.key, {
+              key: entry.key,
+              sessionId: session.sessionId,
+              backend: entry.backend,
+              model: entry.model,
+              agentName: entry.agentName,
+              createdAt: stored?.createdAt ?? entry.createdAt,
+              updatedAt: Math.max(stored?.updatedAt ?? 0, entry.updatedAt),
+            });
+          } catch {
+            // A session that failed before producing an identifier is not listable.
+          }
+        }),
+      );
+
+      // oxlint-disable-next-line unicorn/no-array-sort -- this sorts a fresh array copy.
+      return [...summaries.values()].sort(
+        (left, right) => right.updatedAt - left.updatedAt || left.key.localeCompare(right.key),
+      );
+    },
+
     async close(key) {
       const entry = sessions.get(key);
       if (!entry) {
@@ -447,8 +492,11 @@ export function createConversationManager(options: ConversationManagerOptions): 
     },
 
     async purge(key) {
-      await manager.close(key);
+      const existed = sessions.has(key) || getPersistedConversation(key) !== undefined;
+      const closing = manager.close(key);
       options.store?.remove(key, agentBackend);
+      await closing;
+      return existed;
     },
 
     async closeAll() {

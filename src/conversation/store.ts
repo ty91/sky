@@ -5,13 +5,18 @@ import {
   secureSqliteFiles,
   type SkyHome,
 } from '../sky-home.js';
-import type { ConversationStore, PersistedConversation } from './types.js';
+import type {
+  ConversationStore,
+  ConversationSummary,
+  PersistedConversation,
+} from './types.js';
 
 const CONVERSATION_SCHEMA_VERSION = '4';
 
 type StoreHandles = {
   db: DatabaseSync;
   getStmt: StatementSync;
+  listStmt: StatementSync;
   putStmt: StatementSync;
   removeStmt: StatementSync;
 };
@@ -151,6 +156,12 @@ export function openConversationStore(
     getStmt: db.prepare(
       'SELECT session_id, backend, resume_ref, model, agent_name, system_prompt FROM conversations WHERE key = ? AND backend = ?',
     ),
+    listStmt: db.prepare(
+      `SELECT key, session_id, backend, model, agent_name, created_at, updated_at
+       FROM conversations
+       WHERE backend = ?
+       ORDER BY updated_at DESC, key`,
+    ),
     putStmt: db.prepare(
       `INSERT INTO conversations (key, session_id, backend, resume_ref, model, agent_name, system_prompt, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -188,6 +199,27 @@ export function openConversationStore(
         ...(row.resume_ref !== null ? { resumeRef: row.resume_ref } : {}),
         ...(row.system_prompt !== null ? { systemPrompt: row.system_prompt } : {}),
       };
+    },
+
+    list(backend: string): ConversationSummary[] {
+      const rows = handles.listStmt.all(backend) as Array<{
+        key: string;
+        session_id: string;
+        backend: string;
+        model: string;
+        agent_name: string;
+        created_at: number;
+        updated_at: number;
+      }>;
+      return rows.map((row) => ({
+        key: row.key,
+        sessionId: row.session_id,
+        backend: row.backend,
+        model: row.model,
+        agentName: row.agent_name,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
     },
 
     put(key: string, conversation: PersistedConversation): void {

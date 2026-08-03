@@ -31,6 +31,7 @@ export type NewScheduledJob = Omit<
 
 export interface ScheduledJobStore {
   create(job: NewScheduledJob): ScheduledJob;
+  get(id: string): ScheduledJob | undefined;
   list(): ScheduledJob[];
   cancel(id: string): boolean;
   claimDue(now: number): ScheduledJob[];

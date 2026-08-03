@@ -277,6 +277,52 @@ async function handleRequest(
     return;
   }
 
+  if (url.pathname === '/api/sessions') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    writeJson(response, 200, await control.execute({ type: 'sessions.list' }));
+    return;
+  }
+
+  const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+  if (sessionMatch) {
+    if (request.method !== 'DELETE') return methodNotAllowed(response, 'DELETE');
+    if (!requireMutationProtection(request, response, session)) return;
+    let threadKey: string;
+    try {
+      threadKey = decodeURIComponent(sessionMatch[1]);
+    } catch {
+      writeError(response, 400, 'invalid_request');
+      return;
+    }
+    writeJson(response, 200, await control.execute({ type: 'session.reset', threadKey }));
+    return;
+  }
+
+  if (url.pathname === '/api/scheduler/jobs') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    writeJson(response, 200, await control.execute({ type: 'scheduler.jobs.list' }));
+    return;
+  }
+
+  const scheduledJobMatch = url.pathname.match(/^\/api\/scheduler\/jobs\/([^/]+)$/);
+  if (scheduledJobMatch) {
+    if (request.method !== 'DELETE') return methodNotAllowed(response, 'DELETE');
+    if (!requireMutationProtection(request, response, session)) return;
+    let jobId: string;
+    try {
+      jobId = decodeURIComponent(scheduledJobMatch[1]);
+    } catch {
+      writeError(response, 400, 'invalid_request');
+      return;
+    }
+    writeJson(
+      response,
+      200,
+      await control.execute({ type: 'scheduler.job.cancel', jobId }),
+    );
+    return;
+  }
+
   if (url.pathname === '/api/configuration') {
     if (request.method === 'GET') {
       writeJson(response, 200, await control.execute({ type: 'configuration.get' }));

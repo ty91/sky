@@ -1,6 +1,13 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { configurationFixture, connectionsFixture, overviewFixture, promptSnapshotFixture } from './fixtures';
+import {
+  configurationFixture,
+  connectionsFixture,
+  overviewFixture,
+  promptSnapshotFixture,
+  scheduledJobsFixture,
+  sessionsFixture,
+} from './fixtures';
 
 export const handlers = [
   http.get('/api/auth/session', () =>
@@ -36,6 +43,10 @@ export const handlers = [
     );
   }),
   http.get('/api/prompts', () => HttpResponse.json(promptSnapshotFixture())),
+  http.get('/api/sessions', () => HttpResponse.json(sessionsFixture())),
+  http.delete('/api/sessions/:threadKey', () => HttpResponse.json({ reset: true })),
+  http.get('/api/scheduler/jobs', () => HttpResponse.json(scheduledJobsFixture())),
+  http.delete('/api/scheduler/jobs/:jobId', () => HttpResponse.json({ cancelled: true })),
   http.post('/api/restart', () => HttpResponse.json({ accepted: true }, { status: 202 })),
 ];
 
