@@ -1,6 +1,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
+import type { ControlConfiguration } from '../../src/skyd/control';
 import type { AdminOverview } from '../../src/skyd/types';
+import type {
+  WorkspacePrompt,
+  WorkspacePromptSnapshot,
+} from '../../src/workspace-prompts';
 
 type Session = {
   csrfToken: string;
@@ -14,7 +19,10 @@ type AuthenticationState =
   | { phase: 'authenticated'; session: Session };
 
 class ApiError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly details: Record<string, unknown> = {},
+  ) {
     super(`Admin request failed with status ${status}.`);
   }
 }
@@ -28,8 +36,15 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  if (!response.ok) throw new ApiError(response.status);
-  return response.json() as Promise<T>;
+  const payload = (await response.json().catch(() => undefined)) as unknown;
+  if (!response.ok) {
+    const details =
+      payload && typeof payload === 'object' && 'error' in payload
+        ? (payload.error as Record<string, unknown>)
+        : {};
+    throw new ApiError(response.status, details);
+  }
+  return payload as T;
 }
 
 function takeFragmentToken(): string | undefined {
@@ -136,7 +151,13 @@ const navigation = [
   ['/system', 'System'],
 ] as const;
 
-function Shell({ onSessionExpired }: { onSessionExpired(): void }) {
+function Shell({
+  session,
+  onSessionExpired,
+}: {
+  session: Session;
+  onSessionExpired(): void;
+}) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -168,7 +189,16 @@ function Shell({ onSessionExpired }: { onSessionExpired(): void }) {
       <main className="content">
         <Routes>
           <Route path="/" element={<Dashboard onSessionExpired={onSessionExpired} />} />
-          {navigation.slice(1).map(([path, label]) => (
+          <Route
+            path="/agent"
+            element={
+              <Agent
+                session={session}
+                onSessionExpired={onSessionExpired}
+              />
+            }
+          />
+          {navigation.filter(([path]) => path !== '/' && path !== '/agent').map(([path, label]) => (
             <Route key={path} path={path} element={<Placeholder title={label} />} />
           ))}
           <Route path="*" element={<Dashboard onSessionExpired={onSessionExpired} />} />
@@ -176,6 +206,331 @@ function Shell({ onSessionExpired }: { onSessionExpired(): void }) {
       </main>
     </div>
   );
+}
+
+type AgentForm = {
+  agentBackend: ControlConfiguration['settings']['agentBackend'];
+  model: string;
+  effort: '' | NonNullable<ControlConfiguration['settings']['effort']>;
+  workspace: string;
+};
+
+type AgentAction =
+  | { phase: 'idle'; message?: string }
+  | { phase: 'saving' }
+  | { phase: 'restarting' }
+  | { phase: 'conflict'; message: string }
+  | { phase: 'error'; message: string };
+
+function formFromConfiguration(configuration: ControlConfiguration): AgentForm {
+  return {
+    agentBackend: configuration.settings.agentBackend,
+    model: configuration.settings.model ?? '',
+    effort: configuration.settings.effort ?? '',
+    workspace: configuration.settings.workspace,
+  };
+}
+
+function conflictConfiguration(error: ApiError): ControlConfiguration | undefined {
+  const current = error.details.current;
+  if (
+    !current ||
+    typeof current !== 'object' ||
+    !('revision' in current) ||
+    !('settings' in current)
+  ) {
+    return undefined;
+  }
+  return current as ControlConfiguration;
+}
+
+function Agent({
+  session,
+  onSessionExpired,
+}: {
+  session: Session;
+  onSessionExpired(): void;
+}) {
+  const [configuration, setConfiguration] = useState<ControlConfiguration>();
+  const [promptSnapshot, setPromptSnapshot] = useState<WorkspacePromptSnapshot>();
+  const [form, setForm] = useState<AgentForm>();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [action, setAction] = useState<AgentAction>({ phase: 'idle' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [nextConfiguration, nextPrompts] = await Promise.all([
+        requestJson<ControlConfiguration>('/api/configuration'),
+        requestJson<WorkspacePromptSnapshot>('/api/prompts'),
+      ]);
+      setConfiguration(nextConfiguration);
+      setForm(formFromConfiguration(nextConfiguration));
+      setPromptSnapshot(nextPrompts);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [onSessionExpired]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!configuration || !form) return;
+    const model = form.model.trim();
+    const workspace = form.workspace.trim();
+    if (!/^[^/\s]+\/[^/\s]+$/.test(model)) {
+      setAction({ phase: 'error', message: 'Model must use provider/model format.' });
+      return;
+    }
+    if (form.agentBackend === 'claude-agent-sdk' && !model.startsWith('anthropic/')) {
+      setAction({
+        phase: 'error',
+        message: 'Claude Agent SDK models must use the anthropic/ provider.',
+      });
+      return;
+    }
+
+    setAction({ phase: 'saving' });
+    try {
+      const updated = await requestJson<ControlConfiguration>('/api/configuration', {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+          'x-sky-csrf-token': session.csrfToken,
+        },
+        body: JSON.stringify({
+          expectedRevision: configuration.revision,
+          patch: {
+            agentBackend: form.agentBackend,
+            model,
+            effort: form.effort || null,
+            workspace,
+          },
+        }),
+      });
+      setConfiguration(updated);
+      setForm(formFromConfiguration(updated));
+      setAction({
+        phase: 'idle',
+        message: updated.restartRequired
+          ? 'Configuration saved. Restart Sky to apply it to the active runtime.'
+          : 'Configuration saved.',
+      });
+      try {
+        const prompts = await requestJson<WorkspacePromptSnapshot>('/api/prompts');
+        setPromptSnapshot(prompts);
+      } catch (promptError) {
+        if (promptError instanceof ApiError && promptError.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        setAction({
+          phase: 'idle',
+          message: 'Configuration saved, but the prompt snapshot could not be refreshed.',
+        });
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      if (error instanceof ApiError && error.status === 409) {
+        const current = conflictConfiguration(error);
+        if (current) {
+          setConfiguration(current);
+          setForm(formFromConfiguration(current));
+          setAction({
+            phase: 'conflict',
+            message: 'Configuration changed elsewhere. The latest values are loaded; review them and save again.',
+          });
+          return;
+        }
+      }
+      setAction({
+        phase: 'error',
+        message: 'Configuration was not saved. Review the values and try again.',
+      });
+    }
+  };
+
+  const restart = async () => {
+    setAction({ phase: 'restarting' });
+    try {
+      await requestJson<{ accepted: true }>('/api/restart', {
+        method: 'POST',
+        headers: { 'x-sky-csrf-token': session.csrfToken },
+      });
+      setAction({
+        phase: 'idle',
+        message: 'Graceful restart requested. Sign in again after the daemon returns.',
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      setAction({
+        phase: 'error',
+        message: 'Sky could not start a graceful restart. The saved configuration is unchanged.',
+      });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="page agent-page">
+        <AgentHeader />
+        <section className="loading-panel" role="status" aria-label="Loading agent settings">
+          <span className="loading-orbit" aria-hidden="true" />
+          <div><strong>Reading agent configuration</strong><p>Inspecting settings and prompt files.</p></div>
+        </section>
+      </div>
+    );
+  }
+
+  if (loadError || !configuration || !form || !promptSnapshot) {
+    return (
+      <div className="page agent-page">
+        <AgentHeader />
+        <section className="error-panel" role="alert">
+          <p className="eyebrow">Connection failed</p>
+          <h2>Could not load agent settings</h2>
+          <p>The existing configuration was not changed.</p>
+          <button className="secondary-button" type="button" onClick={() => void load()}>Retry</button>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page agent-page">
+      <AgentHeader />
+      {configuration.restartRequired && (
+        <section className="restart-banner" role="status" aria-label="Restart required">
+          <div>
+            <p className="eyebrow">Pending runtime change</p>
+            <strong>Restart required</strong>
+            <span>Revision {configuration.revision} is saved; the active runtime uses revision {configuration.activeRevision ?? 'none'}.</span>
+          </div>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={action.phase === 'restarting'}
+            onClick={() => void restart()}
+          >
+            {action.phase === 'restarting' ? 'Restarting…' : 'Graceful restart'}
+          </button>
+        </section>
+      )}
+
+      <section className="panel settings-panel" aria-labelledby="agent-settings-heading">
+        <PanelHeader eyebrow={`Configuration revision ${configuration.revision}`} title="Agent settings" id="agent-settings-heading" />
+        <form className="settings-form" onSubmit={save}>
+          <label>
+            <span>Backend</span>
+            <select
+              aria-label="Backend"
+              value={form.agentBackend}
+              onChange={(event) => setForm({ ...form, agentBackend: event.target.value as AgentForm['agentBackend'] })}
+            >
+              <option value="pi">Pi</option>
+              <option value="claude-agent-sdk">Claude Agent SDK</option>
+            </select>
+          </label>
+          <label>
+            <span>Model</span>
+            <input aria-label="Model" value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} required spellCheck="false" />
+            <small>{form.agentBackend === 'claude-agent-sdk' ? 'anthropic/model' : 'provider/model'}</small>
+          </label>
+          <label>
+            <span>Effort</span>
+            <select aria-label="Effort" value={form.effort} onChange={(event) => setForm({ ...form, effort: event.target.value as AgentForm['effort'] })}>
+              <option value="">Backend default</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="xhigh">Extra high</option>
+            </select>
+          </label>
+          <label className="workspace-field">
+            <span>Workspace</span>
+            <input aria-label="Workspace" value={form.workspace} onChange={(event) => setForm({ ...form, workspace: event.target.value })} required spellCheck="false" />
+            <small>Absolute path on the daemon host</small>
+          </label>
+          <div className="form-actions">
+            <button className="primary-button" type="submit" disabled={action.phase === 'saving'}>
+              {action.phase === 'saving' ? 'Saving…' : 'Save configuration'}
+            </button>
+            {(action.phase === 'error' || action.phase === 'conflict') && <p className="form-error" role="alert">{action.message}</p>}
+            {action.phase === 'idle' && action.message && <p className="form-success" role="status">{action.message}</p>}
+          </div>
+        </form>
+      </section>
+
+      <section className="prompt-section" aria-labelledby="prompt-files-heading">
+        <header className="prompt-section-header">
+          <div><p className="eyebrow">Read-only workspace view</p><h2 id="prompt-files-heading">Prompt files</h2></div>
+          <span>Content limit {formatBytes(promptSnapshot.maxContentBytes)}</span>
+        </header>
+        <div className="prompt-grid">
+          {promptSnapshot.prompts.map((prompt) => <PromptCard key={prompt.role} prompt={prompt} />)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AgentHeader() {
+  return (
+    <header className="page-header">
+      <div><p className="eyebrow">Runtime configuration</p><h1>Agent</h1><p>Manage the next runtime configuration and inspect its prompt inputs.</p></div>
+    </header>
+  );
+}
+
+function PromptCard({ prompt }: { prompt: WorkspacePrompt }) {
+  const descriptions: Record<WorkspacePrompt['status'], string> = {
+    available: prompt.content?.length ? 'Content loaded' : 'File is empty',
+    missing: 'No workspace entry exists for this role.',
+    unreadable: 'The entry or its UTF-8 content could not be read.',
+    broken_symlink: 'The symlink target is missing or cyclic.',
+    non_file: 'The entry does not resolve to a regular file.',
+    too_large: 'Content is hidden because the file exceeds the read limit.',
+  };
+  return (
+    <article className={`prompt-card prompt-${prompt.status}`}>
+      <header>
+        <div><p className="eyebrow">{prompt.role}</p><h3>{prompt.filename}</h3></div>
+        <span className="prompt-badge">{prompt.status.replace('_', ' ')}</span>
+      </header>
+      <dl className="prompt-meta">
+        <div><dt>Entry</dt><dd>{prompt.entry.type}</dd></div>
+        <div><dt>Target</dt><dd>{prompt.target.state}</dd></div>
+        <div><dt>Size</dt><dd>{prompt.target.sizeBytes === null ? '—' : formatBytes(prompt.target.sizeBytes)}</dd></div>
+        <div><dt>Modified</dt><dd>{prompt.target.modifiedAt ? formatDate(prompt.target.modifiedAt) : '—'}</dd></div>
+      </dl>
+      {prompt.status === 'available' ? (
+        <pre className="prompt-content">{prompt.content || 'Empty file'}</pre>
+      ) : (
+        <p className="prompt-diagnostic">{descriptions[prompt.status]}</p>
+      )}
+    </article>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(bytes % 1024 === 0 ? 0 : 1)} KiB`;
 }
 
 function Placeholder({ title }: { title: string }) {
@@ -452,7 +807,7 @@ function AdminApp() {
   if (authentication.phase === 'unreachable') {
     return <ConnectionUnavailable onRetry={() => void authenticate()} />;
   }
-  return <Shell onSessionExpired={() => setAuthentication({ phase: 'anonymous', message: 'Your admin session expired. Sign in again.' })} />;
+  return <Shell session={authentication.session} onSessionExpired={() => setAuthentication({ phase: 'anonymous', message: 'Your admin session expired. Sign in again.' })} />;
 }
 
 export function App() {

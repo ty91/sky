@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -184,6 +184,84 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
     assert.equal(configuration.statusCode, 200, configuration.body);
     assert.equal(JSON.parse(configuration.body).revision, 0);
 
+    const emptyPromptsResponse = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/prompts',
+      { headers: { cookie } },
+    );
+    assert.equal(emptyPromptsResponse.statusCode, 200, emptyPromptsResponse.body);
+    assert.equal(emptyPromptsResponse.headers['cache-control'], 'no-store');
+    const emptyPrompts = JSON.parse(emptyPromptsResponse.body);
+    assert.equal(emptyPrompts.maxContentBytes, 256 * 1024);
+    assert.deepEqual(
+      emptyPrompts.prompts.map(({ role, status }) => [role, status]),
+      [
+        ['soul', 'missing'],
+        ['agents', 'missing'],
+        ['user', 'missing'],
+        ['memory', 'missing'],
+      ],
+    );
+
+    const linkedPrompt = path.join(daemon.paths.workspaceDir, 'shared-agents.md');
+    await writeFile(path.join(daemon.paths.workspaceDir, 'SOUL.md'), '# Soul\n', 'utf8');
+    await writeFile(linkedPrompt, '# Shared agents\n', 'utf8');
+    await symlink(linkedPrompt, path.join(daemon.paths.workspaceDir, 'AGENTS.md'));
+    await symlink(
+      path.join(daemon.paths.workspaceDir, 'missing-user.md'),
+      path.join(daemon.paths.workspaceDir, 'USER.md'),
+    );
+    await writeFile(
+      path.join(daemon.paths.workspaceDir, 'MEMORY.md'),
+      Buffer.alloc(256 * 1024 + 1, 'm'),
+    );
+
+    const promptsResponse = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/prompts',
+      { headers: { cookie } },
+    );
+    assert.equal(promptsResponse.statusCode, 200, promptsResponse.body);
+    const prompts = JSON.parse(promptsResponse.body).prompts;
+    assert.deepEqual(
+      prompts.map(({ role, status }) => [role, status]),
+      [
+        ['soul', 'available'],
+        ['agents', 'available'],
+        ['user', 'broken_symlink'],
+        ['memory', 'too_large'],
+      ],
+    );
+    assert.equal(prompts[0].content, '# Soul\n');
+    assert.equal(prompts[0].target.sizeBytes, Buffer.byteLength('# Soul\n'));
+    assert.match(prompts[0].target.modifiedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(prompts[1].entry.type, 'symlink');
+    assert.equal(prompts[1].target.state, 'file');
+    assert.equal(prompts[1].content, '# Shared agents\n');
+    assert.equal(prompts[2].entry.exists, true);
+    assert.equal(prompts[2].entry.type, 'symlink');
+    assert.equal(prompts[2].target.state, 'missing');
+    assert.equal(prompts[2].content, null);
+    assert.equal(prompts[3].target.sizeBytes, 256 * 1024 + 1);
+    assert.equal(prompts[3].content, null);
+
+    const promptQuery = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/prompts?path=/etc/passwd',
+      { headers: { cookie } },
+    );
+    assert.equal(promptQuery.statusCode, 400);
+    const promptPath = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/api/prompts/SOUL.md',
+      { headers: { cookie } },
+    );
+    assert.equal(promptPath.statusCode, 404);
+
     const patchBody = {
       expectedRevision: 0,
       patch: { model: 'anthropic/admin-test' },
@@ -250,6 +328,140 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
 
     const logs = await readFile(daemon.paths.logFile, 'utf8');
     assert.doesNotMatch(logs, new RegExp(`${login.token}|${sessionId}|${session.csrfToken}`));
+  } finally {
+    await daemon.close();
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('authenticated configuration flow reports conflicts and keeps runtime changes behind restart', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-admin-configuration-'));
+  const skyRoot = path.join(homeDir, '.sky');
+  const workspace = path.join(skyRoot, 'workspace');
+  await mkdir(skyRoot, { recursive: true, mode: 0o700 });
+  await writeFile(
+    path.join(skyRoot, 'settings.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      revision: 1,
+      agentBackend: 'pi',
+      model: 'anthropic/active-model',
+      effort: 'high',
+      workspace,
+    })}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    path.join(skyRoot, 'secrets.json'),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      secrets: {
+        'slack.botToken': {
+          value: 'xoxb-admin-test',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+        },
+        'slack.appToken': {
+          value: 'xapp-admin-test',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+        },
+      },
+    })}\n`,
+    { mode: 0o600 },
+  );
+
+  const daemon = await startSkyd({
+    homeDir,
+    supervisionMode: 'launchd',
+    admin: { host: '127.0.0.1', port: 0 },
+    startRuntime: async () => ({ close: async () => {} }),
+  });
+  try {
+    const daemonStatus = await getDaemonStatus(daemon.paths.socketFile);
+    const origin = `http://127.0.0.1:${daemonStatus.admin.port}`;
+    const login = await issueAdminLogin(daemon.paths.socketFile);
+    const exchange = await tcpRequest(daemonStatus.admin.port, 'POST', '/api/auth/exchange', {
+      body: { token: login.token },
+      headers: { origin },
+    });
+    const session = JSON.parse(exchange.body);
+    const cookie = exchange.headers['set-cookie'][0].split(';', 1)[0];
+    const mutationHeaders = {
+      cookie,
+      origin,
+      'x-sky-csrf-token': session.csrfToken,
+    };
+
+    const active = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/configuration', {
+      headers: { cookie },
+    });
+    assert.deepEqual(
+      {
+        revision: JSON.parse(active.body).revision,
+        activeRevision: JSON.parse(active.body).activeRevision,
+        restartRequired: JSON.parse(active.body).restartRequired,
+      },
+      { revision: 1, activeRevision: 1, restartRequired: false },
+    );
+
+    const saved = await tcpRequest(daemonStatus.admin.port, 'PATCH', '/api/configuration', {
+      headers: mutationHeaders,
+      body: {
+        expectedRevision: 1,
+        patch: { model: 'anthropic/saved-model' },
+      },
+    });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.deepEqual(
+      {
+        revision: JSON.parse(saved.body).revision,
+        activeRevision: JSON.parse(saved.body).activeRevision,
+        restartRequired: JSON.parse(saved.body).restartRequired,
+        model: JSON.parse(saved.body).settings.model,
+      },
+      {
+        revision: 2,
+        activeRevision: 1,
+        restartRequired: true,
+        model: 'anthropic/saved-model',
+      },
+    );
+    assert.equal((await getDaemonStatus(daemon.paths.socketFile)).agent.model, 'anthropic/active-model');
+
+    const conflict = await tcpRequest(daemonStatus.admin.port, 'PATCH', '/api/configuration', {
+      headers: mutationHeaders,
+      body: {
+        expectedRevision: 1,
+        patch: { model: 'anthropic/stale-model' },
+      },
+    });
+    assert.equal(conflict.statusCode, 409, conflict.body);
+    const conflictBody = JSON.parse(conflict.body);
+    assert.equal(conflictBody.error.code, 'revision_conflict');
+    assert.equal(conflictBody.error.current.revision, 2);
+    assert.equal(conflictBody.error.current.settings.model, 'anthropic/saved-model');
+    assert.equal(conflictBody.error.current.restartRequired, true);
+
+    const invalidClaude = await tcpRequest(
+      daemonStatus.admin.port,
+      'PATCH',
+      '/api/configuration',
+      {
+        headers: mutationHeaders,
+        body: {
+          expectedRevision: 2,
+          patch: { agentBackend: 'claude-agent-sdk', model: 'openai/not-allowed' },
+        },
+      },
+    );
+    assert.equal(invalidClaude.statusCode, 400, invalidClaude.body);
+    assert.equal(JSON.parse(invalidClaude.body).error.code, 'invalid_value');
+
+    const restart = await tcpRequest(daemonStatus.admin.port, 'POST', '/api/restart', {
+      headers: mutationHeaders,
+    });
+    assert.equal(restart.statusCode, 202, restart.body);
+    assert.equal(JSON.parse(restart.body).accepted, true);
+    await daemon.finished;
   } finally {
     await daemon.close();
     await rm(homeDir, { recursive: true, force: true });

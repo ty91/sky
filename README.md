@@ -232,6 +232,8 @@ sky admin --no-open
 
 Admin gateway는 기본적으로 `0.0.0.0:4815`의 **평문 HTTP**로 LAN과 tailnet에 노출됩니다. 인터넷에 공개하지 마세요. Network 위치나 Tailscale header는 인증으로 취급하지 않으며, admin data는 session cookie를 요구하고 변경 요청은 같은 origin과 session-bound CSRF token을 함께 검증합니다. Cookie에는 `HttpOnly`, `SameSite=Strict`, `Path=/`가 적용되지만 평문 HTTP 지원 때문에 `Secure`는 적용되지 않습니다.
 
+Admin의 Agent 화면은 `GET /api/configuration`과 optimistic revision을 사용하는 `PATCH /api/configuration`으로 다음 실행 설정을 관리합니다. 저장은 현재 runtime을 부분 변경하지 않으며, 응답의 `restartRequired`가 참일 때 CSRF로 보호된 `POST /api/restart`로 graceful restart를 요청합니다. `GET /api/prompts`는 client path 입력 없이 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`만 읽는 read-only snapshot입니다. 각 role은 entry/symlink target 상태, byte size, 수정 시각과 최대 256 KiB의 UTF-8 content를 제공하며 모든 응답은 `no-store`입니다.
+
 `skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. `sky restart`는 진행 중인 Slack turn과 scheduler dispatch를 최대 120초 drain한 뒤 종료하고, launchd가 시작한 새 daemon이 startup 상태에 도달할 때까지 기다립니다. daemon이 응답하지 않을 때는 자동으로 강제 교체하지 않으며, 사용자가 `sky restart --force`를 명시한 경우에만 `launchctl kickstart -k`를 사용합니다.
 
 ```bash

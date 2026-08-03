@@ -295,6 +295,23 @@ async function handleRequest(
     return;
   }
 
+  if (url.pathname === '/api/prompts') {
+    if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
+    if (url.search.length > 0) {
+      writeError(response, 400, 'invalid_request');
+      return;
+    }
+    writeJson(response, 200, await control.execute({ type: 'workspace.prompts.get' }));
+    return;
+  }
+
+  if (url.pathname === '/api/restart') {
+    if (request.method !== 'POST') return methodNotAllowed(response, 'POST');
+    if (!requireMutationProtection(request, response, session)) return;
+    writeJson(response, 202, await control.execute({ type: 'restart' }));
+    return;
+  }
+
   writeError(response, 404, 'not_found');
 }
 

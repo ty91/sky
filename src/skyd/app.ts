@@ -41,6 +41,7 @@ import type {
 import { runDiagnostics } from '../diagnostics.js';
 import { openScheduledJobStore } from '../scheduler/store.js';
 import type { ScheduledJobStore } from '../scheduler/types.js';
+import { inspectWorkspacePrompts } from '../workspace-prompts.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -266,6 +267,8 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
         activeSettings,
         homeDir: options.homeDir,
       }),
+    getWorkspacePrompts: () =>
+      inspectWorkspacePrompts(configuration.inspect().public.settings.workspace),
     configuration: {
       get: () => controlConfiguration(configuration.inspect()),
       patch: (expectedRevision, patch) =>

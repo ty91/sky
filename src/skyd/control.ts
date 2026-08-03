@@ -14,6 +14,7 @@ import type {
   OperationRequest,
 } from './operations.js';
 import type { AdminOverview, DaemonStatus } from './types.js';
+import type { WorkspacePromptSnapshot } from '../workspace-prompts.js';
 
 export type ControlConfiguration = PublicConfiguration & {
   activeRevision: number | null;
@@ -39,6 +40,7 @@ export type ControlDependencies = {
   operations?: OperationRegistry;
   logger?: JsonlLogger;
   getDiagnostics?: () => DiagnosticsReport | Promise<DiagnosticsReport>;
+  getWorkspacePrompts?: () => WorkspacePromptSnapshot | Promise<WorkspacePromptSnapshot>;
   configuration?: {
     get(): ControlConfiguration;
     patch(expectedRevision: number, patch: SettingsPatch): ControlConfiguration;
@@ -61,6 +63,7 @@ export type ControlExecuteRequest =
   | { type: 'overview' }
   | { type: 'admin.login.issue' }
   | { type: 'diagnostics' }
+  | { type: 'workspace.prompts.get' }
   | { type: 'configuration.get' }
   | { type: 'configuration.patch'; body: ConfigurationPatchBody }
   | { type: 'secret.put'; name: SecretName; body: SecretValueBody }
@@ -83,6 +86,8 @@ export type ControlExecuteResult<Request extends ControlExecuteRequest> =
         ? AdminLoginGrant
         : Request extends { type: 'diagnostics' }
           ? DiagnosticsReport
+          : Request extends { type: 'workspace.prompts.get' }
+            ? WorkspacePromptSnapshot
           : Request extends
               | { type: 'configuration.get' }
               | { type: 'configuration.patch' }
@@ -317,6 +322,9 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
           case 'diagnostics':
             if (!dependencies.getDiagnostics) throw new ControlError('not_found');
             return asResult<Request>(await dependencies.getDiagnostics());
+          case 'workspace.prompts.get':
+            if (!dependencies.getWorkspacePrompts) throw new ControlError('not_found');
+            return asResult<Request>(await dependencies.getWorkspacePrompts());
           case 'configuration.get':
             if (!dependencies.configuration) throw new ControlError('not_found');
             return asResult<Request>(dependencies.configuration.get());
@@ -326,9 +334,18 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
               throw new ControlError('configuration_draining');
             }
             const body = parseConfigurationPatch(request.body);
-            return asResult<Request>(
-              dependencies.configuration.patch(body.expectedRevision, body.patch),
-            );
+            try {
+              return asResult<Request>(
+                dependencies.configuration.patch(body.expectedRevision, body.patch),
+              );
+            } catch (error) {
+              if (error instanceof ConfigurationError && error.code === 'revision_conflict') {
+                throw new ControlError('revision_conflict', {
+                  current: dependencies.configuration.get(),
+                });
+              }
+              throw error;
+            }
           }
           case 'secret.put': {
             if (!dependencies.configuration) throw new ControlError('not_found');
