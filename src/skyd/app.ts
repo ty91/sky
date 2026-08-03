@@ -14,8 +14,15 @@ import {
   prepareSkyHome,
   type SkyHome,
 } from '../sky-home.js';
-import { createDaemonControl, type DaemonControl } from './control.js';
+import { ControlError, createDaemonControl, type DaemonControl } from './control.js';
 import { startControlServer, type ControlServer } from './control-uds.js';
+import { createAdminAuthentication } from './admin-auth.js';
+import {
+  DEFAULT_ADMIN_HOST,
+  DEFAULT_ADMIN_PORT,
+  startAdminHttpServer,
+  type AdminHttpServer,
+} from './admin-http.js';
 import { createJsonlLogger, type JsonlLoggerOptions } from './logger.js';
 import { createMaintenanceOperationRunner } from './maintenance.js';
 import {
@@ -24,7 +31,12 @@ import {
   type OperationRunner,
 } from './operations.js';
 import { ConfigurationError } from '../configuration.js';
-import type { DaemonStatus, RuntimeState, SlackConnectionState } from './types.js';
+import type {
+  AdminGatewayStatus,
+  DaemonStatus,
+  RuntimeState,
+  SlackConnectionState,
+} from './types.js';
 import { runDiagnostics } from '../diagnostics.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
@@ -57,6 +69,13 @@ export type StartSkydOptions = {
     now?: () => Date;
     createId?: () => string;
   };
+  admin?:
+    | false
+    | {
+        host?: string;
+        port?: number;
+        now?: () => Date;
+      };
 };
 
 export type Skyd = {
@@ -74,6 +93,7 @@ type MutableStatus = {
   nextRetryAt: string | null;
   backend: 'pi' | 'claude-agent-sdk' | null;
   model: string | null;
+  admin: AdminGatewayStatus;
   recentErrors: Array<{ code: string; at: string }>;
 };
 
@@ -102,6 +122,9 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     restartTimeoutMs: options.restartDrainTimeoutMs,
     stopTimeoutMs: options.stopDrainTimeoutMs,
   });
+  const adminOptions = options.admin === false ? undefined : (options.admin ?? {});
+  const adminHost = adminOptions?.host ?? DEFAULT_ADMIN_HOST;
+  const adminPort = adminOptions?.port ?? DEFAULT_ADMIN_PORT;
   const mutable: MutableStatus = {
     runtimeState: 'starting',
     slackState: 'not_configured',
@@ -109,6 +132,12 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     nextRetryAt: null,
     backend: null,
     model: null,
+    admin: {
+      state: adminOptions ? 'starting' : 'stopped',
+      host: adminHost,
+      port: adminPort,
+      error: null,
+    },
     recentErrors: [],
   };
   let activeSettings: Settings | undefined;
@@ -129,6 +158,10 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     logger,
     run: options.runOperation ?? createMaintenanceOperationRunner(paths, logger, configuration),
     ...options.operationRegistry,
+  });
+  const adminAuthentication = createAdminAuthentication({
+    now: adminOptions?.now,
+    protect: (values) => logger.protect(values),
   });
 
   const addError = (code: string) => {
@@ -157,12 +190,24 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       backend: mutable.backend,
       model: mutable.model,
     },
+    admin: {
+      ...mutable.admin,
+      error: mutable.admin.error && { ...mutable.admin.error },
+    },
     activeWorkCount: runtimeController.activeCount(),
     recentErrors: [...mutable.recentErrors],
   });
 
   const control = createDaemonControl({
     getStatus: status,
+    issueAdminLogin: () => {
+      if (mutable.admin.state !== 'listening') throw new ControlError('admin_unavailable');
+      return {
+        ...adminAuthentication.issueLoginToken(),
+        host: mutable.admin.host,
+        port: mutable.admin.port,
+      };
+    },
     requestRestart: () => {
       const result = runtimeController.requestRestart(() => {
         try {
@@ -207,6 +252,44 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     throw error;
   }
   logger.log('info', 'daemon', 'Control interface started.');
+
+  let adminServer: AdminHttpServer | undefined;
+  if (adminOptions) {
+    try {
+      adminServer = await startAdminHttpServer({
+        host: adminHost,
+        port: adminPort,
+        control,
+        authentication: adminAuthentication,
+      });
+      mutable.admin = {
+        state: 'listening',
+        host: adminServer.host,
+        port: adminServer.port,
+        error: null,
+      };
+      logger.log(
+        'info',
+        'admin',
+        `Admin gateway started on ${adminServer.host}:${adminServer.port}.`,
+      );
+    } catch (error) {
+      mutable.admin = {
+        state: 'failed',
+        host: adminHost,
+        port: adminPort,
+        error: { code: 'admin_bind_failed' },
+      };
+      addError('admin_bind_failed');
+      const reason =
+        error instanceof Error && 'code' in error ? String(error.code) : 'unknown_error';
+      logger.log(
+        'error',
+        'admin',
+        `admin_bind_failed: Admin gateway could not bind to ${adminHost}:${adminPort} (${reason}).`,
+      );
+    }
+  }
 
   const startRuntime = options.startRuntime ?? startBotRuntime;
   const runtimeTask = (async () => {
@@ -295,6 +378,11 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     await runtime?.close();
     runtime = undefined;
     mutable.slackState = 'stopped';
+    if (adminServer) {
+      await adminServer.close();
+      adminServer = undefined;
+      mutable.admin = { ...mutable.admin, state: 'stopped' };
+    }
     await controlServer.close();
     runtimeController.finish();
     logger.log('info', 'daemon', 'Daemon stopped.');

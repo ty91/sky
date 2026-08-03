@@ -24,8 +24,16 @@ export type ControlRestartResult =
   | { ok: true; instanceId: string }
   | { ok: false; code: string; message: string };
 
+export type AdminLoginGrant = {
+  token: string;
+  expiresAt: string;
+  host: string;
+  port: number;
+};
+
 export type ControlDependencies = {
   getStatus(): DaemonStatus;
+  issueAdminLogin?: () => AdminLoginGrant;
   requestRestart?: () => ControlRestartResult;
   operations?: OperationRegistry;
   logger?: JsonlLogger;
@@ -49,6 +57,7 @@ type SecretValueBody = {
 
 export type ControlExecuteRequest =
   | { type: 'status' }
+  | { type: 'admin.login.issue' }
   | { type: 'diagnostics' }
   | { type: 'configuration.get' }
   | { type: 'configuration.patch'; body: ConfigurationPatchBody }
@@ -66,23 +75,25 @@ export type ControlSubscribeRequest =
 export type ControlExecuteResult<Request extends ControlExecuteRequest> =
   Request extends { type: 'status' }
     ? DaemonStatus
-    : Request extends { type: 'diagnostics' }
-      ? DiagnosticsReport
-      : Request extends
-            | { type: 'configuration.get' }
-            | { type: 'configuration.patch' }
-            | { type: 'secret.put' }
-            | { type: 'secret.delete' }
-        ? ControlConfiguration
-        : Request extends { type: 'restart' }
-          ? { accepted: true; instanceId: string }
-          : Request extends { type: 'operation.create' }
-            ? { operationId: string }
-            : Request extends { type: 'operation.get' }
-              ? OperationRecord
-              : Request extends { type: 'logs.history' }
-                ? LogHistory
-                : never;
+    : Request extends { type: 'admin.login.issue' }
+      ? AdminLoginGrant
+      : Request extends { type: 'diagnostics' }
+        ? DiagnosticsReport
+        : Request extends
+              | { type: 'configuration.get' }
+              | { type: 'configuration.patch' }
+              | { type: 'secret.put' }
+              | { type: 'secret.delete' }
+          ? ControlConfiguration
+          : Request extends { type: 'restart' }
+            ? { accepted: true; instanceId: string }
+            : Request extends { type: 'operation.create' }
+              ? { operationId: string }
+              : Request extends { type: 'operation.get' }
+                ? OperationRecord
+                : Request extends { type: 'logs.history' }
+                  ? LogHistory
+                  : never;
 
 export type ControlSubscribeResult<Request extends ControlSubscribeRequest> =
   Request extends { type: 'operation.events' } ? AsyncIterable<OperationEvent> : AsyncIterable<LogRecord>;
@@ -121,6 +132,7 @@ function errorStatus(code: string, context: ErrorContext): number {
     case 'secret_missing':
       return 422;
     case 'daemon_draining':
+    case 'admin_unavailable':
       return 503;
     case 'internal_error':
       return 500;
@@ -292,6 +304,9 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
         switch (request.type) {
           case 'status':
             return asResult<Request>(dependencies.getStatus());
+          case 'admin.login.issue':
+            if (!dependencies.issueAdminLogin) throw new ControlError('admin_unavailable');
+            return asResult<Request>(dependencies.issueAdminLogin());
           case 'diagnostics':
             if (!dependencies.getDiagnostics) throw new ControlError('not_found');
             return asResult<Request>(await dependencies.getDiagnostics());

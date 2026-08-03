@@ -15,6 +15,7 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - `sky doctor`는 설치, runtime, configuration, credential metadata, Sky home 권한과 workspace prompt를 한 번에 진단합니다.
 - `sky init`은 실행 중인 daemon의 control interface를 통해 versioned configuration과 secret을 안전하게 설정하고 workspace prompt를 준비합니다.
 - `skyd`는 foreground daemon으로 실행되며 Sky home의 `run/skyd.sock`에 HTTP/JSON control interface를 제공합니다.
+- `skyd`는 기본 `0.0.0.0:4815`에 인증된 admin HTTP gateway를 함께 열고, `sky admin`으로 일회용 browser login을 시작합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
 - `memory`와 `dream`은 daemon operation으로 실행되며 CLI를 끊어도 계속 진행됩니다.
 - structured JSONL log는 control interface에서 history와 live stream으로 제공되고, `sky logs --follow`는 daemon 교체 뒤에도 cursor로 이어집니다.
@@ -200,6 +201,7 @@ sky stop
 sky restart
 sky status
 sky doctor
+sky admin
 sky service status
 sky logs
 sky logs --follow
@@ -217,6 +219,18 @@ sky service uninstall
 ```bash
 skyd --foreground
 ```
+
+### Admin gateway
+
+`sky admin`은 같은 OS 사용자만 접근할 수 있는 control socket에서 5분짜리 일회용 token을 발급하고, 기본 browser를 `http://127.0.0.1:4815/#token=...` 형태로 엽니다. Browser는 token을 교환하기 전에 fragment를 주소에서 제거하며, 교환에 성공하면 daemon memory에만 존재하는 24시간 session을 사용합니다. Daemon을 재시작하면 발급된 token과 session이 모두 무효화됩니다.
+
+다른 LAN 또는 tailnet 장치에서 접속할 때는 daemon host에서 다음 명령을 실행한 뒤 출력된 URL을 remote browser에서 열고 token을 직접 붙여 넣습니다.
+
+```bash
+sky admin --no-open
+```
+
+Admin gateway는 기본적으로 `0.0.0.0:4815`의 **평문 HTTP**로 LAN과 tailnet에 노출됩니다. 인터넷에 공개하지 마세요. Network 위치나 Tailscale header는 인증으로 취급하지 않으며, admin data는 session cookie를 요구하고 변경 요청은 같은 origin과 session-bound CSRF token을 함께 검증합니다. Cookie에는 `HttpOnly`, `SameSite=Strict`, `Path=/`가 적용되지만 평문 HTTP 지원 때문에 `Secure`는 적용되지 않습니다.
 
 `skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. `sky restart`는 진행 중인 Slack turn과 scheduler dispatch를 최대 120초 drain한 뒤 종료하고, launchd가 시작한 새 daemon이 startup 상태에 도달할 때까지 기다립니다. daemon이 응답하지 않을 때는 자동으로 강제 교체하지 않으며, 사용자가 `sky restart --force`를 명시한 경우에만 `launchctl kickstart -k`를 사용합니다.
 

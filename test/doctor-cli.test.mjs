@@ -7,7 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
-import { startSkyd } from '../dist/skyd/app.js';
+import { startSkyd } from './helpers/start-skyd.mjs';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
 import { SlackStartupError } from '../dist/bot.js';
 import { runDiagnostics } from '../dist/diagnostics.js';

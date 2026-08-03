@@ -31,6 +31,10 @@ export function printStatus(status: ServiceStatus): void {
   console.log(`version: ${daemon.productVersion}`);
   if (daemon.agent.backend) console.log(`agent backend: ${daemon.agent.backend}`);
   if (daemon.agent.model) console.log(`model: ${daemon.agent.model}`);
+  if (daemon.admin) {
+    const address = `${daemon.admin.host}:${daemon.admin.port}`;
+    console.log(`admin: ${daemon.admin.state} (${address})`);
+  }
 }
 
 export function printJson(value: unknown): void {

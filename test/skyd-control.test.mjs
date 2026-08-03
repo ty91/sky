@@ -17,7 +17,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SlackStartupError } from '../dist/bot.js';
-import { startSkyd } from '../dist/skyd/app.js';
+import { startSkyd } from './helpers/start-skyd.mjs';
 import { ControlError } from '../dist/skyd/control.js';
 import {
   ControlRequestError,

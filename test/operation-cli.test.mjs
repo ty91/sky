@@ -8,7 +8,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { getOperation, watchOperation } from '../dist/skyd/control-uds.js';
-import { startSkyd } from '../dist/skyd/app.js';
+import { startSkyd } from './helpers/start-skyd.mjs';
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));

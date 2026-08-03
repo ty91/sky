@@ -20,7 +20,7 @@ import {
   ensurePrivateFile,
   prepareSkyHome,
 } from '../dist/sky-home.js';
-import { startSkyd } from '../dist/skyd/app.js';
+import { startSkyd } from './helpers/start-skyd.mjs';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
 import { loadSettings } from '../dist/settings.js';
 import { openConversationStore } from '../dist/conversation/store.js';

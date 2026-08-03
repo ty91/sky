@@ -24,7 +24,7 @@ import {
   putSecret,
   requestDaemonRestart,
 } from '../dist/skyd/control-uds.js';
-import { startSkyd } from '../dist/skyd/app.js';
+import { startSkyd } from './helpers/start-skyd.mjs';
 import { bootstrapWorkspace, WorkspaceBootstrapError } from '../dist/workspace-bootstrap.js';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));

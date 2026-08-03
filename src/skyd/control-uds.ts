@@ -6,6 +6,7 @@ import type { DiagnosticsReport } from '../diagnostics.js';
 import { ensurePrivateSocket } from '../sky-home.js';
 import {
   ControlError,
+  type AdminLoginGrant,
   type ControlConfiguration,
   type DaemonControl,
 } from './control.js';
@@ -134,6 +135,12 @@ async function handleRequest(
   if (url.pathname === '/status') {
     if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
     writeJson(response, 200, await control.execute({ type: 'status' }));
+    return;
+  }
+
+  if (url.pathname === '/admin/login-token') {
+    if (request.method !== 'POST') return methodNotAllowed(response, 'POST');
+    writeJson(response, 201, await control.execute({ type: 'admin.login.issue' }));
     return;
   }
 
@@ -365,6 +372,10 @@ function requestJson<T>(
 
 export function getDaemonStatus(socketFile: string): Promise<DaemonStatus> {
   return requestJson(socketFile, 'GET', '/status', 200);
+}
+
+export function issueAdminLogin(socketFile: string): Promise<AdminLoginGrant> {
+  return requestJson(socketFile, 'POST', '/admin/login-token', 201);
 }
 
 export function getDaemonDiagnostics(socketFile: string): Promise<DiagnosticsReport> {

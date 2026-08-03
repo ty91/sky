@@ -12,6 +12,13 @@ export type SlackConnectionState =
   | 'retrying'
   | 'stopped';
 
+export type AdminGatewayStatus = {
+  state: 'starting' | 'listening' | 'failed' | 'stopped';
+  host: string;
+  port: number;
+  error: { code: 'admin_bind_failed' } | null;
+};
+
 export type DaemonStatus = {
   instanceId: string;
   supervision: {
@@ -36,6 +43,7 @@ export type DaemonStatus = {
     backend: 'pi' | 'claude-agent-sdk' | null;
     model: string | null;
   };
+  admin: AdminGatewayStatus;
   activeWorkCount: number;
   recentErrors: Array<{
     code: string;
