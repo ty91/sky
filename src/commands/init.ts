@@ -27,6 +27,11 @@ import {
   WorkspaceBootstrapError,
   type WorkspaceBootstrapResult,
 } from '../workspace-bootstrap.js';
+import {
+  openInBrowser,
+  printSlackAppSetupSteps,
+  slackManifestReport,
+} from './slack-manifest-output.js';
 
 const stdinSchema = z
   .object({
@@ -165,6 +170,21 @@ async function secretChoice(
   throw new InitError('invalid_input', `Unknown action for ${name}.`);
 }
 
+/**
+ * Shown before the token prompts, because the tokens only exist once the app
+ * does. Reached only from the interactive path, so `--from-stdin` and non-TTY
+ * runs never print onboarding text or touch a browser.
+ */
+async function offerSlackAppCreation(): Promise<void> {
+  const report = slackManifestReport();
+  console.log('');
+  printSlackAppSetupSteps(report);
+  const answer = await question('Open this link in your browser now? (yes/no)', 'no');
+  if (!/^y(?:es)?$/i.test(answer)) return;
+  const opened = await openInBrowser(report.createUrl);
+  if (!opened) console.log('Could not open a browser. Use the link above.');
+}
+
 async function interactiveInput(current: ControlConfiguration): Promise<InitInput> {
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new InitError(
@@ -186,6 +206,9 @@ async function interactiveInput(current: ControlConfiguration): Promise<InitInpu
     throw new InitError('invalid_input', 'Effort must be medium, high, xhigh, or none.');
   }
   const workspace = await question('Workspace', current.settings.workspace);
+  if (!current.secrets['slack.botToken'].configured || !current.secrets['slack.appToken'].configured) {
+    await offerSlackAppCreation();
+  }
   const secretChanges: Partial<Record<SecretName, string | null>> = {};
   for (const name of SECRET_NAMES) {
     const required =

@@ -10,6 +10,7 @@ import { getServiceStatus, type ServiceStatus } from './service/launch-agent.js'
 import type { SkyHome } from './sky-home.js';
 import type { DaemonStatus } from './skyd/types.js';
 import { inspectPiBackend } from './connections.js';
+import { slackManifestRemediation } from './slack/manifest.js';
 
 const { version: PRODUCT_VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -345,7 +346,9 @@ async function credentialChecks(
       ? 'Slack bot and app credentials are configured.'
       : 'One or more Slack credentials are missing.',
     null,
-    slackConfigured ? null : 'Configure both Slack bot and app credentials.',
+    slackConfigured
+      ? null
+      : 'Create the Slack app with `sky slack manifest`, install it to the workspace, then run `sky init` to store the bot and app tokens.',
   );
 
   const model = settings.model ?? '';
@@ -814,7 +817,9 @@ function runtimeChecks(daemon: DaemonStatus | undefined): DiagnosticCheck[] {
       slackStatus,
       `Daemon-observed Slack connection state is ${daemon.slack.state}.`,
       'No new Slack network request was made.',
-      slackStatus === 'pass' ? null : 'Review Slack credentials and recent stable error codes.',
+      slackStatus === 'pass'
+        ? null
+        : `Review Slack credentials and recent stable error codes. Doctor does not probe scopes; if the app is missing a scope or event, ${slackManifestRemediation()}`,
     ),
     check(
       'runtime.errors',

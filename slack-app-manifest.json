@@ -1,0 +1,67 @@
+{
+  "display_information": {
+    "name": "Sky",
+    "description": "Slack에서 코딩 에이전트와 대화하는 개인용 봇",
+    "background_color": "#1f2933"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": {
+      "display_name": "Sky",
+      "always_online": true
+    },
+    "agent_view": {
+      "agent_description": "DM으로 대화하고 채널에서 멘션으로 부를 수 있는 코딩 에이전트입니다.",
+      "suggested_prompts": [
+        {
+          "title": "오늘 할 일",
+          "message": "오늘 내가 해야 할 일을 정리해줘"
+        },
+        {
+          "title": "코드 리뷰",
+          "message": "최근 변경사항을 리뷰해줘"
+        },
+        {
+          "title": "아이디어 브레인스토밍",
+          "message": "새로운 기능 아이디어를 함께 생각해보자"
+        }
+      ]
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions.read",
+        "assistant:write",
+        "channels:history",
+        "chat:write",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "im:history",
+        "reactions:write",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "message.im"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}

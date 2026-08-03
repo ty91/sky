@@ -26,6 +26,7 @@
     "test:package": "node --test test/package-release.smoke.mjs",
     "test:launchd": "node --test test/launchd-package.smoke.mjs",
     "release:check-tag": "node scripts/verify-release-tag.mjs",
+    "manifest:sync": "pnpm build && node scripts/write-slack-manifest.mjs",
     "prepack": "pnpm build",
     "test:admin": "vitest run --config admin/vite.config.ts",
     "dev:admin": "vite --config admin/vite.config.ts"

@@ -9,6 +9,7 @@ import { maybeHandleChatCommand } from './commands.js';
 import { downloadSlackFiles, formatAttachmentsLine, type SlackFile } from './files.js';
 import { SlackSender } from './sender.js';
 import { toThreadId } from './thread-id.js';
+import { DEFAULT_SUGGESTED_PROMPTS } from './manifest.js';
 import { executeSlackTurn, SLACK_DRAINING_REPLY } from './turn.js';
 import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
@@ -21,11 +22,7 @@ export type SlackAssistantOptions = {
   skyHome?: SkyHome;
 };
 
-export const DEFAULT_SUGGESTED_PROMPTS = [
-  { title: '오늘 할 일', message: '오늘 내가 해야 할 일을 정리해줘' },
-  { title: '코드 리뷰', message: '최근 변경사항을 리뷰해줘' },
-  { title: '아이디어 브레인스토밍', message: '새로운 기능 아이디어를 함께 생각해보자' },
-] as const;
+export { DEFAULT_SUGGESTED_PROMPTS } from './manifest.js';
 
 export function createSlackAssistantConfig(options: SlackAssistantOptions): AssistantConfig {
   const {

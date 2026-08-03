@@ -14,6 +14,7 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - `sky status`는 macOS LaunchAgent 상태와 daemon control 상태를 함께 보여주며 자동화를 위한 `--json`을 제공합니다.
 - `sky doctor`는 설치, runtime, configuration, credential metadata, Sky home 권한과 workspace prompt를 한 번에 진단합니다.
 - `sky init`은 실행 중인 daemon의 control interface를 통해 versioned configuration과 secret을 안전하게 설정하고 workspace prompt를 준비합니다.
+- `sky slack manifest`는 필수 scope·event·Socket Mode·agent view를 담은 Slack app manifest와 create-from-manifest 딥링크를 출력합니다.
 - `skyd`는 foreground daemon으로 실행되며 Sky home의 `run/skyd.sock`에 HTTP/JSON control interface를 제공합니다.
 - `skyd`는 기본 `0.0.0.0:4815`에 인증된 admin HTTP gateway를 함께 열고, `sky admin`으로 일회용 browser login을 시작합니다.
 - `GET /status`는 daemon instance, runtime/Slack 상태, uptime, backend/model, 활성 작업 수와 최근 오류 코드를 반환합니다.
@@ -26,11 +27,10 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 ## 준비물
 
 - [mise](https://mise.jdx.dev/)
-- Slack bot token + app token (Socket Mode 사용 시)
-- Slack app event subscriptions: `app_mention`, `message.im`, public channel message events, private channel message events
-- Slack agent messaging experience: `agent_view`
-- Slack scopes: `app_mentions.read`, `chat:write`, `im:history`, `channels:history`, `groups:history`, `files:write`, `reactions:write`
+- Slack workspace에 앱을 설치할 수 있는 권한
 - 선택한 backend에서 사용할 모델 인증 설정
+
+Slack app은 `slack-app-manifest.json` 한 장으로 만듭니다. scope와 event를 콘솔에서 하나씩 체크할 필요가 없습니다. 자세한 절차는 [Slack app 만들기](#slack-app-만들기)를 참고하세요.
 
 Sky의 개발 및 package release toolchain은 `mise.toml`에 고정되어 있습니다.
 
@@ -66,6 +66,7 @@ token을 현재 install 명령에만 주입해 package를 전역 설치합니다
 NODE_AUTH_TOKEN=<github-pat-classic> mise exec -- pnpm add --global @ty91/sky
 mise exec -- sky --version
 mise exec -- sky service install
+mise exec -- sky slack manifest --open
 mise exec -- sky init
 mise exec -- sky status
 ```
@@ -106,6 +107,37 @@ Sky home의 `settings.json`에 있는 `model` 값은 `<provider>/<model>` 형식
 
 인증이 없거나 모델 이름을 backend가 찾지 못하면 session 생성 단계의 model/auth 오류가 그대로 보고됩니다. 먼저 선택한 backend의 로컬 인증 상태와 모델 이름을 확인하세요.
 
+## Slack app 만들기
+
+Sky는 Socket Mode로 동작하고 각 사용자가 자기 workspace에 앱을 설치하므로 이 단계는 없앨 수 없습니다. 대신 필요한 scope, event, Socket Mode, agent view를 manifest 한 장에 담아 세 단계로 줄였습니다.
+
+```bash
+sky slack manifest --open
+```
+
+1. 열린 링크에서 manifest를 확인하고 **Create**를 누릅니다.
+2. **Install to Workspace**로 앱을 workspace에 설치합니다.
+3. token 두 개를 복사합니다.
+   - bot token(`xoxb-`): **OAuth & Permissions**
+   - app token(`xapp-`): **Basic Information > App-Level Tokens**에서 `connections:write` scope로 새로 발급
+
+app-level token은 manifest가 만들어 주지 못하므로 3번의 두 번째 항목만 콘솔에서 직접 생성합니다. `--open` 없이 실행하면 링크와 manifest JSON을 출력만 하고, `--json`은 자동화를 위한 안정된 JSON 문서를 냅니다.
+
+manifest의 scope와 event 목록은 `src/slack/manifest.ts` 한 곳에서 정의되고, repo 루트의 `slack-app-manifest.json`과 Slack 연결 검사가 같은 목록을 사용합니다. 체크인된 JSON은 생성물이므로 source를 고친 뒤 `pnpm manifest:sync`로 다시 쓰고, 어긋나면 `test/slack-manifest.test.mjs`가 실패합니다.
+
+### 기존 앱 갱신
+
+Sky를 업데이트한 뒤 scope나 event가 늘어났다면 새 앱을 만들지 말고 기존 앱의 manifest를 교체합니다.
+
+1. [api.slack.com/apps](https://api.slack.com/apps)에서 앱을 고릅니다.
+2. **Features > App Manifest**에서 `sky slack manifest` 출력으로 전체를 교체합니다.
+3. **Install to Workspace**로 재설치합니다. scope가 바뀌면 재설치가 필요합니다.
+4. 재설치하면 bot token이 새로 발급되므로 `sky init`을 다시 실행해 저장합니다. app token은 그대로 유지됩니다.
+
+### Sky가 확인할 수 있는 것
+
+Slack 연결 검사는 bot token의 granted scope를 `auth.test` 응답으로 비교하고, app token으로 `apps.connections.open`이 성공하는지 확인해 Socket Mode 활성화를 간접 확인합니다. event 구독 목록과 agent view 설정은 앱 configuration token 없이 읽을 수 없으므로 Sky가 검증하지 못합니다. 그래서 부족한 항목을 하나씩 추가하는 대신 manifest 전체를 다시 적용하는 방식을 안내합니다.
+
 ## 초기 설정
 
 새 설치에서는 LaunchAgent를 먼저 설치해 `needs_configuration` 상태의 daemon을 띄운 뒤 interactive wizard를 실행합니다. 설정 파일을 직접 만들거나 수정하지 않습니다.
@@ -115,6 +147,8 @@ sky service install
 sky init
 sky status
 ```
+
+Slack credential이 아직 없으면 `sky init`이 token을 묻기 전에 create-from-manifest 링크를 출력하고 브라우저로 열지 물어봅니다. `--from-stdin`이나 TTY가 아닌 실행에서는 이 안내와 브라우저 실행을 모두 건너뜁니다.
 
 `sky init`은 backend, model, 선택적 effort와 workspace를 물어보고 Slack/Claude credential은 echo 없이 입력받습니다. 기존 secret 값은 읽거나 보여주지 않으며 keep, replace, delete 중 하나만 선택합니다. 설정을 저장한 뒤 기본적으로 graceful restart를 요청하고 새 startup 상태를 확인합니다. 저장만 하려면 `--no-restart`를 사용한 뒤 직접 `sky restart`를 실행합니다.
 
@@ -242,7 +276,7 @@ Logs 화면은 authenticated `GET /api/logs` history와 `GET /api/logs/stream` S
 
 System 화면의 `GET /api/system`은 product version, admin listener, supervision mode, LaunchAgent 설치/load/autostart 상태, 최근 daemon error와 package capability를 함께 반환합니다. Update와 rollback은 `unsupported`이며 action button이 없습니다. Graceful restart가 `202`로 수락되면 잠깐의 connection loss를 정상으로 취급하고, replacement daemon이 이전 in-memory session을 거부하므로 새 `sky admin` token으로 로그인해야 합니다.
 
-명시적 연결 검사는 저장 상태와 별도로 daemon memory에 마지막 결과만 보관합니다. Slack bot은 `auth.test` 응답 identity와 `x-oauth-scopes`를 Sky 필수 scope와 비교하고, Slack app token은 `apps.connections.open` 성공만 확인한 뒤 발급된 WebSocket URL을 즉시 버립니다. Claude Agent SDK는 prompt나 turn 없이 bounded `accountInfo()` smoke를 실행하고 subprocess를 정리하며, Pi는 `sky doctor`와 같은 local model registry·provider credential·effort compatibility 규칙을 사용합니다. timeout, rate limit, invalid credential, missing scope는 서로 다른 안정된 결과 code로 반환되며 raw credential과 Socket Mode URL은 응답이나 log에 포함되지 않습니다.
+명시적 연결 검사는 저장 상태와 별도로 daemon memory에 마지막 결과만 보관합니다. Slack bot은 `auth.test` 응답 identity와 `x-oauth-scopes`를 Sky 필수 scope와 비교하고, Slack app token은 `apps.connections.open` 성공만 확인한 뒤 발급된 WebSocket URL을 즉시 버립니다. Claude Agent SDK는 prompt나 turn 없이 bounded `accountInfo()` smoke를 실행하고 subprocess를 정리하며, Pi는 `sky doctor`와 같은 local model registry·provider credential·effort compatibility 규칙을 사용합니다. timeout, rate limit, invalid credential, missing scope는 서로 다른 안정된 결과 code로 반환되며 raw credential과 Socket Mode URL은 응답이나 log에 포함되지 않습니다. `missing_scope` 결과에는 부족한 scope 이름과 함께 manifest 재적용 안내가 들어갑니다.
 
 `skyd`는 detach하거나 PID 파일을 만들지 않으며 종료할 때까지 foreground에 머뭅니다. 설치 환경에서는 macOS 사용자 LaunchAgent가 process lifecycle의 유일한 권위자입니다. `sky restart`는 진행 중인 Slack turn과 scheduler dispatch를 최대 120초 drain한 뒤 종료하고, launchd가 시작한 새 daemon이 startup 상태에 도달할 때까지 기다립니다. daemon이 응답하지 않을 때는 자동으로 강제 교체하지 않으며, 사용자가 `sky restart --force`를 명시한 경우에만 `launchctl kickstart -k`를 사용합니다.
 
@@ -273,7 +307,7 @@ Exit code는 다음과 같습니다.
 - `1`: 하나 이상의 check가 fail입니다.
 - `2`: daemon diagnostics 자체의 내부 오류 등으로 진단을 완료하지 못했습니다.
 
-Doctor는 secret 값·길이, Slack message, prompt 또는 transcript 내용을 출력하지 않습니다. remediation도 `chmod`, 삭제, migration을 자동 실행하지 않고 검토할 명령과 위험만 안내합니다. 기본 doctor는 daemon이 이미 관찰한 Slack 연결 상태와 local backend 설정만 읽으며 Slack `auth.test`, scope probe, 새 network request 또는 비용이 생기는 agent turn을 실행하지 않습니다. 외부 credential probe와 backend smoke는 별도의 명시적 opt-in 진단으로 추가해야 합니다.
+Doctor는 secret 값·길이, Slack message, prompt 또는 transcript 내용을 출력하지 않습니다. remediation도 `chmod`, 삭제, migration을 자동 실행하지 않고 검토할 명령과 위험만 안내합니다. 기본 doctor는 daemon이 이미 관찰한 Slack 연결 상태와 local backend 설정만 읽으며 Slack `auth.test`, scope probe, 새 network request 또는 비용이 생기는 agent turn을 실행하지 않습니다. 외부 credential probe와 backend smoke는 별도의 명시적 opt-in 진단으로 추가해야 합니다. 따라서 doctor는 어떤 scope가 빠졌는지 스스로 알지 못하고, Slack 관련 remediation은 scope를 직접 지목하는 대신 manifest 재적용 경로만 안내합니다. 부족한 scope 이름이 필요하면 admin gateway의 Slack 연결 검사를 사용합니다.
 
 ### Maintenance operation
 

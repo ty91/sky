@@ -13,6 +13,7 @@ import { operationCommand } from './commands/operation.js';
 import { doctorCommand } from './commands/doctor.js';
 import { initCommand } from './commands/init.js';
 import { adminCommand } from './commands/admin.js';
+import { slackCommand } from './commands/slack.js';
 
 const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -35,6 +36,7 @@ program.addCommand(operationCommand);
 program.addCommand(doctorCommand);
 program.addCommand(initCommand);
 program.addCommand(adminCommand);
+program.addCommand(slackCommand);
 
 program.parseAsync().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));

@@ -19,16 +19,12 @@ import type {
   PublicSettings,
   SecretName,
 } from './configuration.js';
+import { missingSlackBotScopes, slackManifestRemediation } from './slack/manifest.js';
 
-export const REQUIRED_SLACK_BOT_SCOPES = [
-  'app_mentions.read',
-  'channels:history',
-  'chat:write',
-  'files:write',
-  'groups:history',
-  'im:history',
-  'reactions:write',
-] as const;
+export {
+  REQUIRED_SLACK_BOT_SCOPES,
+  REQUIRED_SLACK_BOT_EVENTS,
+} from './slack/manifest.js';
 
 export type ConnectionTarget = 'slack.bot' | 'slack.app' | 'agent';
 
@@ -374,7 +370,7 @@ function failureResult(
     invalid_credential: 'The credential was rejected.',
     timeout: 'The connection check timed out.',
     rate_limited: 'The external service rate-limited the check.',
-    missing_scope: 'The credential is missing a required scope.',
+    missing_scope: `The credential is missing a required scope. ${slackManifestRemediation()}`,
     unavailable: 'The external service could not be reached.',
   }[failure.status];
   return checkResult(
@@ -505,15 +501,14 @@ export function createConnections(
           'Slack authenticated the bot, but did not report its granted scopes.',
         );
       }
-      const granted = new Set(grantedScopes);
-      const missingScopes = REQUIRED_SLACK_BOT_SCOPES.filter((scope) => !granted.has(scope));
+      const missingScopes = missingSlackBotScopes(grantedScopes);
       return checkResult(
         'slack.bot',
         missingScopes.length === 0 ? 'ok' : 'missing_scope',
         checkedAt,
         missingScopes.length === 0
           ? 'Slack bot authentication and required scopes are valid.'
-          : 'Slack bot authentication succeeded, but required scopes are missing.',
+          : `Slack bot authentication succeeded, but required scopes are missing. ${slackManifestRemediation(missingScopes)}`,
         {
           workspace: {
             id: externalString(payload.team_id, credential.value),
