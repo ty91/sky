@@ -967,6 +967,14 @@ export async function runDiagnostics(
       0o600,
       rootExists,
     ),
+    inspectManagedPath(
+      'filesystem.launchd_stdout_log',
+      'LaunchAgent stdout log',
+      home.launchdStdoutFile,
+      'file',
+      0o600,
+      rootExists,
+    ),
     inspectManagedPath('filesystem.socket', 'control socket', home.socketFile, 'socket', 0o600, Boolean(daemon)),
     rootExists
       ? inspectTree('filesystem.transcript_tree', 'Transcript tree', home.transcriptsDir, 0o700, 0o600)

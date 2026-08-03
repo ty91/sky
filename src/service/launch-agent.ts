@@ -45,6 +45,7 @@ type LaunchAgentPaths = {
   legacyPidFile: string;
   legacyLogFile: string;
   migratedLegacyLogFile: string;
+  launchdStdoutFile: string;
   launchdStderrFile: string;
   launchAgentsDir: string;
   plistFile: string;
@@ -126,6 +127,7 @@ function launchAgentPaths(
     legacyPidFile: skyHome.legacyPidFile,
     legacyLogFile: skyHome.legacyLogFile,
     migratedLegacyLogFile: skyHome.migratedLegacyLogFile,
+    launchdStdoutFile: skyHome.launchdStdoutFile,
     launchdStderrFile: skyHome.launchdStderrFile,
     launchAgentsDir: path.join(homeDir, 'Library', 'LaunchAgents'),
     plistFile: path.join(homeDir, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`),
@@ -249,6 +251,8 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
   <string>Standard</string>
   <key>Umask</key>
   <integer>63</integer>
+  <key>StandardOutPath</key>
+  <string>${xml(paths.launchdStdoutFile)}</string>
   <key>StandardErrorPath</key>
   <string>${xml(paths.launchdStderrFile)}</string>
   <key>ExitTimeOut</key>

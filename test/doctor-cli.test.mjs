@@ -154,6 +154,7 @@ test('local fallback validates a healthy private filesystem, settings, and works
     }
     for (const file of [
       path.join(skyHome, 'logs', 'skyd.jsonl'),
+      path.join(skyHome, 'logs', 'launchd.stdout.log'),
       path.join(skyHome, 'logs', 'launchd.stderr.log'),
     ]) {
       await writeFile(file, '', { mode: 0o600 });
@@ -290,6 +291,7 @@ test('doctor distinguishes unsafe SQLite state and workspace prompt failures wit
       { mode: 0o600 },
     );
     await writeFile(path.join(skyHome, 'logs', 'skyd.jsonl'), '', { mode: 0o600 });
+    await writeFile(path.join(skyHome, 'logs', 'launchd.stdout.log'), '', { mode: 0o600 });
     await writeFile(path.join(skyHome, 'logs', 'launchd.stderr.log'), '', { mode: 0o600 });
     await writeFile(path.join(skyHome, 'sky.db-wal'), 'sqlite fixture', { mode: 0o644 });
     await chmod(path.join(skyHome, 'sky.db-wal'), 0o644);

@@ -67,6 +67,7 @@ test('SkyHome resolves every managed path from the default and overridden root',
     socketFile: path.join(homeDir, '.sky', 'run', 'skyd.sock'),
     logsDir: path.join(homeDir, '.sky', 'logs'),
     logFile: path.join(homeDir, '.sky', 'logs', 'skyd.jsonl'),
+    launchdStdoutFile: path.join(homeDir, '.sky', 'logs', 'launchd.stdout.log'),
     launchdStderrFile: path.join(homeDir, '.sky', 'logs', 'launchd.stderr.log'),
     databaseFile: path.join(homeDir, '.sky', 'sky.db'),
     databaseWalFile: path.join(homeDir, '.sky', 'sky.db-wal'),
@@ -136,6 +137,7 @@ test('SkyHome prepares and repairs private managed directories and files', () =>
       home.databaseShmFile,
       home.memoryCursorFile,
       home.logFile,
+      home.launchdStdoutFile,
       home.launchdStderrFile,
       path.join(home.transcriptsDir, 'C123', 'session.md'),
     ];
@@ -177,6 +179,7 @@ test('SkyHome creates its private directory contract and log files from scratch'
       assert.equal(permissions(directory), 0o700, directory);
     }
     assert.equal(permissions(home.logFile), 0o600);
+    assert.equal(permissions(home.launchdStdoutFile), 0o600);
     assert.equal(permissions(home.launchdStderrFile), 0o600);
   });
 });

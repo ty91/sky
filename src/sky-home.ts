@@ -18,6 +18,7 @@ export type SkyHome = Readonly<{
   socketFile: string;
   logsDir: string;
   logFile: string;
+  launchdStdoutFile: string;
   launchdStderrFile: string;
   databaseFile: string;
   databaseWalFile: string;
@@ -236,6 +237,7 @@ export function prepareSkyHome(home: SkyHome): void {
     ensurePrivateFile(`${home.logFile}.${index}`);
   }
   ensurePrivateFile(home.logFile, true);
+  ensurePrivateFile(home.launchdStdoutFile, true);
   ensurePrivateFile(home.launchdStderrFile, true);
   prepareTranscriptTree(home.transcriptsDir);
 }
@@ -260,6 +262,7 @@ export function createSkyHome(options: CreateSkyHomeOptions = {}): SkyHome {
     socketFile: path.join(rootDir, 'run', 'skyd.sock'),
     logsDir: path.join(rootDir, 'logs'),
     logFile: path.join(rootDir, 'logs', 'skyd.jsonl'),
+    launchdStdoutFile: path.join(rootDir, 'logs', 'launchd.stdout.log'),
     launchdStderrFile: path.join(rootDir, 'logs', 'launchd.stderr.log'),
     databaseFile,
     databaseWalFile: `${databaseFile}-wal`,

@@ -142,6 +142,7 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
       'ProcessType',
       'ProgramArguments',
       'StandardErrorPath',
+      'StandardOutPath',
       'Umask',
     ]);
     assert.equal(plist.Label, 'com.ty91.skyd');
@@ -154,6 +155,10 @@ test('CLI manages a persistent LaunchAgent without restarting an unchanged plist
     assert.equal(plist.ProcessType, 'Standard');
     assert.equal(plist.Umask, 0o77);
     assert.equal(plist.ExitTimeOut, 30);
+    assert.equal(
+      plist.StandardOutPath,
+      path.join(context.homeDir, '.sky', 'logs', 'launchd.stdout.log'),
+    );
     assert.equal(
       plist.StandardErrorPath,
       path.join(context.homeDir, '.sky', 'logs', 'launchd.stderr.log'),
@@ -233,6 +238,7 @@ test('service install records an absolute SKY_HOME override for launchd', { time
     assert.equal(installed.code, 0, installed.stderr || installed.stdout);
 
     const plist = await parsePlist(context.plistFile);
+    assert.equal(plist.StandardOutPath, path.join(customRoot, 'logs', 'launchd.stdout.log'));
     assert.equal(plist.StandardErrorPath, path.join(customRoot, 'logs', 'launchd.stderr.log'));
     assert.equal(plist.EnvironmentVariables.SKY_HOME, customRoot);
   } finally {
