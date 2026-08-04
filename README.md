@@ -70,7 +70,7 @@ mise install
 mise exec -- pnpm install --frozen-lockfile
 ```
 
-`mise exec -- node --version`과 `mise exec -- pnpm --version`이 각각 Node.js `24.16.0`, pnpm `11.10.0`을 출력해야 합니다.
+`mise exec -- node --version`, `mise exec -- pnpm --version`, `mise exec -- bun --version`이 각각 Node.js `24.16.0`, pnpm `11.10.0`, Bun `1.3.14`를 출력해야 합니다. Node.js와 pnpm은 기존 개발 및 package 경로에, Bun은 standalone release build에 사용합니다.
 
 ## Sky home과 private filesystem
 
@@ -188,6 +188,14 @@ pnpm dev
 ```bash
 pnpm build
 ```
+
+Apple Silicon macOS용 standalone artifact 빌드는 별도 명령으로 실행합니다:
+
+```bash
+bun run build:standalone
+```
+
+이 명령은 `dist/standalone/darwin-arm64/`에 하나의 물리 executable `sky`와 이를 가리키는 `skyd` symlink를 만들고, architecture, mode, CLI version/help 계약을 검증합니다. Bun build metafile은 `dist/standalone/darwin-arm64.metafile.json`에 기록합니다.
 
 타입체크:
 

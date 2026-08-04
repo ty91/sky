@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { PRODUCT_VERSION } from './product-version.js';
-import { startSkyd } from './skyd/app.js';
 
 function waitForShutdownSignal(): Promise<void> {
   return new Promise((resolve) => {
@@ -23,6 +22,7 @@ function waitForShutdownSignal(): Promise<void> {
 }
 
 async function runForeground(supervised: boolean): Promise<void> {
+  const { startSkyd } = await import('./skyd/app.js');
   const daemon = await startSkyd({ supervisionMode: supervised ? 'launchd' : 'foreground' });
   try {
     await Promise.race([waitForShutdownSignal(), daemon.finished]);
