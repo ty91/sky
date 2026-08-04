@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import {
   lstat,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   readlink,
@@ -10,15 +12,19 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+const adminDirectory = path.join(repositoryRoot, 'dist', 'admin');
 const standaloneRoot = path.join(repositoryRoot, 'dist', 'standalone');
 const artifactDirectory = path.join(standaloneRoot, 'darwin-arm64');
 const skyExecutable = path.join(artifactDirectory, 'sky');
 const skydExecutable = path.join(artifactDirectory, 'skyd');
 const metafilePath = path.join(standaloneRoot, 'darwin-arm64.metafile.json');
+const adminManifestModule = path.join(repositoryRoot, 'src', 'standalone-admin-manifest.ts');
+const adminSmokeEntrypoint = path.join(repositoryRoot, 'scripts', 'standalone-admin-smoke.ts');
 
 const nodeSqliteCompatibilityPlugin = {
   name: 'node-sqlite-compatibility',
@@ -39,12 +45,72 @@ const nodeSqliteCompatibilityPlugin = {
   },
 };
 
+function createAdminAssetPlugin(assets) {
+  return {
+    name: 'embedded-admin-assets',
+    setup(build) {
+      build.onLoad({ filter: /standalone-admin-manifest\.ts$/ }, (args) => {
+        assert.equal(args.path, adminManifestModule);
+        const imports = assets.map(
+          ({ filePath }, index) =>
+            `import asset${index} from ${JSON.stringify(filePath)} with { type: 'file' };`,
+        );
+        const entries = assets.map(
+          ({ relativePath }, index) => `[${JSON.stringify(relativePath)}, asset${index}]`,
+        );
+        return {
+          contents: [
+            ...imports,
+            `export const EMBEDDED_ADMIN_ASSET_PATHS = new Map([${entries.join(',')}]);`,
+          ].join('\n'),
+          loader: 'ts',
+        };
+      });
+    },
+  };
+}
+
 function run(executable, args) {
   return execFileSync(executable, args, {
     cwd: artifactDirectory,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function buildAdmin() {
+  execFileSync(
+    'pnpm',
+    ['exec', 'vite', 'build', '--config', 'admin/vite.config.ts', '--logLevel', 'error'],
+    { cwd: repositoryRoot, stdio: 'inherit' },
+  );
+}
+
+async function listAdminAssets(directory = adminDirectory, prefix = '') {
+  const assets = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const relativePath = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      assets.push(...(await listAdminAssets(filePath, relativePath)));
+    } else if (entry.isFile()) {
+      assets.push({ relativePath, filePath });
+    }
+  }
+  return assets.toSorted((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+function verifyAdminBuild(assets) {
+  const paths = assets.map(({ relativePath }) => relativePath);
+  assert.ok(paths.includes('index.html'), 'Vite admin build must emit index.html');
+  assert.ok(
+    paths.some((assetPath) => /^assets\/index-[\w-]+\.js$/.test(assetPath)),
+    'Vite admin build must emit a hashed JavaScript asset',
+  );
+  assert.ok(
+    paths.some((assetPath) => /^assets\/index-[\w-]+\.css$/.test(assetPath)),
+    'Vite admin build must emit a hashed CSS asset',
+  );
 }
 
 async function verifyToolchain() {
@@ -88,12 +154,114 @@ async function verifyArtifact(version) {
   assert.match(run(skydExecutable, ['--help']), /^Usage: skyd \[options\]/m);
 }
 
+async function waitForAdmin(child, stdout, stderr, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`standalone daemon exited before admin startup: ${stderr()}`);
+    }
+    const origin = stdout().match(/^ADMIN_ORIGIN=(http:\/\/127\.0\.0\.1:\d+)$/m)?.[1];
+    if (origin !== undefined) {
+      try {
+        const response = await fetch(origin);
+        if (response.ok) return origin;
+      } catch {
+        // The smoke process printed its address just before the listener became reachable.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`standalone admin did not start: ${stderr()}`);
+}
+
+async function verifyStandaloneAdmin(adminAssets, version) {
+  const isolatedRoot = await mkdtemp(path.join(os.tmpdir(), 'sky-standalone-admin-'));
+  const smokeExecutable = path.join(isolatedRoot, 'admin-smoke');
+  let child;
+  try {
+    const build = await Bun.build({
+      entrypoints: [adminSmokeEntrypoint],
+      compile: {
+        target: 'bun-darwin-arm64',
+        outfile: smokeExecutable,
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+      },
+      define: {
+        SKY_BUILD_VERSION: JSON.stringify(version),
+      },
+      plugins: [nodeSqliteCompatibilityPlugin, createAdminAssetPlugin(adminAssets)],
+    });
+    assert.equal(build.success, true, 'standalone admin smoke build failed');
+    assert.equal(build.outputs.length, 1, 'standalone admin smoke must emit one executable');
+
+    child = spawn(smokeExecutable, [], {
+      cwd: isolatedRoot,
+      env: {
+        ...process.env,
+        HOME: isolatedRoot,
+        PATH: '/usr/bin:/bin',
+        XDG_CACHE_HOME: path.join(isolatedRoot, 'cache'),
+        XDG_CONFIG_HOME: path.join(isolatedRoot, 'config'),
+        XDG_DATA_HOME: path.join(isolatedRoot, 'data'),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    const origin = await waitForAdmin(child, () => stdout, () => stderr);
+
+    const shell = await fetch(origin);
+    const html = await shell.text();
+    assert.equal(shell.status, 200, html);
+    assert.match(html, /Sky Admin/);
+    assert.equal(shell.headers.get('cache-control'), 'no-store');
+
+    const scriptPath = html.match(/<script[^>]+src="(\/assets\/[^"]+\.js)"/)?.[1];
+    const stylePath = html.match(/<link[^>]+href="(\/assets\/[^"]+\.css)"/)?.[1];
+    assert.ok(scriptPath, html);
+    assert.ok(stylePath, html);
+
+    const script = await fetch(`${origin}${scriptPath}`);
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type') ?? '', /^text\/javascript/);
+    assert.equal(script.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+
+    const style = await fetch(`${origin}${stylePath}`);
+    assert.equal(style.status, 200);
+    assert.match(style.headers.get('content-type') ?? '', /^text\/css/);
+    assert.equal(style.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+
+    const fallback = await fetch(`${origin}/connections`);
+    assert.equal(fallback.status, 200);
+    assert.equal(await fallback.text(), html);
+
+    const missingAsset = await fetch(`${origin}/assets/not-a-real-build-output.js`);
+    assert.equal(missingAsset.status, 404);
+    assert.deepEqual(await missingAsset.json(), { error: { code: 'not_found' } });
+
+    assert.equal(child.exitCode, null, stderr);
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await once(child, 'exit');
+    }
+    await rm(isolatedRoot, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await verifyToolchain();
 
   const manifest = JSON.parse(
     await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
   );
+
+  buildAdmin();
+  const adminAssets = await listAdminAssets();
+  verifyAdminBuild(adminAssets);
 
   await rm(standaloneRoot, { recursive: true, force: true });
   await mkdir(artifactDirectory, { recursive: true });
@@ -110,7 +278,7 @@ async function main() {
       SKY_BUILD_VERSION: JSON.stringify(manifest.version),
     },
     metafile: true,
-    plugins: [nodeSqliteCompatibilityPlugin],
+    plugins: [nodeSqliteCompatibilityPlugin, createAdminAssetPlugin(adminAssets)],
   });
 
   assert.equal(build.success, true, 'Bun standalone build failed');
@@ -120,6 +288,7 @@ async function main() {
   await symlink('sky', skydExecutable);
 
   await verifyArtifact(manifest.version);
+  await verifyStandaloneAdmin(adminAssets, manifest.version);
   console.log(`Built and verified ${path.relative(repositoryRoot, artifactDirectory)}.`);
   console.log(`Metafile: ${path.relative(repositoryRoot, metafilePath)}`);
 }

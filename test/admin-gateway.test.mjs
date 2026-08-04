@@ -143,6 +143,22 @@ test('admin login exchanges a UDS-issued token for an authenticated TCP session'
     assert.equal(spaFallback.statusCode, 200);
     assert.equal(spaFallback.body, shell.body);
 
+    const missingAsset = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/assets/not-a-real-build-output.js',
+    );
+    assert.equal(missingAsset.statusCode, 404);
+    assert.deepEqual(JSON.parse(missingAsset.body), { error: { code: 'not_found' } });
+
+    const traversal = await tcpRequest(
+      daemonStatus.admin.port,
+      'GET',
+      '/assets/%2e%2e%2fpackage.json',
+    );
+    assert.equal(traversal.statusCode, 404);
+    assert.deepEqual(JSON.parse(traversal.body), { error: { code: 'not_found' } });
+
     const missingApi = await tcpRequest(daemonStatus.admin.port, 'GET', '/api/not-real');
     assert.equal(missingApi.statusCode, 401);
 

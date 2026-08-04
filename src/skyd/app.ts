@@ -26,6 +26,7 @@ import {
   DEFAULT_ADMIN_HOST,
   DEFAULT_ADMIN_PORT,
   startAdminHttpServer,
+  type AdminAssetReader,
   type AdminHttpServer,
 } from './admin-http.js';
 import { createJsonlLogger, type JsonlLoggerOptions } from './logger.js';
@@ -89,6 +90,7 @@ export type StartSkydOptions = {
         host?: string;
         port?: number;
         now?: () => Date;
+        assets?: AdminAssetReader;
       };
   connections?: Omit<ConnectionsOptions, 'homeDir'>;
   configurationEnv?: NodeJS.ProcessEnv;
@@ -347,6 +349,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
         port: adminPort,
         control,
         authentication: adminAuthentication,
+        assets: adminOptions.assets,
       });
       mutable.admin = {
         state: 'listening',

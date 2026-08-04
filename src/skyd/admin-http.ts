@@ -17,6 +17,40 @@ const SESSION_COOKIE = 'sky_admin_session';
 const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
 const ADMIN_ASSET_DIRECTORY = fileURLToPath(new URL('../admin/', import.meta.url));
 
+export type AdminAssetReader = {
+  read(relativePath: string): Promise<Buffer | undefined>;
+};
+
+export function createFileSystemAdminAssetReader(
+  directory = ADMIN_ASSET_DIRECTORY,
+): AdminAssetReader {
+  const root = path.resolve(directory);
+  return {
+    async read(relativePath) {
+      const candidate = path.resolve(root, relativePath);
+      if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) return undefined;
+      try {
+        return await readFile(candidate);
+      } catch (error) {
+        if (isMissingFile(error)) return undefined;
+        throw error;
+      }
+    },
+  };
+}
+
+export function createEmbeddedAdminAssetReader(
+  assetPaths: ReadonlyMap<string, string>,
+): AdminAssetReader {
+  return {
+    async read(relativePath) {
+      const assetPath = assetPaths.get(relativePath);
+      if (assetPath === undefined) return undefined;
+      return readFile(assetPath);
+    },
+  };
+}
+
 export type AdminHttpServer = {
   host: string;
   port: number;
@@ -28,6 +62,7 @@ export type StartAdminHttpServerOptions = {
   port?: number;
   control: DaemonControl;
   authentication: AdminAuthentication;
+  assets?: AdminAssetReader;
 };
 
 function closeHttpServer(server: http.Server): Promise<void> {
@@ -104,7 +139,10 @@ function isMissingFile(error: unknown): boolean {
   );
 }
 
-async function readAdminAsset(requestPath: string): Promise<{ filePath: string; body: Buffer }> {
+async function readAdminAsset(
+  requestPath: string,
+  assets: AdminAssetReader,
+): Promise<{ relativePath: string; body: Buffer }> {
   let decoded: string;
   try {
     decoded = decodeURIComponent(requestPath);
@@ -113,35 +151,33 @@ async function readAdminAsset(requestPath: string): Promise<{ filePath: string; 
   }
   if (decoded.includes('\0')) throw new ControlError('invalid_request');
   const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
-  const candidate = path.resolve(ADMIN_ASSET_DIRECTORY, relative);
-  const assetRoot = path.resolve(ADMIN_ASSET_DIRECTORY);
-  if (candidate !== assetRoot && !candidate.startsWith(`${assetRoot}${path.sep}`)) {
+  if (relative.split(/[\\/]/).includes('..')) {
     throw new ControlError('not_found');
   }
-  try {
-    return { filePath: candidate, body: await readFile(candidate) };
-  } catch (error) {
-    if (!isMissingFile(error) || decoded.startsWith('/assets/')) throw error;
-    const indexPath = path.join(ADMIN_ASSET_DIRECTORY, 'index.html');
-    return { filePath: indexPath, body: await readFile(indexPath) };
-  }
+  const body = await assets.read(relative);
+  if (body !== undefined) return { relativePath: relative, body };
+  if (decoded.startsWith('/assets/')) throw new ControlError('not_found');
+  const index = await assets.read('index.html');
+  if (index === undefined) throw new ControlError('not_found');
+  return { relativePath: 'index.html', body: index };
 }
 
 async function serveAdminAsset(
   request: IncomingMessage,
   response: ServerResponse,
   requestPath: string,
+  assets: AdminAssetReader,
 ): Promise<void> {
   if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
   try {
-    const asset = await readAdminAsset(requestPath);
+    const asset = await readAdminAsset(requestPath, assets);
     response.setHeader(
       'cache-control',
       requestPath.startsWith('/assets/')
         ? 'public, max-age=31536000, immutable'
         : 'no-store',
     );
-    writeBody(response, 200, contentType(asset.filePath), asset.body);
+    writeBody(response, 200, contentType(asset.relativePath), asset.body);
   } catch (error) {
     if (isMissingFile(error) || (error instanceof ControlError && error.code === 'not_found')) {
       writeError(response, 404, 'not_found');
@@ -262,12 +298,13 @@ async function handleRequest(
   response: ServerResponse,
   control: DaemonControl,
   authentication: AdminAuthentication,
+  assets: AdminAssetReader,
 ): Promise<void> {
   applySecurityHeaders(response);
   const url = new URL(request.url ?? '/', 'http://localhost');
 
   if (!url.pathname.startsWith('/api/')) {
-    await serveAdminAsset(request, response, url.pathname);
+    await serveAdminAsset(request, response, url.pathname, assets);
     return;
   }
 
@@ -495,8 +532,9 @@ export async function startAdminHttpServer(
 ): Promise<AdminHttpServer> {
   const host = options.host ?? DEFAULT_ADMIN_HOST;
   const port = options.port ?? DEFAULT_ADMIN_PORT;
+  const assets = options.assets ?? createFileSystemAdminAssetReader();
   const server = http.createServer((request, response) => {
-    void handleRequest(request, response, options.control, options.authentication).catch((error) => {
+    void handleRequest(request, response, options.control, options.authentication, assets).catch((error) => {
       if (!response.headersSent) {
         applySecurityHeaders(response);
         writeUnexpectedError(response, error);
