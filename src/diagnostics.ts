@@ -1,4 +1,12 @@
-import { accessSync, constants, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import {
+  accessSync,
+  constants,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Settings } from './settings.js';
@@ -11,10 +19,9 @@ import type { SkyHome } from './sky-home.js';
 import type { DaemonStatus } from './skyd/types.js';
 import { inspectPiBackend } from './connections.js';
 import { slackManifestRemediation } from './slack/manifest.js';
+import { PRODUCT_VERSION } from './product-version.js';
 
-export const { version: PRODUCT_VERSION } = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-) as { version: string };
+export { PRODUCT_VERSION };
 
 const PROMPT_FILES = [
   ['soul', 'SOUL.md'],

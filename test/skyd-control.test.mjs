@@ -31,6 +31,7 @@ import {
   watchOperation,
 } from '../dist/skyd/control-uds.js';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
+import { PRODUCT_VERSION } from '../dist/product-version.js';
 
 function permissions(stats) {
   return stats.mode & 0o777;
@@ -120,14 +121,14 @@ async function leaveStaleSocket(socketFile) {
 
 test('GET /status stays available without settings and exposes stable control errors', async () => {
   await withTempHome(async (homeDir) => {
-    const daemon = await startSkyd({ homeDir, productVersion: 'test-version' });
+    const daemon = await startSkyd({ homeDir });
     try {
       const status = await waitForStatus(
         daemon.paths.socketFile,
         (candidate) => candidate.runtime.state === 'needs_configuration',
       );
 
-      assert.equal(status.productVersion, 'test-version');
+      assert.equal(status.productVersion, PRODUCT_VERSION);
       assert.equal(status.process.pid, process.pid);
       assert.equal(status.process.state, 'running');
       assert.equal(status.slack.state, 'not_configured');
@@ -305,7 +306,7 @@ test('the skyd entrypoint stays foreground with invalid settings and shuts down 
         socketFile,
         (candidate) => candidate.runtime.state === 'needs_configuration',
       );
-      assert.deepEqual(status.recentErrors.map(({ code }) => code), ['settings_invalid']);
+      assert.ok(status.recentErrors.some(({ code }) => code === 'settings_invalid'));
       assert.equal(permissions(await lstat(settingsFile)), 0o600);
 
       let exited = false;

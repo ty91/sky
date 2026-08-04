@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import {
   SlackStartupError,
@@ -54,10 +53,7 @@ import {
 } from '../connections.js';
 import { inspectLaunchAgent, type LaunchdStatus } from '../service/launch-agent.js';
 import { createSkydClaudeDiagnostics } from './claude-diagnostics.js';
-
-const { version: PRODUCT_VERSION } = JSON.parse(
-  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
-) as { version: string };
+import { PRODUCT_VERSION } from '../product-version.js';
 
 export type RuntimeStarter = (
   settings: Settings,

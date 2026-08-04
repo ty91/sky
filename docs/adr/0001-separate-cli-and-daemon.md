@@ -72,6 +72,8 @@ Daemon app log는 크기 제한이 있는 structured JSONL로 기록한다. 실�
 
 배포 파일 수는 줄지만 CLI와 daemon의 책임 및 dependency가 다시 하나의 entrypoint에 결합된다. 두 실행 파일을 한 installer 또는 package로 배포하면 제품의 원자성은 유지할 수 있으므로 물리적 분리를 선택한다.
 
+후속 [ADR-0006](./0006-select-runtime-role-by-invocation-name.md)은 역할과 lifecycle 책임을 계속 분리하면서 Bun standalone의 물리 artifact만 공유하도록 이 결정을 변경한다.
+
 ### Control interface를 localhost TCP에 연다
 
 향후 browser가 바로 접근하기는 쉽지만 CLI 전용 제어면을 불필요하게 network interface에 노출하고 browser authentication과 CSRF 정책을 지금부터 끌어오게 된다. 먼저 UDS를 사용하고 admin web은 인증된 loopback adapter로 추가한다.
