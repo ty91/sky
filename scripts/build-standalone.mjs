@@ -26,6 +26,7 @@ const skydExecutable = path.join(artifactDirectory, 'skyd');
 const metafilePath = path.join(standaloneRoot, 'darwin-arm64.metafile.json');
 const adminManifestModule = path.join(repositoryRoot, 'src', 'standalone-admin-manifest.ts');
 const adminSmokeEntrypoint = path.join(repositoryRoot, 'scripts', 'standalone-admin-smoke.ts');
+const piSmokeEntrypoint = path.join(repositoryRoot, 'scripts', 'standalone-pi-smoke.ts');
 const claudeHelperManifestModule = path.join(
   repositoryRoot,
   'src',
@@ -38,6 +39,9 @@ const claudeAgentSdkRequire = createRequire(claudeAgentSdkEntry);
 const claudeHelperPath = claudeAgentSdkRequire.resolve(
   '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
 );
+const piEntryPath = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
+const piClipboardNativeModule = path.join(path.dirname(piEntryPath), 'utils', 'clipboard-native.js');
+const piClipboardAddonPath = require.resolve('@mariozechner/clipboard-darwin-arm64');
 
 const nodeSqliteCompatibilityPlugin = {
   name: 'node-sqlite-compatibility',
@@ -99,6 +103,25 @@ const claudeHelperAssetPlugin = {
   },
 };
 
+const piClipboardNativePlugin = {
+  name: 'embedded-pi-clipboard',
+  setup(build) {
+    build.onLoad({ filter: /clipboard-native\.js$/ }, (args) => {
+      if (args.path !== piClipboardNativeModule) return undefined;
+      return {
+        // A direct require is Bun's static N-API bundling seam. Pi's upstream
+        // createRequire loader remains untouched for the regular Node.js build.
+        contents: [
+          `const clipboard = require(${JSON.stringify(piClipboardAddonPath)});`,
+          'export function loadClipboardNative() { return clipboard; }',
+          'export { clipboard };',
+        ].join('\n'),
+        loader: 'js',
+      };
+    });
+  },
+};
+
 function verifyClaudeHelperBuild(metafile) {
   const helperInputs = Object.keys(metafile.inputs).filter(
     (input) =>
@@ -109,6 +132,17 @@ function verifyClaudeHelperBuild(metafile) {
     helperInputs,
     [path.relative(repositoryRoot, claudeHelperPath)],
     'standalone must embed exactly the darwin-arm64 Claude helper',
+  );
+}
+
+function verifyPiClipboardBuild(metafile) {
+  const clipboardAddonInputs = Object.keys(metafile.inputs).filter((input) =>
+    /(?:^|\/)clipboard\.[^/]+\.node$/.test(input),
+  );
+  assert.deepEqual(
+    clipboardAddonInputs,
+    [path.relative(repositoryRoot, piClipboardAddonPath)],
+    'standalone must embed exactly the darwin-arm64 Pi clipboard addon',
   );
 }
 
@@ -306,6 +340,45 @@ async function verifyStandaloneAdmin(adminAssets, version) {
   }
 }
 
+async function verifyStandalonePi() {
+  const isolatedRoot = await mkdtemp(path.join(os.tmpdir(), 'sky-standalone-pi-'));
+  const smokeExecutable = path.join(isolatedRoot, 'pi-smoke');
+  try {
+    const build = await Bun.build({
+      entrypoints: [piSmokeEntrypoint],
+      compile: {
+        target: 'bun-darwin-arm64',
+        outfile: smokeExecutable,
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+      },
+      metafile: true,
+      plugins: [nodeSqliteCompatibilityPlugin, piClipboardNativePlugin],
+    });
+    assert.equal(build.success, true, 'standalone Pi smoke build failed');
+    assert.equal(build.outputs.length, 1, 'standalone Pi smoke must emit one executable');
+    assert.ok(build.metafile, 'standalone Pi smoke must return a metafile');
+    verifyPiClipboardBuild(build.metafile);
+
+    const output = execFileSync(smokeExecutable, [], {
+      cwd: isolatedRoot,
+      env: {
+        ...process.env,
+        HOME: isolatedRoot,
+        PATH: '/usr/bin:/bin',
+        XDG_CACHE_HOME: path.join(isolatedRoot, 'cache'),
+        XDG_CONFIG_HOME: path.join(isolatedRoot, 'config'),
+        XDG_DATA_HOME: path.join(isolatedRoot, 'data'),
+      },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(output.trim(), 'STANDALONE_PI_TURN=ok');
+  } finally {
+    await rm(isolatedRoot, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await verifyToolchain();
 
@@ -336,6 +409,7 @@ async function main() {
       nodeSqliteCompatibilityPlugin,
       createAdminAssetPlugin(adminAssets),
       claudeHelperAssetPlugin,
+      piClipboardNativePlugin,
     ],
   });
 
@@ -343,11 +417,13 @@ async function main() {
   assert.equal(build.outputs.length, 1, 'Bun build must emit exactly one executable');
   assert.ok(build.metafile, 'Bun build must return a metafile');
   verifyClaudeHelperBuild(build.metafile);
+  verifyPiClipboardBuild(build.metafile);
   await writeFile(metafilePath, `${JSON.stringify(build.metafile, null, 2)}\n`);
   await symlink('sky', skydExecutable);
 
   await verifyArtifact(manifest.version);
   await verifyStandaloneAdmin(adminAssets, manifest.version);
+  await verifyStandalonePi();
   console.log(`Built and verified ${path.relative(repositoryRoot, artifactDirectory)}.`);
   console.log(`Metafile: ${path.relative(repositoryRoot, metafilePath)}`);
 }
