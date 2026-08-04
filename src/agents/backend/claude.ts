@@ -12,6 +12,7 @@ import {
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentConfig } from '../types.js';
 import { Pushable } from '../../session/pushable.js';
+import { resolveClaudeCodeExecutable } from '../../claude-code-executable.js';
 import {
   claudeDebugQueryOptions,
   startClaudeQueryAttempt,
@@ -56,6 +57,7 @@ type ClaudeAgentSdkDeps = {
   query: typeof sdkQuery;
   createSdkMcpServer: typeof sdkCreateSdkMcpServer;
   tool: typeof sdkTool;
+  resolveClaudeCodeExecutable: () => string | undefined;
   env?: NodeJS.ProcessEnv;
   diagnostics?: ClaudeQueryDiagnostics;
 };
@@ -425,6 +427,7 @@ class ClaudeAgentSdkSession implements AgentSession {
 
   private createQueryOptions(): ClaudeOptions {
     const toolSelection = resolveToolSelection(this.options.agent.tools, this.customToolNames);
+    const pathToClaudeCodeExecutable = this.deps.resolveClaudeCodeExecutable();
 
     // Per TY-6 verification, per-turn query has no idle subprocess, but each active
     // turn spawns about 330 MB RSS and pays about 200 ms spawn overhead. A manager
@@ -448,6 +451,7 @@ class ClaudeAgentSdkSession implements AgentSession {
       mcpServers: {
         [CLAUDE_MCP_SERVER_NAME]: this.mcpServer,
       },
+      ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
       ...(this.options.agent.model ? { model: resolveClaudeModel(this.options.agent.model) } : {}),
       ...(this.options.agent.effort ? { effort: this.options.agent.effort } : {}),
       ...(this.options.agent.maxTurns !== undefined ? { maxTurns: this.options.agent.maxTurns } : {}),
@@ -468,6 +472,7 @@ const DEFAULT_SDK_DEPS: ClaudeAgentSdkDeps = {
   query: sdkQuery,
   createSdkMcpServer: sdkCreateSdkMcpServer,
   tool: sdkTool,
+  resolveClaudeCodeExecutable,
 };
 
 export function createClaudeAgentSdkSessionFactory(

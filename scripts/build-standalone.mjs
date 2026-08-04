@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createRequire } from 'node:module';
 import {
   lstat,
   mkdir,
@@ -25,6 +26,18 @@ const skydExecutable = path.join(artifactDirectory, 'skyd');
 const metafilePath = path.join(standaloneRoot, 'darwin-arm64.metafile.json');
 const adminManifestModule = path.join(repositoryRoot, 'src', 'standalone-admin-manifest.ts');
 const adminSmokeEntrypoint = path.join(repositoryRoot, 'scripts', 'standalone-admin-smoke.ts');
+const claudeHelperManifestModule = path.join(
+  repositoryRoot,
+  'src',
+  'standalone-claude-helper-manifest.ts',
+);
+// pnpm keeps the SDK's platform package beside the SDK because it is an optional dependency.
+const require = createRequire(import.meta.url);
+const claudeAgentSdkEntry = require.resolve('@anthropic-ai/claude-agent-sdk');
+const claudeAgentSdkRequire = createRequire(claudeAgentSdkEntry);
+const claudeHelperPath = claudeAgentSdkRequire.resolve(
+  '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
+);
 
 const nodeSqliteCompatibilityPlugin = {
   name: 'node-sqlite-compatibility',
@@ -70,9 +83,39 @@ function createAdminAssetPlugin(assets) {
   };
 }
 
-function run(executable, args) {
+const claudeHelperAssetPlugin = {
+  name: 'embedded-claude-helper',
+  setup(build) {
+    build.onLoad({ filter: /standalone-claude-helper-manifest\.ts$/ }, (args) => {
+      assert.equal(args.path, claudeHelperManifestModule);
+      return {
+        contents: [
+          `import helperPath from ${JSON.stringify(claudeHelperPath)} with { type: 'file' };`,
+          'export const EMBEDDED_CLAUDE_CODE_EXECUTABLE = helperPath;',
+        ].join('\n'),
+        loader: 'ts',
+      };
+    });
+  },
+};
+
+function verifyClaudeHelperBuild(metafile) {
+  const helperInputs = Object.keys(metafile.inputs).filter(
+    (input) =>
+      /claude-agent-sdk-(?:darwin|linux|win32)-/.test(input) &&
+      (input.endsWith('/claude') || input.endsWith('/claude.exe')),
+  );
+  assert.deepEqual(
+    helperInputs,
+    [path.relative(repositoryRoot, claudeHelperPath)],
+    'standalone must embed exactly the darwin-arm64 Claude helper',
+  );
+}
+
+function run(executable, args, env = process.env) {
   return execFileSync(executable, args, {
     cwd: artifactDirectory,
+    env,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -148,10 +191,21 @@ async function verifyArtifact(version) {
   assert.match(fileDescription, /^Mach-O 64-bit executable arm64\b/);
   assert.equal(run('/usr/bin/lipo', ['-archs', skyExecutable]).trim(), 'arm64');
 
-  assert.equal(run(skyExecutable, ['--version']).trim(), version);
-  assert.match(run(skyExecutable, ['--help']), /^Usage: sky \[options\] \[command\]/m);
-  assert.equal(run(skydExecutable, ['--version']).trim(), version);
-  assert.match(run(skydExecutable, ['--help']), /^Usage: skyd \[options\]/m);
+  const claudeTempDirectory = await mkdtemp(path.join(os.tmpdir(), 'sky-claude-lazy-'));
+  try {
+    const env = { ...process.env, CLAUDE_CODE_TMPDIR: claudeTempDirectory };
+    assert.equal(run(skyExecutable, ['--version'], env).trim(), version);
+    assert.match(run(skyExecutable, ['--help'], env), /^Usage: sky \[options\] \[command\]/m);
+    assert.equal(run(skydExecutable, ['--version'], env).trim(), version);
+    assert.match(run(skydExecutable, ['--help'], env), /^Usage: skyd \[options\]/m);
+    assert.deepEqual(
+      await readdir(claudeTempDirectory),
+      [],
+      'version and help must not extract the embedded Claude helper',
+    );
+  } finally {
+    await rm(claudeTempDirectory, { recursive: true, force: true });
+  }
 }
 
 async function waitForAdmin(child, stdout, stderr, timeoutMs = 15_000) {
@@ -278,12 +332,17 @@ async function main() {
       SKY_BUILD_VERSION: JSON.stringify(manifest.version),
     },
     metafile: true,
-    plugins: [nodeSqliteCompatibilityPlugin, createAdminAssetPlugin(adminAssets)],
+    plugins: [
+      nodeSqliteCompatibilityPlugin,
+      createAdminAssetPlugin(adminAssets),
+      claudeHelperAssetPlugin,
+    ],
   });
 
   assert.equal(build.success, true, 'Bun standalone build failed');
   assert.equal(build.outputs.length, 1, 'Bun build must emit exactly one executable');
   assert.ok(build.metafile, 'Bun build must return a metafile');
+  verifyClaudeHelperBuild(build.metafile);
   await writeFile(metafilePath, `${JSON.stringify(build.metafile, null, 2)}\n`);
   await symlink('sky', skydExecutable);
 

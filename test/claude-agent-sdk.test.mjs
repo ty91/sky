@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { createClaudeAgentSdkSessionFactory } from '../dist/agents/backend/claude.js';
+import { createClaudeCodeExecutableResolver } from '../dist/claude-code-executable.js';
 
 function deferred() {
   let resolve;
@@ -76,7 +77,7 @@ function errorResult(sessionId) {
   };
 }
 
-function createFakeDeps({ env, query, diagnostics }) {
+function createFakeDeps({ env, query, diagnostics, resolveClaudeCodeExecutable }) {
   const toolCalls = [];
   const mcpServerCalls = [];
   return {
@@ -84,6 +85,7 @@ function createFakeDeps({ env, query, diagnostics }) {
       env,
       query,
       diagnostics,
+      ...(resolveClaudeCodeExecutable ? { resolveClaudeCodeExecutable } : {}),
       tool: (name, description, inputSchema, handler, extras) => {
         const toolDef = { name, description, inputSchema, handler, extras };
         toolCalls.push(toolDef);
@@ -98,6 +100,58 @@ function createFakeDeps({ env, query, diagnostics }) {
     mcpServerCalls,
   };
 }
+
+test('embedded claude executable extraction stays lazy and reuses its first result', () => {
+  const extractedPaths = [];
+  const resolveExecutable = createClaudeCodeExecutableResolver('/$bunfs/root/claude', (input) => {
+    extractedPaths.push(input);
+    return '/tmp/claude-agent-sdk-content-hash/claude';
+  });
+
+  assert.deepEqual(extractedPaths, []);
+  assert.equal(resolveExecutable(), '/tmp/claude-agent-sdk-content-hash/claude');
+  assert.equal(resolveExecutable(), '/tmp/claude-agent-sdk-content-hash/claude');
+  assert.deepEqual(extractedPaths, ['/$bunfs/root/claude']);
+});
+
+test('claude agent sdk resolves and passes a standalone executable only when a query starts', async () => {
+  const queryOptions = [];
+  let resolverCalls = 0;
+  const { deps } = createFakeDeps({
+    env: { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token' },
+    resolveClaudeCodeExecutable: () => {
+      resolverCalls += 1;
+      return '/tmp/claude-agent-sdk-helper/claude';
+    },
+    query: (params) => {
+      queryOptions.push(params.options);
+      return createQuery(async function* () {
+        const input = params.prompt[Symbol.asyncIterator]();
+        await input.next();
+        yield initMessage('claude-session-standalone');
+        yield successResult('claude-session-standalone');
+        await input.next();
+      });
+    },
+  });
+  const createSession = createClaudeAgentSdkSessionFactory(deps);
+
+  assert.equal(resolverCalls, 0);
+  const session = await createSession({
+    key: 'thread-standalone',
+    cwd: '/tmp/workspace',
+    agent: { name: 'main', systemPrompt: 'system' },
+  });
+  assert.equal(resolverCalls, 0);
+
+  await session.prompt('hello');
+
+  assert.equal(resolverCalls, 1);
+  assert.equal(
+    queryOptions[0].pathToClaudeCodeExecutable,
+    '/tmp/claude-agent-sdk-helper/claude',
+  );
+});
 
 test('claude agent sdk factory fails fast without an OAuth token', async () => {
   const { deps } = createFakeDeps({
@@ -281,6 +335,7 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
   });
   assert.equal(queryParams.options.cwd, workspace);
   assert.equal(queryParams.options.model, 'claude-opus-4-7');
+  assert.equal(queryParams.options.pathToClaudeCodeExecutable, undefined);
   assert.equal(queryParams.options.systemPrompt, 'loaded-1');
   assert.equal(queryParams.options.permissionMode, 'bypassPermissions');
   assert.equal(queryParams.options.allowDangerouslySkipPermissions, true);
