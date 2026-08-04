@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import { PRODUCT_VERSION } from './product-version.js';
 import type { AdminAssetReader } from './skyd/admin-http.js';
 
@@ -26,17 +26,26 @@ function waitForShutdownSignal(): Promise<void> {
   });
 }
 
+function parseAdminPort(value: string): number {
+  const port = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new InvalidArgumentError('Admin port must be an integer between 0 and 65535.');
+  }
+  return port;
+}
+
 async function runForeground(
   supervised: boolean,
+  adminPort: number | undefined,
   dependencies: SkydCliDependencies,
 ): Promise<void> {
   const { startSkyd } = await import('./skyd/app.js');
   const daemon = await startSkyd({
     supervisionMode: supervised ? 'launchd' : 'foreground',
-    admin:
-      dependencies.adminAssets === undefined
-        ? undefined
-        : { assets: dependencies.adminAssets },
+    admin: {
+      ...(dependencies.adminAssets === undefined ? {} : { assets: dependencies.adminAssets }),
+      ...(adminPort === undefined ? {} : { port: adminPort }),
+    },
   });
   try {
     await Promise.race([waitForShutdownSignal(), daemon.finished]);
@@ -55,11 +64,12 @@ export async function runSkyd(
     .version(PRODUCT_VERSION)
     .option('--foreground', 'Run the daemon in the foreground')
     .option('--supervised', 'Run under the installed process supervisor')
-    .action(async (options: { foreground?: boolean; supervised?: boolean }) => {
+    .option('--admin-port <port>', 'Bind the admin gateway to a specific port', parseAdminPort)
+    .action(async (options: { foreground?: boolean; supervised?: boolean; adminPort?: number }) => {
       if (!options.foreground) {
         program.error('skyd must be run explicitly with --foreground');
       }
-      await runForeground(options.supervised === true, dependencies);
+      await runForeground(options.supervised === true, options.adminPort, dependencies);
     });
 
   await program.parseAsync(userArgs, { from: 'user' });

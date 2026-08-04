@@ -193,9 +193,12 @@ Apple Silicon macOS용 standalone artifact 빌드는 별도 명령으로 실행�
 
 ```bash
 bun run build:standalone
+pnpm test:standalone
 ```
 
-이 명령은 `dist/standalone/darwin-arm64/`에 하나의 물리 executable `sky`와 이를 가리키는 `skyd` symlink를 만들고, architecture, mode, CLI version/help 계약을 검증합니다. Bun build metafile은 `dist/standalone/darwin-arm64.metafile.json`에 기록합니다.
+빌드는 `dist/standalone/darwin-arm64/`에 하나의 물리 executable `sky`와 이를 가리키는 `skyd` symlink를 만들고 Bun build metafile을 `dist/standalone/darwin-arm64.metafile.json`에 기록합니다. Standalone smoke는 checkout 밖의 임시 디렉터리와 Node.js·Bun이 없는 `PATH`에서 architecture, artifact 구성, CLI, foreground daemon, embedded admin asset과 metafile target 계약을 검증합니다.
+
+실제 Pi와 Claude credential을 사용하는 turn·resume, Claude interrupt와 Sky MCP acceptance 절차는 [standalone acceptance](./docs/standalone-acceptance.md)에 정리되어 있습니다.
 
 타입체크:
 
