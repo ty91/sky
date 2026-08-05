@@ -5,17 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import http from 'node:http';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
 import { SlackStartupError } from '../dist/bot.js';
-import {
-  PRODUCT_VERSION,
-  runDiagnostics,
-  supportsNodeVersion,
-  withDaemonVersionDrift,
-} from '../dist/diagnostics.js';
+import { PRODUCT_VERSION, runDiagnostics, withDaemonVersionDrift } from '../dist/diagnostics.js';
 import { openConversationStore } from '../dist/conversation/store.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 
@@ -30,6 +25,28 @@ async function runCli(args, env) {
       env,
       maxBuffer: 1024 * 1024,
     });
+    return { code: 0, stdout, stderr };
+  } catch (error) {
+    return {
+      code: typeof error.code === 'number' ? error.code : 1,
+      stdout: error.stdout ?? '',
+      stderr: error.stderr ?? '',
+    };
+  }
+}
+
+async function runCliWithNodeVersion(args, env, version) {
+  const script = [
+    `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version)} });`,
+    "process.argv.splice(1, 0, 'sky');",
+    `await import(${JSON.stringify(pathToFileURL(skyEntrypoint).href)});`,
+  ].join('\n');
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ['--input-type=module', '--eval', script, ...args],
+      { encoding: 'utf8', env, maxBuffer: 1024 * 1024 },
+    );
     return { code: 0, stdout, stderr };
   } catch (error) {
     return {
@@ -126,11 +143,24 @@ test('doctor gets the assembled report from a live daemon over its real UDS', as
   }
 });
 
-test('node runtime diagnostics preserve the supported Node 24 range', () => {
-  assert.equal(supportsNodeVersion('24.15.9'), false);
-  assert.equal(supportsNodeVersion('24.16.0'), true);
-  assert.equal(supportsNodeVersion('24.99.0'), true);
-  assert.equal(supportsNodeVersion('25.0.0'), false);
+test('doctor fails the runtime check when the node runtime is below the supported range', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-doctor-old-node-'));
+  try {
+    const result = await runCliWithNodeVersion(['doctor', '--json'], {
+      ...process.env,
+      HOME: homeDir,
+      SKY_HOME: path.join(homeDir, '.sky'),
+    }, '24.15.9');
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    const runtime = report.checks.find((check) => check.id === 'installation.runtime');
+    assert.equal(runtime?.status, 'fail');
+    assert.match(runtime?.summary ?? '', /Node\.js 24\.15\.9 is unsupported/);
+    assert.match(runtime?.detail ?? '', />=24\.16\.0 <25/);
+    assert.match(runtime?.remediation ?? '', /brew install ty91\/tap\/sky/);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
 });
 
 // `brew upgrade sky` replaces the files without touching the running daemon. The

@@ -622,7 +622,7 @@ function inspectWorkspace(workspace: string | undefined, home: SkyHome): Diagnos
   return checks;
 }
 
-export function supportsNodeVersion(version: string): boolean {
+function supportedNodeVersion(version: string): boolean {
   const [major, minor, patch] = version.split('.').map(Number);
   return major === 24 && (minor > 16 || (minor === 16 && patch >= 0));
 }
@@ -639,7 +639,7 @@ function installationRuntimeCheck(): DiagnosticCheck {
   }
 
   const nodeVersion = process.versions.node;
-  const supported = supportsNodeVersion(nodeVersion);
+  const supported = supportedNodeVersion(nodeVersion);
   return check(
     'installation.runtime',
     supported ? 'pass' : 'fail',
