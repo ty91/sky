@@ -10,7 +10,12 @@ import http from 'node:http';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
 import { SlackStartupError } from '../dist/bot.js';
-import { PRODUCT_VERSION, runDiagnostics, withDaemonVersionDrift } from '../dist/diagnostics.js';
+import {
+  PRODUCT_VERSION,
+  runDiagnostics,
+  supportsNodeVersion,
+  withDaemonVersionDrift,
+} from '../dist/diagnostics.js';
 import { openConversationStore } from '../dist/conversation/store.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 
@@ -121,6 +126,13 @@ test('doctor gets the assembled report from a live daemon over its real UDS', as
   }
 });
 
+test('node runtime diagnostics preserve the supported Node 24 range', () => {
+  assert.equal(supportsNodeVersion('24.15.9'), false);
+  assert.equal(supportsNodeVersion('24.16.0'), true);
+  assert.equal(supportsNodeVersion('24.99.0'), true);
+  assert.equal(supportsNodeVersion('25.0.0'), false);
+});
+
 // `brew upgrade sky` replaces the files without touching the running daemon. The
 // daemon assembles the report, so it can only ever compare its own version
 // against itself; the CLI has to contribute this one.
@@ -130,7 +142,7 @@ test('doctor reports the stale daemon an upgrade leaves behind', () => {
     mode: 'daemon',
     overall: 'pass',
     checks: [
-      { id: 'installation.node', status: 'pass', summary: '', detail: null, remediation: null },
+      { id: 'installation.runtime', status: 'pass', summary: '', detail: null, remediation: null },
       { id: 'runtime.control', status: 'pass', summary: '', detail: null, remediation: null },
     ],
   };
@@ -144,7 +156,7 @@ test('doctor reports the stale daemon an upgrade leaves behind', () => {
   assert.equal(drifted.overall, 'fail');
   assert.deepEqual(
     drifted.checks.map(({ id }) => id),
-    ['installation.node', 'installation.drift', 'runtime.control'],
+    ['installation.runtime', 'installation.drift', 'runtime.control'],
   );
   assert.equal(report.checks.length, 2, 'the report the daemon sent must not be mutated');
 
@@ -203,6 +215,12 @@ test('local fallback validates a healthy private filesystem, settings, and works
     const report = JSON.parse(result.stdout);
     assert.equal(report.mode, 'local-fallback');
     assert.equal(report.overall, 'warn');
+    const runtime = report.checks.find((check) => check.id === 'installation.runtime');
+    assert.equal(runtime?.status, 'pass');
+    assert.match(runtime?.summary ?? '', /Node\.js 24\./);
+    assert.equal(report.checks.find((check) => check.id === 'installation.executable')?.status, 'pass');
+    assert.equal(report.checks.some((check) => check.id === 'installation.node'), false);
+    assert.equal(report.checks.some((check) => check.id === 'installation.wrapper'), false);
     for (const id of [
       'filesystem.root',
       'filesystem.run',

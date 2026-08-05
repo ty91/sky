@@ -20,6 +20,7 @@ import type { DaemonStatus } from './skyd/types.js';
 import { inspectPiBackend } from './connections.js';
 import { slackManifestRemediation } from './slack/manifest.js';
 import { PRODUCT_VERSION } from './product-version.js';
+import { RUNTIME_KIND } from './runtime-identity.js';
 
 export { PRODUCT_VERSION };
 
@@ -621,9 +622,35 @@ function inspectWorkspace(workspace: string | undefined, home: SkyHome): Diagnos
   return checks;
 }
 
-function supportedNodeVersion(): boolean {
-  const [major, minor, patch] = process.versions.node.split('.').map(Number);
+export function supportsNodeVersion(version: string): boolean {
+  const [major, minor, patch] = version.split('.').map(Number);
   return major === 24 && (minor > 16 || (minor === 16 && patch >= 0));
+}
+
+function installationRuntimeCheck(): DiagnosticCheck {
+  if (RUNTIME_KIND === 'standalone') {
+    const bunVersion = (process.versions as NodeJS.ProcessVersions & { bun?: string }).bun ?? 'unknown';
+    return check(
+      'installation.runtime',
+      'pass',
+      'The standalone Sky runtime is supported.',
+      `Runtime: standalone; Bun ${bunVersion}; Sky build ${PRODUCT_VERSION}.`,
+    );
+  }
+
+  const nodeVersion = process.versions.node;
+  const supported = supportsNodeVersion(nodeVersion);
+  return check(
+    'installation.runtime',
+    supported ? 'pass' : 'fail',
+    supported
+      ? `Node.js ${nodeVersion} is supported.`
+      : `Node.js ${nodeVersion} is unsupported.`,
+    'The node runtime requires Node.js >=24.16.0 <25.',
+    supported
+      ? null
+      : 'Install Sky with `brew install ty91/tap/sky`, which pins a supported Node.js.',
+  );
 }
 
 function executableOnPath(name: string): boolean {
@@ -644,27 +671,16 @@ function installationChecks(
   daemon: DaemonStatus | undefined,
   service: ServiceStatus | undefined,
 ): DiagnosticCheck[] {
-  const nodeSupported = supportedNodeVersion();
-  const wrapper = executableOnPath('skyd');
+  const executable = executableOnPath('skyd');
   const checks = [
+    installationRuntimeCheck(),
+    check('installation.product', 'pass', `Sky version is ${PRODUCT_VERSION}.`),
     check(
-      'installation.node',
-      nodeSupported ? 'pass' : 'fail',
-      nodeSupported
-        ? `Node.js ${process.versions.node} is supported.`
-        : `Node.js ${process.versions.node} is unsupported.`,
-      'Sky requires Node.js >=24.16.0 <25.',
-      nodeSupported
-        ? null
-        : 'Install Sky with `brew install ty91/tap/sky`, which pins a supported Node.js.',
-    ),
-    check('installation.product', 'pass', `Sky package version is ${PRODUCT_VERSION}.`),
-    check(
-      'installation.wrapper',
-      wrapper ? 'pass' : 'warn',
-      wrapper ? 'The skyd package wrapper is executable.' : 'The skyd package wrapper is not on PATH.',
+      'installation.executable',
+      executable ? 'pass' : 'warn',
+      executable ? 'The skyd executable is available on PATH.' : 'The skyd executable is not on PATH.',
       null,
-      wrapper ? null : 'Reinstall Sky with `brew install ty91/tap/sky`.',
+      executable ? null : 'Reinstall Sky with `brew install ty91/tap/sky`.',
     ),
   ];
 

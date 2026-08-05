@@ -295,7 +295,7 @@ curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/conf
 
 ### Doctor
 
-`sky doctor`는 하나의 구조화된 check 목록에서 사람용 출력과 `--json` 출력을 만듭니다. 각 check는 안정적인 `id`, `pass`/`warn`/`fail` status, summary, 선택적 detail과 remediation을 가집니다. 설치된 Node/Sky version과 package wrapper, LaunchAgent, control socket, daemon runtime/Slack state, 최근 stable error code, 설정·credential metadata, managed path의 owner/mode/type, SQLite sidecar, workspace와 네 prompt file을 검사합니다.
+`sky doctor`는 하나의 구조화된 check 목록에서 사람용 출력과 `--json` 출력을 만듭니다. 각 check는 안정적인 `id`, `pass`/`warn`/`fail` status, summary, 선택적 detail과 remediation을 가집니다. 설치된 Sky runtime/version과 PATH의 `skyd` executable, LaunchAgent, control socket, daemon runtime/Slack state, 최근 stable error code, 설정·credential metadata, managed path의 owner/mode/type, SQLite sidecar, workspace와 네 prompt file을 검사합니다.
 
 `installation.drift`는 CLI만 판단할 수 있어 CLI 쪽에서 붙입니다. daemon이 진단 목록을 조립하므로 daemon 안에서 version을 비교하면 자기 자신과 비교하게 되고, 업그레이드가 남긴 stale daemon을 절대 감지하지 못합니다. 이 check가 FAIL이면 `sky restart`로 해소합니다.
 

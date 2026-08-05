@@ -9,6 +9,7 @@ import {
   rm,
   stat,
   symlink,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
@@ -104,6 +105,24 @@ async function parsePlist(plistFile) {
   );
   return JSON.parse(stdout);
 }
+
+test('service install reports a runtime-neutral error when skyd is not on PATH', async () => {
+  const context = await setup();
+  try {
+    await unlink(path.join(context.binDir, 'skyd'));
+    const result = await runCli(['service', 'install', '--json'], {
+      ...context.env,
+      PATH: context.binDir,
+    });
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.error.code, 'skyd_executable_not_found');
+    assert.match(output.error.message, /skyd executable/);
+    assert.doesNotMatch(JSON.stringify(output), /package|wrapper/i);
+  } finally {
+    await cleanup(context);
+  }
+});
 
 function previousPlist(oldWrapper, nodeDir) {
   return `<?xml version="1.0" encoding="UTF-8"?>
