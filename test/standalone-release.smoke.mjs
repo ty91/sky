@@ -167,7 +167,7 @@ test('standalone artifact works outside the checkout without Node.js or Bun', { 
     const env = {
       HOME: homeDirectory,
       SKY_HOME: skyHome,
-      PATH: runtimePath,
+      PATH: [binDirectory, runtimePath].join(path.delimiter),
       TMPDIR: temporaryDirectory,
       XDG_CACHE_HOME: path.join(isolatedRoot, 'cache'),
       XDG_CONFIG_HOME: path.join(isolatedRoot, 'config'),
@@ -206,6 +206,17 @@ test('standalone artifact works outside the checkout without Node.js or Bun', { 
     assert.equal(daemon.runtime.kind, 'standalone');
     assert.equal(daemon.runtime.state, 'needs_configuration');
     assert.ok(daemon.admin.port > 0);
+
+    const doctor = run(isolatedSky, ['doctor', '--json'], options);
+    assert.equal(doctor.status, 1, doctor.stderr || doctor.stdout);
+    const report = JSON.parse(doctor.stdout);
+    const runtime = report.checks.find(({ id }) => id === 'installation.runtime');
+    assert.equal(runtime?.status, 'pass');
+    assert.match(runtime?.detail ?? '', /Bun \d+\.\d+\.\d+/);
+    assert.match(runtime?.detail ?? '', new RegExp(`build ${manifest.version.replaceAll('.', '\\.')}`));
+    assert.equal(report.checks.find(({ id }) => id === 'installation.executable')?.status, 'pass');
+    assert.equal(report.checks.some(({ id }) => id === 'installation.node'), false);
+    assert.equal(report.checks.some(({ id }) => id === 'installation.wrapper'), false);
 
     const origin = `http://127.0.0.1:${daemon.admin.port}`;
     const shell = await fetch(origin);

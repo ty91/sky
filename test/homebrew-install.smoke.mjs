@@ -128,8 +128,8 @@ test(
       // Whatever path ran, the installed CLI and the running daemon must agree.
       const settled = runSky(sky, ['doctor', '--json'], skyEnv);
       assert.equal(checkStatus(settled.json, 'installation.drift'), 'pass');
-      assert.equal(checkStatus(settled.json, 'installation.wrapper'), 'pass');
-      assert.equal(checkStatus(settled.json, 'installation.node'), 'pass');
+      assert.equal(checkStatus(settled.json, 'installation.executable'), 'pass');
+      assert.equal(checkStatus(settled.json, 'installation.runtime'), 'pass');
 
       const uninstalled = runSky(sky, ['service', 'uninstall', '--json'], skyEnv);
       assert.equal(uninstalled.code, 0, uninstalled.stderr || uninstalled.stdout);

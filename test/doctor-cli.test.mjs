@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import http from 'node:http';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
@@ -25,6 +25,28 @@ async function runCli(args, env) {
       env,
       maxBuffer: 1024 * 1024,
     });
+    return { code: 0, stdout, stderr };
+  } catch (error) {
+    return {
+      code: typeof error.code === 'number' ? error.code : 1,
+      stdout: error.stdout ?? '',
+      stderr: error.stderr ?? '',
+    };
+  }
+}
+
+async function runCliWithNodeVersion(args, env, version) {
+  const script = [
+    `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version)} });`,
+    "process.argv.splice(1, 0, 'sky');",
+    `await import(${JSON.stringify(pathToFileURL(skyEntrypoint).href)});`,
+  ].join('\n');
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ['--input-type=module', '--eval', script, ...args],
+      { encoding: 'utf8', env, maxBuffer: 1024 * 1024 },
+    );
     return { code: 0, stdout, stderr };
   } catch (error) {
     return {
@@ -121,6 +143,26 @@ test('doctor gets the assembled report from a live daemon over its real UDS', as
   }
 });
 
+test('doctor fails the runtime check when the node runtime is below the supported range', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-doctor-old-node-'));
+  try {
+    const result = await runCliWithNodeVersion(['doctor', '--json'], {
+      ...process.env,
+      HOME: homeDir,
+      SKY_HOME: path.join(homeDir, '.sky'),
+    }, '24.15.9');
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    const runtime = report.checks.find((check) => check.id === 'installation.runtime');
+    assert.equal(runtime?.status, 'fail');
+    assert.match(runtime?.summary ?? '', /Node\.js 24\.15\.9 is unsupported/);
+    assert.match(runtime?.detail ?? '', />=24\.16\.0 <25/);
+    assert.match(runtime?.remediation ?? '', /brew install ty91\/tap\/sky/);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
 // `brew upgrade sky` replaces the files without touching the running daemon. The
 // daemon assembles the report, so it can only ever compare its own version
 // against itself; the CLI has to contribute this one.
@@ -130,7 +172,7 @@ test('doctor reports the stale daemon an upgrade leaves behind', () => {
     mode: 'daemon',
     overall: 'pass',
     checks: [
-      { id: 'installation.node', status: 'pass', summary: '', detail: null, remediation: null },
+      { id: 'installation.runtime', status: 'pass', summary: '', detail: null, remediation: null },
       { id: 'runtime.control', status: 'pass', summary: '', detail: null, remediation: null },
     ],
   };
@@ -144,7 +186,7 @@ test('doctor reports the stale daemon an upgrade leaves behind', () => {
   assert.equal(drifted.overall, 'fail');
   assert.deepEqual(
     drifted.checks.map(({ id }) => id),
-    ['installation.node', 'installation.drift', 'runtime.control'],
+    ['installation.runtime', 'installation.drift', 'runtime.control'],
   );
   assert.equal(report.checks.length, 2, 'the report the daemon sent must not be mutated');
 
@@ -203,6 +245,12 @@ test('local fallback validates a healthy private filesystem, settings, and works
     const report = JSON.parse(result.stdout);
     assert.equal(report.mode, 'local-fallback');
     assert.equal(report.overall, 'warn');
+    const runtime = report.checks.find((check) => check.id === 'installation.runtime');
+    assert.equal(runtime?.status, 'pass');
+    assert.match(runtime?.summary ?? '', /Node\.js 24\./);
+    assert.equal(report.checks.find((check) => check.id === 'installation.executable')?.status, 'pass');
+    assert.equal(report.checks.some((check) => check.id === 'installation.node'), false);
+    assert.equal(report.checks.some((check) => check.id === 'installation.wrapper'), false);
     for (const id of [
       'filesystem.root',
       'filesystem.run',
