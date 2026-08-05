@@ -27,6 +27,7 @@
     "test:standalone": "node --test test/standalone-release.smoke.mjs",
     "test:package": "node --test test/package-release.smoke.mjs",
     "test:launchd": "node --test test/launchd-package.smoke.mjs",
+    "test:launchd:standalone": "node --test test/launchd-standalone.smoke.mjs",
     "test:homebrew": "node --test test/homebrew-install.smoke.mjs",
     "release:check-tag": "node scripts/verify-release-tag.mjs",
     "manifest:sync": "pnpm build && node scripts/write-slack-manifest.mjs",
