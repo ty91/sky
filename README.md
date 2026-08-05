@@ -249,7 +249,7 @@ sky operation watch <id>
 sky service uninstall
 ```
 
-`sky service install`은 `~/Library/LaunchAgents/com.ty91.skyd.plist`를 생성하거나 현재 package wrapper에 맞게 reconcile하고 즉시 시작합니다. plist가 이미 같다면 실행 중인 daemon을 재시작하지 않습니다. `sky stop`은 등록을 보존한 채 job만 내리고, `sky service uninstall`은 plist만 제거하므로 settings, DB, transcript와 logs는 유지됩니다.
+`sky service install`은 `~/Library/LaunchAgents/com.ty91.skyd.plist`를 생성하거나 PATH에서 해석된 `skyd` 실행 파일과 환경 계약에 맞게 reconcile하고 즉시 시작합니다. plist가 이미 같다면 실행 중인 daemon을 재시작하지 않습니다. `sky stop`은 등록을 보존한 채 job만 내리고, `sky service uninstall`은 plist만 제거하므로 settings, DB, transcript와 logs는 유지됩니다.
 
 포그라운드 실행이 필요하면 `skyd`를 명시적으로 사용합니다:
 
@@ -381,11 +381,9 @@ formula는 `dist`가 이미 들어 있는 `pnpm pack` tarball을 받으므로 �
   - daemon이 보고하는 product version, model과 agent backend
 - `sky doctor --json`은 `schemaVersion`, `mode`(`daemon`/`local-fallback`), `overall`과 안정적인 check 배열을 반환합니다.
 - `sky start`, `sky stop`, `sky status`, `sky service install`, `sky service uninstall`은 안정적인 JSON 결과를 위한 `--json`을 지원합니다.
-- LaunchAgent plist에는 `HOME`, Node wrapper 실행에 필요한 최소 `PATH`, override 사용 시 `SKY_HOME`, 명시적으로 활성화한 비밀 아닌 진단 플래그만 들어가며 Slack/Claude/provider credential은 복사하지 않습니다.
+- LaunchAgent plist에는 `HOME`, PATH에서 해석된 `skyd` 디렉터리와 표준 시스템 경로로 구성한 `PATH`, override 사용 시 `SKY_HOME`, 명시적으로 활성화한 비밀 아닌 진단 플래그만 들어가며 Slack/Claude/provider credential은 복사하지 않습니다.
 - Claude Agent SDK query는 DM turn과 agent connection check 모두 `claude-query` scope에 query 생성, input enqueue, 첫 SDK message, init, result와 종료 milestone을 monotonic elapsed와 함께 기록합니다. 첫 SDK message가 5초/15초 안에 오지 않으면 allowlist된 shell/locale/TTY metadata만 포함한 warning을 남기며 prompt, Slack 본문, token과 전체 environment는 구조화 로그에 기록하지 않습니다.
 - SDK raw stderr/debug는 기본 비활성입니다. LaunchAgent 조사 때만 `SKY_CLAUDE_DIAGNOSTICS=1 sky service install`로 활성화할 수 있으며 `~/.sky/logs/claude-agent-sdk.debug.log`를 mode `0600`, daemon 실행당 최대 10 MiB로 기록합니다. raw debug에는 민감한 실행 정보가 포함될 수 있으므로 공유하지 말고 조사 후 플래그 없이 `sky service install`을 다시 실행해 비활성화합니다.
-- 이전 PID 기반 daemon이 발견되면 `sky service install`은 command가 실제 `@ty91/sky`의 `dist/bot.js`인지 확인한 뒤에만 `SIGTERM`을 보냅니다. 20초 안에 끝나지 않아도 자동으로 `SIGKILL`하지 않습니다.
-- 기존 Sky home의 `sky.log`는 migration 시 `logs/legacy-sky.log`로 한 번만 이동됩니다.
 - `skyd` structured app log는 Sky home의 `logs/skyd.jsonl`에 기록되며 10 MiB 단위, archive 5개로 rotation됩니다.
 - LaunchAgent가 daemon entrypoint를 시작하지 못한 오류는 Sky home의 `logs/launchd.stderr.log`에 남으며 daemon down 상태의 `sky logs` fallback에 포함됩니다.
 - structured app log에는 Slack message, agent prompt, token을 기록하지 않고 operation 종류/상태와 안전한 daemon 진단만 기록합니다.

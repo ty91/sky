@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -67,6 +67,7 @@ test(
       run('pnpm', ['add', '--global', tarball], { env });
       const globalBin = run('pnpm', ['bin', '--global'], { env }).trim().split('\n').at(-1);
       assert.ok(globalBin);
+      await symlink(process.execPath, path.join(globalBin, 'node'));
       const sky = path.join(globalBin, 'sky');
 
       const installed = runSky(sky, ['service', 'install', '--json'], env);

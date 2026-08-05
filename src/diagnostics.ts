@@ -875,38 +875,6 @@ function revisionCheck(
   );
 }
 
-function migrationCheck(home: SkyHome): DiagnosticCheck {
-  const exists = (file: string): boolean => {
-    try {
-      lstatSync(file);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (exists(home.legacyLogFile) && exists(home.migratedLegacyLogFile)) {
-    return check(
-      'configuration.migration',
-      'fail',
-      'Legacy log migration has a destination conflict.',
-      'Both the legacy log and migrated destination exist.',
-      'Review both files before moving or deleting either one, then run `sky service install`.',
-    );
-  }
-  const artifacts = [home.legacyPidFile, home.legacyLogFile].filter((file) => {
-    return exists(file);
-  });
-  return check(
-    'configuration.migration',
-    artifacts.length === 0 ? 'pass' : 'warn',
-    artifacts.length === 0
-      ? 'No pending legacy runtime artifacts were found.'
-      : 'Legacy runtime artifacts still need review or migration.',
-    null,
-    artifacts.length === 0 ? null : 'Run `sky service install` to perform the supported legacy migration.',
-  );
-}
-
 export async function runDiagnostics(
   home: SkyHome,
   options: RunDiagnosticsOptions = {},
@@ -1001,7 +969,6 @@ export async function runDiagnostics(
     schemaCheck(configuration),
     ...credentials,
     revisionCheck(configuration.settings, options.activeSettings, daemon),
-    migrationCheck(home),
     ...inspectWorkspace(configuration.public?.settings.workspace, home),
   ];
 

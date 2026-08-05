@@ -75,9 +75,6 @@ test('SkyHome resolves every managed path from the default and overridden root',
     transcriptsDir: path.join(homeDir, '.sky', 'transcripts'),
     memoryCursorFile: path.join(homeDir, '.sky', 'memory-cursors.json'),
     workspaceDir: path.join(homeDir, '.sky', 'workspace'),
-    legacyPidFile: path.join(homeDir, '.sky', 'sky.pid'),
-    legacyLogFile: path.join(homeDir, '.sky', 'sky.log'),
-    migratedLegacyLogFile: path.join(homeDir, '.sky', 'logs', 'legacy-sky.log'),
     source: 'default',
   });
   assert.equal(Object.isFrozen(defaultHome), true);

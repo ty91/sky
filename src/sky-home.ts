@@ -26,9 +26,6 @@ export type SkyHome = Readonly<{
   transcriptsDir: string;
   memoryCursorFile: string;
   workspaceDir: string;
-  legacyPidFile: string;
-  legacyLogFile: string;
-  migratedLegacyLogFile: string;
   source: 'default' | 'override';
 }>;
 
@@ -227,9 +224,6 @@ export function prepareSkyHome(home: SkyHome): void {
     home.databaseWalFile,
     home.databaseShmFile,
     home.memoryCursorFile,
-    home.legacyPidFile,
-    home.legacyLogFile,
-    home.migratedLegacyLogFile,
   ]) {
     ensurePrivateFile(file);
   }
@@ -270,9 +264,6 @@ export function createSkyHome(options: CreateSkyHomeOptions = {}): SkyHome {
     transcriptsDir: path.join(rootDir, 'transcripts'),
     memoryCursorFile: path.join(rootDir, 'memory-cursors.json'),
     workspaceDir: path.join(rootDir, 'workspace'),
-    legacyPidFile: path.join(rootDir, 'sky.pid'),
-    legacyLogFile: path.join(rootDir, 'sky.log'),
-    migratedLegacyLogFile: path.join(rootDir, 'logs', 'legacy-sky.log'),
     source,
   });
 }
