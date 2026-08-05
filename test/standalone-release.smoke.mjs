@@ -203,6 +203,7 @@ test('standalone artifact works outside the checkout without Node.js or Bun', { 
     );
     assert.equal(daemon.productVersion, manifest.version);
     assert.equal(daemon.supervision.mode, 'foreground');
+    assert.equal(daemon.runtime.kind, 'standalone');
     assert.equal(daemon.runtime.state, 'needs_configuration');
     assert.ok(daemon.admin.port > 0);
 
