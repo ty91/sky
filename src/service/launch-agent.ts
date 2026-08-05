@@ -206,7 +206,7 @@ function resolveExecutable(name: string, searchPath = process.env.PATH): string 
   if (found) return found;
   throw new ServiceLifecycleError(
     'skyd_wrapper_not_found',
-    'Could not find the skyd package wrapper on PATH. Reinstall Sky with `brew install ty91/tap/sky`.',
+    'Could not find the skyd executable on PATH. Reinstall Sky with `brew install ty91/tap/sky`.',
   );
 }
 
@@ -219,18 +219,9 @@ function xml(value: string): string {
     .replaceAll("'", '&apos;');
 }
 
-// process.execPath is realpathed, so under Homebrew it is a version-pinned Cellar
-// directory that disappears on `brew upgrade node@24`. The PATH entry is the
-// stable symlink (/opt/homebrew/opt/node@24/bin), so record that instead.
-function nodeDirectory(): string {
-  const onPath = findExecutable('node');
-  return path.dirname(onPath ?? process.execPath);
-}
-
-function launchAgentPathValue(skydWrapper: string): string {
+function launchAgentPathValue(skydExecutable: string): string {
   const entries = [
-    nodeDirectory(),
-    path.dirname(skydWrapper),
+    path.dirname(skydExecutable),
     '/usr/local/bin',
     '/usr/bin',
     '/bin',
@@ -240,8 +231,8 @@ function launchAgentPathValue(skydWrapper: string): string {
   return [...new Set(entries)].join(':');
 }
 
-function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
-  const environmentPath = launchAgentPathValue(skydWrapper);
+function desiredPlist(paths: LaunchAgentPaths, skydExecutable: string): string {
+  const environmentPath = launchAgentPathValue(skydExecutable);
   const skyHomeEnvironment =
     paths.skyHome.source === 'override'
       ? `    <key>SKY_HOME</key>
@@ -262,7 +253,7 @@ function desiredPlist(paths: LaunchAgentPaths, skydWrapper: string): string {
   <string>${LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${xml(skydWrapper)}</string>
+    <string>${xml(skydExecutable)}</string>
     <string>--foreground</string>
     <string>--supervised</string>
   </array>
@@ -635,8 +626,8 @@ export async function installLaunchAgent(): Promise<InstallResult> {
   assertMacOS();
   const paths = launchAgentPaths();
   prepareSkyHome(paths.skyHome);
-  const skydWrapper = resolveExecutable('skyd');
-  const desired = desiredPlist(paths, skydWrapper);
+  const skydExecutable = resolveExecutable('skyd');
+  const desired = desiredPlist(paths, skydExecutable);
   const previous = readExistingPlist(paths);
   const changed = previous !== desired;
   const legacyMigration = await migrateLegacyDaemon(paths);

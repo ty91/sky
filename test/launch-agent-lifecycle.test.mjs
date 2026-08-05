@@ -105,7 +105,7 @@ async function parsePlist(plistFile) {
   return JSON.parse(stdout);
 }
 
-function previousPlist(oldWrapper) {
+function previousPlist(oldWrapper, nodeDir) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -113,6 +113,7 @@ function previousPlist(oldWrapper) {
   <key>Label</key><string>com.ty91.skyd</string>
   <key>ProgramArguments</key><array><string>${oldWrapper}</string><string>--foreground</string></array>
   <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${nodeDir}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
 </dict>
 </plist>
 `;
@@ -284,10 +285,7 @@ test('unhealthy startup states are reported as completed but non-zero', { timeou
   }
 });
 
-// Homebrew's node@24 is keg-only and process.execPath is realpathed, so recording
-// the running interpreter's directory would pin a Cellar path that disappears on
-// `brew upgrade node@24`. The plist has to keep the stable PATH entry instead.
-test('the plist records the PATH entry for node, not the realpathed interpreter', { timeout: 30_000 }, async () => {
+test('the plist records only the skyd directory and standard system paths', { timeout: 30_000 }, async () => {
   const context = await setup();
   const nodeDir = path.join(context.homeDir, 'stable-node-bin');
   try {
@@ -302,7 +300,6 @@ test('the plist records the PATH entry for node, not the realpathed interpreter'
 
     const plist = await parsePlist(context.plistFile);
     assert.deepEqual(plist.EnvironmentVariables.PATH.split(path.delimiter), [
-      nodeDir,
       context.binDir,
       '/usr/local/bin',
       '/usr/bin',
@@ -310,21 +307,48 @@ test('the plist records the PATH entry for node, not the realpathed interpreter'
       '/usr/sbin',
       '/sbin',
     ]);
-    assert.ok(
-      !plist.EnvironmentVariables.PATH.split(path.delimiter).includes(
-        path.dirname(process.execPath),
-      ),
-      'the realpathed interpreter directory must not be recorded',
-    );
+    assert.equal(plist.EnvironmentVariables.PATH.split(path.delimiter).includes(nodeDir), false);
   } finally {
     await cleanup(context);
   }
 });
 
-test('a failed changed plist restores and reboots the previous LaunchAgent', { timeout: 30_000 }, async () => {
+test('service install reconciles a previous LaunchAgent that recorded a node directory', { timeout: 30_000 }, async () => {
+  const context = await setup();
+  const nodeDir = path.join(context.homeDir, 'node@24', 'bin');
+  const oldPlist = previousPlist('/opt/sky/old-skyd', nodeDir);
+  try {
+    await mkdir(path.dirname(context.plistFile), { recursive: true });
+    await writeFile(context.plistFile, oldPlist);
+    await execFileAsync(path.join(context.binDir, 'launchctl'), [
+      'bootstrap',
+      'gui/501',
+      context.plistFile,
+    ], { env: context.env });
+
+    const result = await runCli(['service', 'install', '--json'], context.env);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).changed, true);
+    const plist = await parsePlist(context.plistFile);
+    assert.deepEqual(plist.EnvironmentVariables.PATH.split(path.delimiter), [
+      context.binDir,
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ]);
+    assert.equal(plist.EnvironmentVariables.PATH.split(path.delimiter).includes(nodeDir), false);
+    assert.equal((await readState(context.stateFile)).bootstrapCount, 2);
+  } finally {
+    await cleanup(context);
+  }
+});
+
+test('a failed node PATH reconcile restores and reboots the previous LaunchAgent', { timeout: 30_000 }, async () => {
   const context = await setup();
   const oldWrapper = '/opt/sky/old-skyd';
-  const oldPlist = previousPlist(oldWrapper);
+  const oldPlist = previousPlist(oldWrapper, path.join(context.homeDir, 'node@24', 'bin'));
   try {
     await mkdir(path.dirname(context.plistFile), { recursive: true });
     await writeFile(context.plistFile, oldPlist);
