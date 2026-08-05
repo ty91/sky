@@ -23,6 +23,26 @@ pnpm test:standalone
 
 메타파일 audit 자체는 합성된 duplicate와 non-target 입력을 `pnpm test`에서 별도로 거부한다.
 
+## 실제 launchd lifecycle 검증
+
+Standalone LaunchAgent 스모크는 Apple Silicon macOS의 로그인된 GUI 세션에서만 수동으로 실행한다. 기본 테스트 스위트와 CI에는 포함되지 않는다.
+
+```bash
+pnpm build:standalone
+pnpm test:launchd:standalone
+```
+
+이 스모크는 실제 사용자 gui domain의 `com.ty91.skyd` service target을 점유한다. 기존 Sky LaunchAgent가 로드되어 있거나 `~/Library/LaunchAgents/com.ty91.skyd.plist`가 남아 있으면 실행하지 않는다. 스모크도 이 상태를 선검사해 기존 daemon을 중지하거나 plist를 변경하지 않고 실패한다. 전용 test user 또는 Sky LaunchAgent를 완전히 uninstall한 개발 머신에서만 실행한다.
+
+통과 조건은 다음과 같다.
+
+- `sky`와 `skyd`만 있는 임시 bin과 `/usr/bin:/bin`으로 구성한 PATH에 Node.js와 Bun이 없고, standalone `service install`이 daemon을 시작한다.
+- `status`, `stop`, `start`, 강제 `restart`, `service uninstall` 전체 lifecycle이 실제 launchd에서 동작한다.
+- plist `ProgramArguments`가 standalone build의 versioned 산출물 경로가 아니라 임시 설치의 안정적인 `skyd` 경로를 기록한다.
+- 호스트 `node@24` 경로가 들어 있는 기존 plist를 `service install`이 새 PATH와 안정적인 `skyd` 계약으로 reconcile한다.
+- 새 plist의 bootstrap 실패가 이전 plist를 byte-for-byte 복원하고 이전 daemon을 다시 시작한다.
+- `sky doctor`의 standalone runtime과 executable 검사가 pass하며 `installation.node` 검사가 존재하지 않는다.
+
 ## 실제 backend acceptance 준비
 
 실제 acceptance에는 별도의 Slack test app credential, 사용할 model credential, 테스트용 Slack 대화 공간이 필요하다. 같은 Slack app으로 실행 중인 다른 Sky daemon이 있으면 Socket Mode event가 어느 daemon으로 전달될지 보장되지 않으므로 기존 daemon을 중지하거나 전용 test app을 사용한다.
