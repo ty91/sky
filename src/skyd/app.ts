@@ -55,6 +55,7 @@ import {
 import { inspectLaunchAgent, type LaunchdStatus } from '../service/launch-agent.js';
 import { createSkydClaudeDiagnostics } from './claude-diagnostics.js';
 import { PRODUCT_VERSION } from '../product-version.js';
+import { RUNTIME_KIND } from '../runtime-identity.js';
 
 export type RuntimeStarter = (
   settings: Settings,
@@ -210,6 +211,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       uptimeMs: Math.max(0, Date.now() - startedAt.getTime()),
     },
     runtime: {
+      kind: RUNTIME_KIND,
       state: runtimeController.isAccepting() ? mutable.runtimeState : 'draining',
     },
     productVersion: options.productVersion ?? PRODUCT_VERSION,

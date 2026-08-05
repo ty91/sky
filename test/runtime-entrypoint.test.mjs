@@ -30,6 +30,18 @@ function runSharedEntrypoint(name, args) {
   );
 }
 
+function runBunRuntimeIdentity() {
+  const moduleUrl = pathToFileURL(path.join(repositoryRoot, 'dist', 'runtime-identity.js')).href;
+  return spawnSync(
+    'bun',
+    [
+      '--eval',
+      `import { RUNTIME_KIND } from ${JSON.stringify(moduleUrl)}; process.stdout.write(RUNTIME_KIND);`,
+    ],
+    { encoding: 'utf8' },
+  );
+}
+
 test('the shared runtime entrypoint selects an exact role from its invocation basename', () => {
   assert.equal(selectRuntimeRole('/opt/sky/bin/sky'), 'sky');
   assert.equal(selectRuntimeRole('/opt/sky/bin/skyd'), 'skyd');
@@ -47,6 +59,12 @@ test('the shared runtime entrypoint runs both selected roles', () => {
   const skyd = runSharedEntrypoint('skyd', ['--help']);
   assert.equal(skyd.status, 0, skyd.stderr);
   assert.match(skyd.stdout, /^Usage: skyd \[options\]/m);
+});
+
+test('Bun CLI execution of the regular build keeps the node runtime identity', () => {
+  const identity = runBunRuntimeIdentity();
+  assert.equal(identity.status, 0, identity.stderr);
+  assert.equal(identity.stdout, 'node');
 });
 
 test('the Node.js sky wrapper preserves its version and help contract', () => {

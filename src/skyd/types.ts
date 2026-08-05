@@ -1,4 +1,5 @@
 import type { DiagnosticsReport } from '../diagnostics.js';
+import type { RuntimeKind } from '../runtime-identity.js';
 import type { LaunchdStatus } from '../service/launch-agent.js';
 
 export type RuntimeState =
@@ -34,6 +35,7 @@ export type DaemonStatus = {
     uptimeMs: number;
   };
   runtime: {
+    kind: RuntimeKind;
     state: RuntimeState;
   };
   productVersion: string;

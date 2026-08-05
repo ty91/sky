@@ -27,7 +27,7 @@ export function overviewFixture(
         startedAt: '2026-08-03T00:00:00.000Z',
         uptimeMs: 3_723_000,
       },
-      runtime: { state: 'ready' },
+      runtime: { kind: 'node', state: 'ready' },
       productVersion: '0.1.0',
       slack: { state: 'connected', attempts: 0, nextRetryAt: null },
       agent: { backend: 'pi', model: 'anthropic/claude-sonnet-4-5' },

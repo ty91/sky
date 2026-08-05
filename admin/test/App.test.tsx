@@ -357,7 +357,7 @@ test('surfaces degraded runtime and diagnostic details', async () => {
         overviewFixture({
           daemon: {
             ...overviewFixture().daemon,
-            runtime: { state: 'degraded' },
+            runtime: { ...overviewFixture().daemon.runtime, state: 'degraded' },
             slack: {
               state: 'retrying',
               attempts: 2,

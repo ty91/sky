@@ -403,6 +403,7 @@ async function main() {
     },
     define: {
       SKY_BUILD_VERSION: JSON.stringify(manifest.version),
+      SKY_RUNTIME: JSON.stringify('standalone'),
     },
     metafile: true,
     plugins: [
