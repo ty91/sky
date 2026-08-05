@@ -249,7 +249,7 @@ sky operation watch <id>
 sky service uninstall
 ```
 
-`sky service install`은 `~/Library/LaunchAgents/com.ty91.skyd.plist`를 생성하거나 현재 package wrapper에 맞게 reconcile하고 즉시 시작합니다. plist가 이미 같다면 실행 중인 daemon을 재시작하지 않습니다. `sky stop`은 등록을 보존한 채 job만 내리고, `sky service uninstall`은 plist만 제거하므로 settings, DB, transcript와 logs는 유지됩니다.
+`sky service install`은 `~/Library/LaunchAgents/com.ty91.skyd.plist`를 생성하거나 PATH에서 해석된 `skyd` 실행 파일과 환경 계약에 맞게 reconcile하고 즉시 시작합니다. plist가 이미 같다면 실행 중인 daemon을 재시작하지 않습니다. `sky stop`은 등록을 보존한 채 job만 내리고, `sky service uninstall`은 plist만 제거하므로 settings, DB, transcript와 logs는 유지됩니다.
 
 포그라운드 실행이 필요하면 `skyd`를 명시적으로 사용합니다:
 
