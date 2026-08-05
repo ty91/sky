@@ -379,58 +379,6 @@ test('a failed node PATH reconcile restores and reboots the previous LaunchAgent
   }
 });
 
-test('legacy migration terminates only a verified @ty91/sky bot.js and moves its log once', { timeout: 30_000 }, async () => {
-  const context = await setup();
-  const legacyPackage = path.join(context.homeDir, 'legacy-package');
-  const legacyEntry = path.join(legacyPackage, 'dist', 'bot.js');
-  let legacy;
-  try {
-    await mkdir(path.dirname(legacyEntry), { recursive: true });
-    await writeFile(path.join(legacyPackage, 'package.json'), '{"name":"@ty91/sky"}\n');
-    await writeFile(legacyEntry, 'setInterval(() => {}, 1000);\n');
-    legacy = spawn(process.execPath, [legacyEntry], { stdio: 'ignore' });
-    const legacyExited = once(legacy, 'exit');
-
-    const skyDir = path.join(context.homeDir, '.sky');
-    await mkdir(skyDir, { recursive: true });
-    await writeFile(path.join(skyDir, 'sky.pid'), `${legacy.pid}\n`);
-    await writeFile(path.join(skyDir, 'sky.log'), 'legacy log\n');
-
-    const result = await runCli(['service', 'install', '--json'], context.env);
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(JSON.parse(result.stdout).legacyMigration, 'terminated');
-    await legacyExited;
-    assert.equal(await readFile(path.join(skyDir, 'logs', 'legacy-sky.log'), 'utf8'), 'legacy log\n');
-    await assert.rejects(stat(path.join(skyDir, 'sky.pid')), { code: 'ENOENT' });
-  } finally {
-    if (legacy?.pid) {
-      try { process.kill(legacy.pid, 'SIGTERM'); } catch {}
-    }
-    await cleanup(context);
-  }
-});
-
-test('a reused legacy PID is ignored and never signaled', { timeout: 30_000 }, async () => {
-  const context = await setup();
-  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
-    stdio: 'ignore',
-  });
-  try {
-    const skyDir = path.join(context.homeDir, '.sky');
-    await mkdir(skyDir, { recursive: true });
-    await writeFile(path.join(skyDir, 'sky.pid'), `${unrelated.pid}\n`);
-
-    const result = await runCli(['service', 'install', '--json'], context.env);
-    assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(JSON.parse(result.stdout).legacyMigration, 'unrelated_process_ignored');
-    assert.equal(unrelated.exitCode, null);
-    process.kill(unrelated.pid, 0);
-  } finally {
-    unrelated.kill('SIGTERM');
-    await cleanup(context);
-  }
-});
-
 test('restart distinguishes an unmanaged foreground daemon', { timeout: 30_000 }, async () => {
   const context = await setup();
   const foreground = spawn(process.execPath, [fakeSkyd], {

@@ -17,7 +17,6 @@ import { promisify } from 'node:util';
 import {
   createSkyHome,
   ensurePrivateDirectory,
-  ensurePrivateFile,
   prepareSkyHome,
   type SkyHome,
 } from '../sky-home.js';
@@ -34,7 +33,6 @@ export const LAUNCH_AGENT_LABEL = 'com.ty91.skyd';
 const STARTUP_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 35_000;
 const RESTART_TIMEOUT_MS = 155_000;
-const LEGACY_STOP_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 250;
 const CLAUDE_DIAGNOSTICS_ENV = 'SKY_CLAUDE_DIAGNOSTICS';
 
@@ -43,9 +41,6 @@ type LaunchAgentPaths = {
   homeDir: string;
   logsDir: string;
   socketFile: string;
-  legacyPidFile: string;
-  legacyLogFile: string;
-  migratedLegacyLogFile: string;
   launchdStdoutFile: string;
   launchdStderrFile: string;
   launchAgentsDir: string;
@@ -71,12 +66,6 @@ export type ServiceStatus = {
   };
 };
 
-export type LegacyMigrationState =
-  | 'not_found'
-  | 'stale_pid_removed'
-  | 'unrelated_process_ignored'
-  | 'terminated';
-
 export type RollbackResult = {
   attempted: boolean;
   succeeded: boolean | null;
@@ -85,7 +74,6 @@ export type RollbackResult = {
 
 export type InstallResult = {
   changed: boolean;
-  legacyMigration: LegacyMigrationState;
   rollback: RollbackResult;
   status: ServiceStatus;
 };
@@ -125,9 +113,6 @@ function launchAgentPaths(
     homeDir,
     logsDir: skyHome.logsDir,
     socketFile: skyHome.socketFile,
-    legacyPidFile: skyHome.legacyPidFile,
-    legacyLogFile: skyHome.legacyLogFile,
-    migratedLegacyLogFile: skyHome.migratedLegacyLogFile,
     launchdStdoutFile: skyHome.launchdStdoutFile,
     launchdStderrFile: skyHome.launchdStderrFile,
     launchAgentsDir: path.join(homeDir, 'Library', 'LaunchAgents'),
@@ -484,107 +469,6 @@ async function assertNoUnmanagedDaemon(paths: LaunchAgentPaths): Promise<void> {
   }
 }
 
-function readLegacyPid(pidFile: string): number | null {
-  try {
-    const value = Number(readFileSync(pidFile, 'utf8').trim());
-    return Number.isSafeInteger(value) && value > 0 ? value : null;
-  } catch (error) {
-    if (isMissing(error)) return null;
-    throw error;
-  }
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function processCommand(pid: number): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command='], {
-      encoding: 'utf8',
-      maxBuffer: 1024 * 1024,
-    });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function legacyBotEntry(command: string): string | null {
-  const match = command.match(/(?:^|\s)(\/\S*\/dist\/bot\.js)(?:\s|$)/);
-  if (!match) return null;
-  const entry = match[1];
-  try {
-    const manifest = JSON.parse(
-      readFileSync(path.join(path.dirname(entry), '..', 'package.json'), 'utf8'),
-    ) as { name?: unknown };
-    return manifest.name === '@ty91/sky' ? entry : null;
-  } catch {
-    return null;
-  }
-}
-
-async function isVerifiedLegacyProcess(pid: number): Promise<boolean> {
-  if (!processExists(pid)) return false;
-  const command = await processCommand(pid);
-  return command !== null && legacyBotEntry(command) !== null;
-}
-
-function moveLegacyLogOnce(paths: LaunchAgentPaths): void {
-  if (!existsSync(paths.legacyLogFile) || existsSync(paths.migratedLegacyLogFile)) return;
-  ensurePrivateDirectory(paths.logsDir);
-  renameSync(paths.legacyLogFile, paths.migratedLegacyLogFile);
-  ensurePrivateFile(paths.migratedLegacyLogFile);
-}
-
-async function migrateLegacyDaemon(paths: LaunchAgentPaths): Promise<LegacyMigrationState> {
-  if (!existsSync(paths.legacyPidFile)) {
-    moveLegacyLogOnce(paths);
-    return 'not_found';
-  }
-
-  const pid = readLegacyPid(paths.legacyPidFile);
-  if (pid === null || !processExists(pid)) {
-    rmSync(paths.legacyPidFile, { force: true });
-    moveLegacyLogOnce(paths);
-    return 'stale_pid_removed';
-  }
-
-  if (!(await isVerifiedLegacyProcess(pid))) {
-    rmSync(paths.legacyPidFile, { force: true });
-    moveLegacyLogOnce(paths);
-    return 'unrelated_process_ignored';
-  }
-
-  // Re-read the command immediately before signaling to narrow the PID reuse window.
-  if (!(await isVerifiedLegacyProcess(pid))) {
-    rmSync(paths.legacyPidFile, { force: true });
-    moveLegacyLogOnce(paths);
-    return 'unrelated_process_ignored';
-  }
-
-  process.kill(pid, 'SIGTERM');
-  const deadline = Date.now() + LEGACY_STOP_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (!processExists(pid)) {
-      rmSync(paths.legacyPidFile, { force: true });
-      moveLegacyLogOnce(paths);
-      return 'terminated';
-    }
-    await sleep(POLL_INTERVAL_MS);
-  }
-
-  throw new ServiceLifecycleError(
-    'legacy_daemon_stop_timeout',
-    'The verified legacy Sky daemon did not stop within 20 seconds. Installation was aborted without sending SIGKILL.',
-  );
-}
-
 async function restorePreviousPlist(
   paths: LaunchAgentPaths,
   previousPlist: string | null,
@@ -630,7 +514,6 @@ export async function installLaunchAgent(): Promise<InstallResult> {
   const desired = desiredPlist(paths, skydExecutable);
   const previous = readExistingPlist(paths);
   const changed = previous !== desired;
-  const legacyMigration = await migrateLegacyDaemon(paths);
 
   await assertNoUnmanagedDaemon(paths);
 
@@ -640,7 +523,6 @@ export async function installLaunchAgent(): Promise<InstallResult> {
     const status = await waitForStartup(paths);
     return {
       changed: false,
-      legacyMigration,
       rollback: { attempted: false, succeeded: null, message: null },
       status,
     };
@@ -664,7 +546,6 @@ export async function installLaunchAgent(): Promise<InstallResult> {
     const status = await waitForStartup(paths);
     return {
       changed: true,
-      legacyMigration,
       rollback: { attempted: false, succeeded: null, message: null },
       status,
     };

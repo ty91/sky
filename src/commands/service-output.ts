@@ -57,11 +57,6 @@ export function reportInstallResult(result: InstallResult, json: boolean): void 
     printJson({ ok: ready, ...result });
   } else {
     console.log(result.changed ? 'LaunchAgent installed.' : 'LaunchAgent is already up to date.');
-    if (result.legacyMigration === 'terminated') {
-      console.log('Migrated the legacy Sky daemon.');
-    } else if (result.legacyMigration === 'unrelated_process_ignored') {
-      console.error('Ignored a reused legacy PID that belongs to another process.');
-    }
     printStatus(result.status);
   }
   if (!ready) process.exitCode = 1;
