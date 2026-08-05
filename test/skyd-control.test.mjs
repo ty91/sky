@@ -129,6 +129,7 @@ test('GET /status stays available without settings and exposes stable control er
       );
 
       assert.equal(status.productVersion, PRODUCT_VERSION);
+      assert.equal(status.runtime.kind, 'node');
       assert.equal(status.process.pid, process.pid);
       assert.equal(status.process.state, 'running');
       assert.equal(status.slack.state, 'not_configured');
