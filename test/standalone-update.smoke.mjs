@@ -59,6 +59,7 @@ async function setup() {
     SKY_FAKE_LAUNCHCTL_STATE: stateFile,
     SKY_FAKE_DAEMON: fakeSkyd,
     SKY_FAKE_DAEMON_READY_FILE: readyFile,
+    SKY_FAKE_PRODUCT_VERSION_EXECUTABLE: sky,
   };
   return { root, homeDir, binDir, releaseDir, stateFile, sky, env };
 }
@@ -104,11 +105,28 @@ async function createRelease(context, version, options = {}) {
   const checksumName = `${archiveName}.sha256`;
   const archivePath = path.join(context.releaseDir, archiveName);
   await mkdir(artifactDir);
-  await writeFile(
-    path.join(artifactDir, 'sky'),
-    `#!/bin/sh\nprintf '%s\\n' '${version}'\n`,
-  );
-  await chmod(path.join(artifactDir, 'sky'), 0o755);
+  const artifactSky = path.join(artifactDir, 'sky');
+  if (options.machO) {
+    const entrypoint = path.join(artifactDir, 'sky.ts');
+    await writeFile(
+      entrypoint,
+      `if (process.argv.includes('--version')) console.log('${version}'); else process.exitCode = 1;\n`,
+    );
+    execFileSync(
+      'bun',
+      [
+        'build',
+        '--compile',
+        '--target=bun-darwin-arm64',
+        `--outfile=${artifactSky}`,
+        entrypoint,
+      ],
+      { stdio: 'ignore' },
+    );
+  } else {
+    await writeFile(artifactSky, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`);
+    await chmod(artifactSky, 0o755);
+  }
   execFileSync('/usr/bin/tar', ['-czf', archivePath, '-C', artifactDir, 'sky']);
   const archive = await readFile(archivePath);
   const digest = createHash('sha256').update(archive).digest('hex');
@@ -229,10 +247,85 @@ for (const failure of ['download', 'checksum']) {
   });
 }
 
-test('standalone update atomically replaces sky and restarts the daemon', { timeout: 60_000 }, async () => {
+test('standalone update rejects a non-arm64 executable without changing the installation', { timeout: 60_000 }, async () => {
   const context = await setup();
   const version = '9.8.7-test.2';
   const release = await createRelease(context, version);
+  const server = await startReleaseServer(version, release);
+  try {
+    const beforeState = await installService(context);
+    const beforeBytes = await readFile(context.sky);
+    const result = await run(
+      context.sky,
+      ['update', '--release-api-url', server.apiUrl],
+      context.env,
+    );
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /architecture|darwin-arm64/i);
+    assert.deepEqual(await readFile(context.sky), beforeBytes);
+    assert.equal((await readState(context.stateFile)).pid, beforeState.pid);
+  } finally {
+    await server.close();
+    await cleanup(context);
+  }
+});
+
+test('standalone update restores the previous executable when daemon restart fails', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  const version = '9.8.7-test.2';
+  const release = await createRelease(context, version, { machO: true });
+  const server = await startReleaseServer(version, release);
+  try {
+    await installService(context);
+    const beforeBytes = await readFile(context.sky);
+    const stopped = await run(context.sky, ['stop', '--json'], context.env);
+    assert.equal(stopped.code, 0, stopped.stderr || stopped.stdout);
+    const result = await run(
+      context.sky,
+      ['update', '--release-api-url', server.apiUrl],
+      context.env,
+    );
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /previous executable was restored/i);
+    assert.deepEqual(await readFile(context.sky), beforeBytes);
+    const state = await readState(context.stateFile);
+    assert.equal(state.loaded, false);
+    assert.equal(state.pid, null);
+  } finally {
+    await server.close();
+    await cleanup(context);
+  }
+});
+
+test('standalone update rolls back when the replacement daemon reports the old version', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  const version = '9.8.7-test.2';
+  const release = await createRelease(context, version, { machO: true });
+  const server = await startReleaseServer(version, release);
+  delete context.env.SKY_FAKE_PRODUCT_VERSION_EXECUTABLE;
+  context.env.SKY_FAKE_PRODUCT_VERSION = currentVersion;
+  try {
+    await installService(context);
+    const beforeBytes = await readFile(context.sky);
+    const result = await run(
+      context.sky,
+      ['update', '--release-api-url', server.apiUrl],
+      context.env,
+    );
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /reported version.*instead/i);
+    assert.deepEqual(await readFile(context.sky), beforeBytes);
+    assert.equal(execFileSync(context.sky, ['--version'], { encoding: 'utf8' }).trim(), currentVersion);
+  } finally {
+    await server.close();
+    await cleanup(context);
+  }
+});
+
+test('standalone update atomically replaces sky and restarts the daemon', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  const version = '9.8.7-test.2';
+  const release = await createRelease(context, version, { machO: true });
   const server = await startReleaseServer(version, release);
   try {
     const beforeState = await installService(context);

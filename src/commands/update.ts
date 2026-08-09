@@ -6,6 +6,7 @@ import {
   chmod,
   constants,
   copyFile,
+  link,
   lstat,
   mkdtemp,
   open,
@@ -23,6 +24,10 @@ import { restartLaunchAgent } from '../service/launch-agent.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_RELEASE_API_URL = 'https://api.github.com/repos/ty91/sky/releases/latest';
+const RELEASE_REQUEST_TIMEOUT_MS = 30_000;
+const ASSET_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
+const MAX_CHECKSUM_BYTES = 64 * 1024;
 
 type ReleaseAsset = {
   name: string;
@@ -53,7 +58,11 @@ function requestHeaders(): Record<string, string> {
 async function fetchLatestRelease(releaseApiUrl: string): Promise<LatestRelease> {
   let response: Response;
   try {
-    response = await fetch(releaseApiUrl, { headers: requestHeaders(), redirect: 'follow' });
+    response = await fetch(releaseApiUrl, {
+      headers: requestHeaders(),
+      redirect: 'follow',
+      signal: AbortSignal.timeout(RELEASE_REQUEST_TIMEOUT_MS),
+    });
   } catch (error) {
     throw new Error(`Could not check the latest Sky release: ${errorMessage(error)}`, {
       cause: error,
@@ -106,12 +115,17 @@ function requireAsset(release: LatestRelease, name: string): ReleaseAsset {
   return asset;
 }
 
-async function download(asset: ReleaseAsset, destination: string): Promise<void> {
+async function download(
+  asset: ReleaseAsset,
+  destination: string,
+  maximumBytes: number,
+): Promise<void> {
   let response: Response;
   try {
     response = await fetch(asset.browser_download_url, {
       headers: requestHeaders(),
       redirect: 'follow',
+      signal: AbortSignal.timeout(ASSET_DOWNLOAD_TIMEOUT_MS),
     });
   } catch (error) {
     throw new Error(`Download failed for ${asset.name}: ${errorMessage(error)}`, { cause: error });
@@ -120,11 +134,25 @@ async function download(asset: ReleaseAsset, destination: string): Promise<void>
     throw new Error(`Download failed for ${asset.name}: HTTP ${response.status}.`);
   }
   if (!response.body) throw new Error(`Download failed for ${asset.name}: empty response body.`);
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > maximumBytes) {
+    throw new Error(`Download failed for ${asset.name}: response is too large.`);
+  }
 
   const output = await open(destination, 'wx', 0o600);
   try {
+    let receivedBytes = 0;
     for await (const chunk of response.body) {
-      await output.write(chunk);
+      receivedBytes += chunk.byteLength;
+      if (receivedBytes > maximumBytes) {
+        throw new Error(`response exceeded ${maximumBytes} bytes`);
+      }
+      let offset = 0;
+      while (offset < chunk.byteLength) {
+        const { bytesWritten } = await output.write(chunk.subarray(offset));
+        if (bytesWritten === 0) throw new Error('file write made no progress');
+        offset += bytesWritten;
+      }
     }
     await output.sync();
   } catch (error) {
@@ -203,24 +231,88 @@ async function verifyExecutableVersion(executable: string, version: string): Pro
   }
 }
 
-async function atomicReplace(executable: string, replacement: string): Promise<void> {
+async function verifyExecutableArchitecture(executable: string): Promise<void> {
+  let description: string;
+  let architectures: string;
+  try {
+    const [fileResult, lipoResult] = await Promise.all([
+      execFileAsync('/usr/bin/file', ['-b', executable], { encoding: 'utf8' }),
+      execFileAsync('/usr/bin/lipo', ['-archs', executable], { encoding: 'utf8' }),
+    ]);
+    description = fileResult.stdout.trim();
+    architectures = lipoResult.stdout.trim();
+  } catch (error) {
+    throw new Error(`Could not verify the downloaded Sky architecture: ${errorMessage(error)}`, {
+      cause: error,
+    });
+  }
+  if (!/^Mach-O 64-bit executable arm64\b/.test(description) || architectures !== 'arm64') {
+    throw new Error('The downloaded Sky executable is not a darwin-arm64 Mach-O.');
+  }
+}
+
+async function syncFile(file: string): Promise<void> {
+  const handle = await open(file, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function atomicReplace(executable: string, replacement: string): Promise<string> {
   const stats = await lstat(executable);
   if (!stats.isFile()) throw new Error('The running Sky executable is not a regular file.');
   const directory = path.dirname(executable);
   const stage = path.join(directory, `.sky.update.${process.pid}.${randomUUID()}.tmp`);
+  const backup = path.join(directory, `.sky.update.${process.pid}.${randomUUID()}.backup`);
+  let replaced = false;
   try {
     await copyFile(replacement, stage, constants.COPYFILE_EXCL);
     await chmod(stage, 0o755);
-    const handle = await open(stage, 'r');
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    await syncFile(stage);
+    await link(executable, backup);
+    await syncFile(backup);
     await rename(stage, executable);
+    replaced = true;
+    return backup;
   } finally {
     await rm(stage, { force: true });
+    if (!replaced) await rm(backup, { force: true });
   }
+}
+
+async function rollbackReplacement(
+  executable: string,
+  backup: string,
+  updateError: unknown,
+): Promise<never> {
+  try {
+    await rename(backup, executable);
+  } catch (rollbackError) {
+    throw new Error(
+      `Sky update failed and the previous executable could not be restored from ${backup}: ${errorMessage(rollbackError)}`,
+      { cause: rollbackError },
+    );
+  }
+
+  let restartError: unknown;
+  try {
+    const status = await restartLaunchAgent();
+    const daemonVersion = status.control.status?.productVersion;
+    if (daemonVersion !== PRODUCT_VERSION) {
+      throw new Error(`the restored daemon reported version ${daemonVersion ?? 'unknown'}`);
+    }
+  } catch (error) {
+    restartError = error;
+  }
+
+  const restartDetail = restartError
+    ? ` The previous executable was restored, but its daemon could not be restarted: ${errorMessage(restartError)}`
+    : ' The previous executable and daemon were restored.';
+  throw new Error(`Sky update failed after replacement: ${errorMessage(updateError)}${restartDetail}`, {
+    cause: updateError,
+  });
 }
 
 export async function updateStandalone(
@@ -243,13 +335,25 @@ export async function updateStandalone(
   try {
     const archivePath = path.join(temporaryDirectory, archiveName);
     const checksumPath = path.join(temporaryDirectory, checksumName);
-    await download(archiveAsset, archivePath);
-    await download(checksumAsset, checksumPath);
+    await download(archiveAsset, archivePath, MAX_ARCHIVE_BYTES);
+    await download(checksumAsset, checksumPath, MAX_CHECKSUM_BYTES);
     await verifyChecksum(archivePath, checksumPath, archiveName);
     const replacement = await extractExecutable(archivePath, temporaryDirectory);
+    await verifyExecutableArchitecture(replacement);
     await verifyExecutableVersion(replacement, release.version);
-    await atomicReplace(process.execPath, replacement);
-    await restartLaunchAgent();
+    const backup = await atomicReplace(process.execPath, replacement);
+    try {
+      const status = await restartLaunchAgent();
+      const daemonVersion = status.control.status?.productVersion;
+      if (daemonVersion !== release.version) {
+        throw new Error(
+          `Restarted Sky daemon reported version ${daemonVersion ?? 'unknown'} instead of ${release.version}.`,
+        );
+      }
+      await rm(backup, { force: true });
+    } catch (error) {
+      await rollbackReplacement(process.execPath, backup, error);
+    }
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
