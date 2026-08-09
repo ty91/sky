@@ -35,7 +35,8 @@
     "manifest:sync": "pnpm build && node scripts/write-slack-manifest.mjs",
     "prepack": "pnpm build",
     "test:admin": "vitest run --config admin/vite.config.ts",
-    "dev:admin": "vite --config admin/vite.config.ts"
+    "dev:admin": "vite --config admin/vite.config.ts",
+    "test:standalone:install": "node --test test/standalone-install.smoke.mjs"
   },
   "engines": {
     "node": ">=24.16.0 <25"
