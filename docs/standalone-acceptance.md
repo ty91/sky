@@ -41,6 +41,10 @@ shasum -a 256 -c sky-<version>-darwin-arm64.tar.gz.sha256
 
 `--artifact-base-url <url>`은 지정한 version의 두 asset을 가져올 source를 바꾼다. 이 옵션은 `--version`과 함께 사용해야 한다. `pnpm test:standalone:install`은 `file://` source와 격리된 `HOME`, `/usr/bin:/bin`만 있는 `PATH`에서 checksum 실패의 무변경 보장, 첫 설치, PATH 안내, 재설치 멱등성과 설치된 `sky --version`을 실제 `/bin/sh` 프로세스로 검증한다.
 
+Standalone 설치 후 `sky update`는 GitHub의 latest release API를 무인증으로 조회한다. 현재 version과 같으면 artifact나 daemon을 건드리지 않고 종료한다. 새 version이면 정확한 이름의 archive와 checksum asset을 내려받아 checksum, 단일 `sky` 내용물, 실행 권한과 version을 검증한 뒤 실행 중인 `sky`와 같은 directory에 staging file을 만들고 원자적으로 교체한다. 교체가 끝난 뒤에는 기존 graceful restart 경로를 호출해 LaunchAgent daemon을 새 executable로 올린다. Node.js 개발 runtime에서는 package 또는 checkout의 update 경로를 사용하도록 안내하고 실행을 거부한다.
+
+`pnpm test:standalone:update`는 mock latest-release API와 release asset 서버를 사용해 이미 최신인 경우의 무변경, download와 checksum 실패 시 executable·daemon 무변경, 성공 시 원자적 교체와 daemon restart, Node.js runtime 거부를 검증한다. 이 smoke는 `bun run build:standalone` 뒤에 실행한다. `--release-api-url <url>`은 이 mock server처럼 latest-release API endpoint를 명시적으로 바꿔야 하는 검증 환경을 위한 override다.
+
 메타파일 audit 자체는 합성된 duplicate와 non-target 입력을 `pnpm test`에서 별도로 거부한다.
 
 ## 실제 launchd lifecycle 검증

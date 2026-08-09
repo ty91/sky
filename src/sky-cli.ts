@@ -12,6 +12,7 @@ import { slackCommand } from './commands/slack.js';
 import { startCommand } from './commands/start.js';
 import { statusCommand } from './commands/status.js';
 import { stopCommand } from './commands/stop.js';
+import { updateCommand } from './commands/update.js';
 import { PRODUCT_VERSION } from './product-version.js';
 
 export async function runSky(userArgs: readonly string[]): Promise<void> {
@@ -23,6 +24,7 @@ export async function runSky(userArgs: readonly string[]): Promise<void> {
   program.addCommand(startCommand);
   program.addCommand(stopCommand);
   program.addCommand(restartCommand);
+  program.addCommand(updateCommand);
   program.addCommand(statusCommand);
   program.addCommand(serviceCommand);
   program.addCommand(logsCommand);
