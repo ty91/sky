@@ -160,18 +160,26 @@ async function download(
 
   const output = await open(destination, 'wx', 0o600);
   try {
+    const reader = response.body.getReader();
     let receivedBytes = 0;
-    for await (const chunk of response.body) {
-      receivedBytes += chunk.byteLength;
-      if (receivedBytes > maximumBytes) {
-        throw new Error(`response exceeded ${maximumBytes} bytes`);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+        receivedBytes += chunk.byteLength;
+        if (receivedBytes > maximumBytes) {
+          throw new Error(`response exceeded ${maximumBytes} bytes`);
+        }
+        let offset = 0;
+        while (offset < chunk.byteLength) {
+          const { bytesWritten } = await output.write(chunk.subarray(offset));
+          if (bytesWritten === 0) throw new Error('file write made no progress');
+          offset += bytesWritten;
+        }
       }
-      let offset = 0;
-      while (offset < chunk.byteLength) {
-        const { bytesWritten } = await output.write(chunk.subarray(offset));
-        if (bytesWritten === 0) throw new Error('file write made no progress');
-        offset += bytesWritten;
-      }
+    } finally {
+      reader.releaseLock();
     }
     await output.sync();
   } catch (error) {
