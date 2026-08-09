@@ -74,6 +74,7 @@ test('doctor uses a read-only local fallback when Sky has not been initialized',
     const result = await runCli(['doctor', '--json'], {
       ...process.env,
       HOME: homeDir,
+      PATH: '/usr/bin:/bin',
       SKY_HOME: skyHome,
     });
 
@@ -92,6 +93,9 @@ test('doctor uses a read-only local fallback when Sky has not been initialized',
     ]);
     assert.equal(report.checks.some((check) => check.id === 'runtime.control'), true);
     assert.equal(report.checks.some((check) => check.id === 'filesystem.root'), true);
+    const executable = report.checks.find((check) => check.id === 'installation.executable');
+    assert.equal(executable?.status, 'warn');
+    assert.match(executable?.remediation ?? '', /\.local\/bin/);
     assert.equal(
       report.checks.find((check) => check.id === 'configuration.settings')?.status,
       'fail',
@@ -157,16 +161,16 @@ test('doctor fails the runtime check when the node runtime is below the supporte
     assert.equal(runtime?.status, 'fail');
     assert.match(runtime?.summary ?? '', /Node\.js 24\.15\.9 is unsupported/);
     assert.match(runtime?.detail ?? '', />=24\.16\.0 <25/);
-    assert.match(runtime?.remediation ?? '', /brew install ty91\/tap\/sky/);
+    assert.match(
+      runtime?.remediation ?? '',
+      /raw\.githubusercontent\.com\/ty91\/sky\/main\/install\.sh/,
+    );
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
 });
 
-// `brew upgrade sky` replaces the files without touching the running daemon. The
-// daemon assembles the report, so it can only ever compare its own version
-// against itself; the CLI has to contribute this one.
-test('doctor reports the stale daemon an upgrade leaves behind', () => {
+test('doctor reports a stale daemon after the installed executable changes', () => {
   const report = {
     schemaVersion: 1,
     mode: 'daemon',

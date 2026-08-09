@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0008
 ---
 
 # Homebrew tap으로 배포하고 bin 이름을 배포 계약으로 고정한다

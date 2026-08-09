@@ -649,7 +649,7 @@ function installationRuntimeCheck(): DiagnosticCheck {
     'The node runtime requires Node.js >=24.16.0 <25.',
     supported
       ? null
-      : 'Install Sky with `brew install ty91/tap/sky`, which pins a supported Node.js.',
+      : 'Install the standalone release with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
   );
 }
 
@@ -680,7 +680,9 @@ function installationChecks(
       executable ? 'pass' : 'warn',
       executable ? 'The skyd executable is available on PATH.' : 'The skyd executable is not on PATH.',
       null,
-      executable ? null : 'Reinstall Sky with `brew install ty91/tap/sky`.',
+      executable
+        ? null
+        : 'Add `$HOME/.local/bin` to PATH if Sky is installed there, or reinstall with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
     ),
   ];
 

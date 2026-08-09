@@ -118,6 +118,8 @@ test('service install reports a runtime-neutral error when skyd is not on PATH',
     const output = JSON.parse(result.stdout);
     assert.equal(output.error.code, 'skyd_wrapper_not_found');
     assert.match(output.error.message, /skyd executable/);
+    assert.match(output.error.message, /\.local\/bin/);
+    assert.match(output.error.message, /raw\.githubusercontent\.com\/ty91\/sky\/main\/install\.sh/);
     assert.doesNotMatch(output.error.message, /package|wrapper/i);
   } finally {
     await cleanup(context);
