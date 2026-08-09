@@ -317,7 +317,7 @@ async function rollbackReplacement(
 
   let restartError: unknown;
   try {
-    const status = await restartLaunchAgent();
+    const status = await restartLaunchAgent({ force: true });
     const daemonVersion = status.control.status?.productVersion;
     if (daemonVersion !== PRODUCT_VERSION) {
       throw new Error(`the restored daemon reported version ${daemonVersion ?? 'unknown'}`);
@@ -362,7 +362,7 @@ export async function updateStandalone(
     await verifyExecutableVersion(replacement, release.version);
     const backup = await atomicReplace(process.execPath, replacement);
     try {
-      const status = await restartLaunchAgent();
+      const status = await restartLaunchAgent({ force: true });
       const daemonVersion = status.control.status?.productVersion;
       if (daemonVersion !== release.version) {
         throw new Error(

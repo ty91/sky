@@ -58,6 +58,16 @@ async function replaceForRestart() {
 
 const server = http.createServer((request, response) => {
   if (request.method === 'POST' && request.url === '/restart') {
+    const restartError = process.env.SKY_FAKE_RESTART_ERROR;
+    if (restartError) {
+      const body = JSON.stringify({ error: { code: restartError } });
+      response.writeHead(409, {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+      });
+      response.end(body);
+      return;
+    }
     const body = JSON.stringify({ accepted: true, instanceId: status.instanceId });
     response.writeHead(202, {
       'content-type': 'application/json',

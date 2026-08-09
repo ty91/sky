@@ -368,3 +368,33 @@ test('standalone update atomically replaces sky and restarts the daemon', { time
     await cleanup(context);
   }
 });
+
+test('standalone update replaces a daemon that needs configuration', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  const version = '9.8.7-test.2';
+  const release = await createRelease(context, version, { machO: true });
+  const server = await startReleaseServer(version, release);
+  context.env.SKY_FAKE_RUNTIME_STATE = 'needs_configuration';
+  context.env.SKY_FAKE_RESTART_ERROR = 'settings_missing';
+  try {
+    const installed = await run(context.sky, ['service', 'install', '--json'], context.env);
+    assert.equal(installed.code, 1, installed.stderr || installed.stdout);
+    const beforeState = await readState(context.stateFile);
+
+    const result = await run(
+      context.sky,
+      ['update', '--release-api-url', server.apiUrl],
+      context.env,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, new RegExp(`Updated Sky from ${currentVersion} to ${version}`));
+    assert.equal(execFileSync(context.sky, ['--version'], { encoding: 'utf8' }).trim(), version);
+
+    const afterState = await readState(context.stateFile);
+    assert.notEqual(afterState.pid, beforeState.pid);
+    assert.equal(afterState.kickstartCount, 1);
+  } finally {
+    await server.close();
+    await cleanup(context);
+  }
+});
