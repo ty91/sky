@@ -141,6 +141,10 @@ async function startReleaseServer(version, release, options = {}) {
   const server = http.createServer((request, response) => {
     requests.push(request.url);
     if (request.url === '/latest') {
+      if (options.oversizedMetadata) {
+        response.end(Buffer.alloc(1024 * 1024 + 1, 0x20));
+        return;
+      }
       const assets = release
         ? [
             {
@@ -212,6 +216,27 @@ test('standalone update leaves the binary and daemon unchanged when already curr
     assert.deepEqual(await readFile(context.sky), beforeBytes);
     assert.equal((await readState(context.stateFile)).pid, beforeState.pid);
     assert.deepEqual(server.requests, ['/latest']);
+  } finally {
+    await server.close();
+    await cleanup(context);
+  }
+});
+
+test('standalone update rejects oversized release metadata without changing the installation', { timeout: 60_000 }, async () => {
+  const context = await setup();
+  const server = await startReleaseServer(currentVersion, undefined, { oversizedMetadata: true });
+  try {
+    const beforeState = await installService(context);
+    const beforeBytes = await readFile(context.sky);
+    const result = await run(
+      context.sky,
+      ['update', '--release-api-url', server.apiUrl],
+      context.env,
+    );
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /release response.*too large/i);
+    assert.deepEqual(await readFile(context.sky), beforeBytes);
+    assert.equal((await readState(context.stateFile)).pid, beforeState.pid);
   } finally {
     await server.close();
     await cleanup(context);

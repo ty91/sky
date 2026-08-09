@@ -26,6 +26,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_RELEASE_API_URL = 'https://api.github.com/repos/ty91/sky/releases/latest';
 const RELEASE_REQUEST_TIMEOUT_MS = 30_000;
 const ASSET_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+const MAX_RELEASE_METADATA_BYTES = 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES = 64 * 1024;
 
@@ -74,7 +75,25 @@ async function fetchLatestRelease(releaseApiUrl: string): Promise<LatestRelease>
 
   let body: unknown;
   try {
-    body = await response.json();
+    const contentLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > MAX_RELEASE_METADATA_BYTES) {
+      throw new Error('response is too large');
+    }
+    if (!response.body) throw new Error('response body is empty');
+    const chunks: Uint8Array[] = [];
+    let receivedBytes = 0;
+    for await (const chunk of response.body) {
+      receivedBytes += chunk.byteLength;
+      if (receivedBytes > MAX_RELEASE_METADATA_BYTES) throw new Error('response is too large');
+      chunks.push(chunk);
+    }
+    const bytes = new Uint8Array(receivedBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch (error) {
     throw new Error(`Could not read the latest Sky release response: ${errorMessage(error)}`, {
       cause: error,
