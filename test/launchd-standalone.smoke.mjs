@@ -29,7 +29,7 @@ const launchAgentLabel = 'com.ty91.skyd';
 const serviceTarget = `gui/${process.getuid?.()}/${launchAgentLabel}`;
 const supportedHost = process.platform === 'darwin' && process.arch === 'arm64';
 const collisionMessage =
-  'This manual-only smoke occupies the real com.ty91.skyd gui service target. Uninstall the existing Sky LaunchAgent before running it.';
+  'This standalone smoke occupies the real com.ty91.skyd gui service target. Uninstall the existing Sky LaunchAgent before running it.';
 
 function run(executable, args, options = {}) {
   const result = spawnSync(executable, args, {
@@ -169,7 +169,7 @@ async function waitForStandaloneDaemon(sky, env, timeoutMs = 30_000) {
 }
 
 test(
-  'manual-only standalone artifact passes the real macOS LaunchAgent lifecycle without Node.js',
+  'standalone artifact passes the real macOS LaunchAgent lifecycle without Node.js',
   { skip: !supportedHost, timeout: 240_000 },
   async () => {
     const userPlist = path.join(
