@@ -12,6 +12,7 @@ bun run build:standalone
 pnpm test:standalone
 pnpm package:standalone
 pnpm test:standalone:package
+pnpm test:standalone:install
 ```
 
 `pnpm test`는 공통 agent session contract와 Claude Agent SDK의 resume, interrupt, Sky MCP tool wiring을 검증한다. `pnpm test:standalone`은 빌드된 artifact를 checkout 밖의 임시 디렉터리에서 실행하며 다음 조건을 확인한다.
@@ -35,6 +36,10 @@ shasum -a 256 -c sky-<version>-darwin-arm64.tar.gz.sha256
 ```
 
 `pnpm test:standalone:package`는 패키징 명령을 실행하고 asset 이름, archive 내용물과 실행 권한, 실행 파일 version과 architecture, checksum 검증을 실제 생성물 기준으로 확인한다.
+
+루트의 `install.sh`는 옵션이 없으면 GitHub의 latest release를 조회하고, `--version <version>`으로 release를 고정할 수 있다. 선택한 release의 archive와 checksum을 모두 내려받아 checksum, 단일 `sky` 내용물, 실행 권한과 version을 검증한 뒤에만 `~/.local/bin/sky`를 교체하고 같은 디렉터리에 `sky`를 가리키는 `skyd` 상대 symlink를 만든다. `~/.local/bin`이 `PATH`에 없으면 설치 후 추가 방법을 출력한다.
+
+`--artifact-base-url <url>`은 지정한 version의 두 asset을 가져올 source를 바꾼다. 이 옵션은 `--version`과 함께 사용해야 한다. `pnpm test:standalone:install`은 `file://` source와 격리된 `HOME`, `/usr/bin:/bin`만 있는 `PATH`에서 checksum 실패의 무변경 보장, 첫 설치, PATH 안내, 재설치 멱등성과 설치된 `sky --version`을 실제 `/bin/sh` 프로세스로 검증한다.
 
 메타파일 audit 자체는 합성된 duplicate와 non-target 입력을 `pnpm test`에서 별도로 거부한다.
 
