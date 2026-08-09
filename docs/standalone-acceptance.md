@@ -40,7 +40,7 @@ shasum -a 256 -c sky-<version>-darwin-arm64.tar.gz.sha256
 
 ## 실제 launchd lifecycle 검증
 
-Standalone LaunchAgent 스모크는 Apple Silicon macOS의 로그인된 GUI 세션에서만 수동으로 실행한다. 기본 테스트 스위트와 CI에는 포함되지 않는다.
+Standalone LaunchAgent 스모크는 Apple Silicon macOS의 로그인된 GUI 세션에서 실행한다. Release workflow는 standalone artifact를 빌드한 뒤 이 스모크를 발행 gate로 실행한다. 로컬에서는 다음 명령으로 같은 검증을 수동 실행할 수 있으며 기본 테스트 스위트에는 포함되지 않는다.
 
 ```bash
 pnpm build:standalone
