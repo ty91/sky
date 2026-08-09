@@ -15,6 +15,8 @@ concurrency:
 jobs:
   release:
     runs-on: macos-15
+    outputs:
+      version: ${{ steps.release_assets.outputs.version }}
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v4
@@ -61,6 +63,7 @@ jobs:
           test -f "$archive"
           test -f "$checksum"
           {
+            echo "version=$version"
             echo "archive=$archive"
             echo "checksum=$checksum"
           } >> "$GITHUB_OUTPUT"
@@ -82,3 +85,32 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCHIVE: ${{ steps.release_assets.outputs.archive }}
           CHECKSUM: ${{ steps.release_assets.outputs.checksum }}
+
+  release-smoke:
+    needs: release
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+
+      - name: Verify macOS arm64 runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build lower-version standalone
+        run: |
+          pnpm pkg set "version=$SMOKE_VERSION"
+          pnpm build:standalone
+          pnpm package:standalone
+        env:
+          SMOKE_VERSION: 0.0.0-smoke
+
+      - name: Smoke install and update from the published release
+        run: node --test test/release-install-update.smoke.mjs
+        env:
+          SKY_RELEASE_SMOKE: '1'
+          SKY_RELEASE_VERSION: ${{ needs.release.outputs.version }}
+          SKY_RELEASE_SMOKE_VERSION: 0.0.0-smoke
+          SKY_RELEASE_SMOKE_ARTIFACT_DIR: ${{ github.workspace }}/dist/release
