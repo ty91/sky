@@ -10,6 +10,8 @@
 pnpm test
 bun run build:standalone
 pnpm test:standalone
+pnpm package:standalone
+pnpm test:standalone:package
 ```
 
 `pnpm test`는 공통 agent session contract와 Claude Agent SDK의 resume, interrupt, Sky MCP tool wiring을 검증한다. `pnpm test:standalone`은 빌드된 artifact를 checkout 밖의 임시 디렉터리에서 실행하며 다음 조건을 확인한다.
@@ -20,6 +22,19 @@ pnpm test:standalone
 - admin index와 hashed JavaScript·CSS가 package directory 없이 제공된다.
 - artifact에는 물리 executable 하나와 `skyd` symlink만 있다.
 - metafile에는 darwin-arm64 Claude helper와 Pi clipboard addon이 각각 하나만 있고 다른 target은 없다.
+
+`pnpm package:standalone`은 검증된 `dist/standalone/darwin-arm64/sky`로부터 다음 두 release asset을 `dist/release`에 생성한다.
+
+- `sky-<version>-darwin-arm64.tar.gz`
+- `sky-<version>-darwin-arm64.tar.gz.sha256`
+
+Archive에는 mode `0755`인 arm64 Mach-O 실행 파일 `sky` 하나만 들어 있다. `skyd` 링크는 설치 과정에서 생성하므로 archive에 포함하지 않는다. 파일 이름의 version은 실행 파일의 `sky --version` 및 `package.json` version과 일치해야 한다. Checksum 파일은 archive와 같은 디렉터리에서 다음 표준 명령으로 검증한다.
+
+```bash
+shasum -a 256 -c sky-<version>-darwin-arm64.tar.gz.sha256
+```
+
+`pnpm test:standalone:package`는 패키징 명령을 실행하고 asset 이름, archive 내용물과 실행 권한, 실행 파일 version과 architecture, checksum 검증을 실제 생성물 기준으로 확인한다.
 
 메타파일 audit 자체는 합성된 duplicate와 non-target 입력을 `pnpm test`에서 별도로 거부한다.
 
