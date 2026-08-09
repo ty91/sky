@@ -182,15 +182,14 @@ test(
       assertNeedsConfiguration(lowerService, smokeVersion);
       const lowerInstanceId = lowerService.json.status.control.status.instanceId;
 
-      const updated = run(
-        sky,
-        [
-          'update',
+      const updateArgs = ['update'];
+      if (releaseVersion.includes('-')) {
+        updateArgs.push(
           '--release-api-url',
           `https://api.github.com/repos/ty91/sky/releases/tags/v${releaseVersion}`,
-        ],
-        { env },
-      );
+        );
+      }
+      const updated = run(sky, updateArgs, { env });
       assert.equal(updated.status, 0, updated.stderr || updated.stdout);
       assert.equal(
         updated.stdout.trim(),

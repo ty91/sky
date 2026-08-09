@@ -141,6 +141,10 @@ async function startReleaseServer(version, release, options = {}) {
   const server = http.createServer((request, response) => {
     requests.push(request.url);
     if (request.url === '/latest') {
+      if (options.redirectLatest) {
+        response.writeHead(302, { location: `${origin()}/releases/tag/v${version}` }).end();
+        return;
+      }
       if (options.oversizedMetadata) {
         response.end(Buffer.alloc(1024 * 1024 + 1, 0x20));
         return;
@@ -161,7 +165,11 @@ async function startReleaseServer(version, release, options = {}) {
       response.end(JSON.stringify({ tag_name: `v${version}`, assets }));
       return;
     }
-    if (release && request.url === `/${release.archiveName}`) {
+    if (
+      release &&
+      (request.url === `/${release.archiveName}` ||
+        request.url === `/releases/download/v${version}/${release.archiveName}`)
+    ) {
       if (options.archiveFailure) {
         response.writeHead(503).end('unavailable');
       } else {
@@ -169,7 +177,11 @@ async function startReleaseServer(version, release, options = {}) {
       }
       return;
     }
-    if (release && request.url === `/${release.checksumName}`) {
+    if (
+      release &&
+      (request.url === `/${release.checksumName}` ||
+        request.url === `/releases/download/v${version}/${release.checksumName}`)
+    ) {
       response.end(release.checksum);
       return;
     }
@@ -347,11 +359,11 @@ test('standalone update rolls back when the replacement daemon reports the old v
   }
 });
 
-test('standalone update atomically replaces sky and restarts the daemon', { timeout: 60_000 }, async () => {
+test('standalone update resolves a release redirect, replaces sky, and restarts the daemon', { timeout: 60_000 }, async () => {
   const context = await setup();
   const version = '9.8.7-test.2';
   const release = await createRelease(context, version, { machO: true });
-  const server = await startReleaseServer(version, release);
+  const server = await startReleaseServer(version, release, { redirectLatest: true });
   try {
     const beforeState = await installService(context);
     const result = await run(

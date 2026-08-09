@@ -23,7 +23,7 @@ import { RUNTIME_KIND } from '../runtime-identity.js';
 import { restartLaunchAgent } from '../service/launch-agent.js';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_RELEASE_API_URL = 'https://api.github.com/repos/ty91/sky/releases/latest';
+const DEFAULT_RELEASE_URL = 'https://github.com/ty91/sky/releases/latest';
 const RELEASE_REQUEST_TIMEOUT_MS = 30_000;
 const ASSET_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 const MAX_RELEASE_METADATA_BYTES = 1024 * 1024;
@@ -56,18 +56,40 @@ function requestHeaders(): Record<string, string> {
   };
 }
 
+function releaseFromRedirect(requestUrl: string, location: string): LatestRelease {
+  const releaseUrl = new URL(location, requestUrl);
+  const match = releaseUrl.pathname.match(/^(.*\/releases)\/tag\/(v[0-9A-Za-z][0-9A-Za-z.-]*)$/);
+  if (!match) throw new Error('The latest Sky release redirect did not contain a version tag.');
+  const version = match[2].slice(1);
+  const archiveName = `sky-${version}-darwin-arm64.tar.gz`;
+  const checksumName = `${archiveName}.sha256`;
+  const downloadBaseUrl = `${releaseUrl.origin}${match[1]}/download/${match[2]}`;
+  return {
+    version,
+    assets: [
+      { name: archiveName, browser_download_url: `${downloadBaseUrl}/${archiveName}` },
+      { name: checksumName, browser_download_url: `${downloadBaseUrl}/${checksumName}` },
+    ],
+  };
+}
+
 async function fetchLatestRelease(releaseApiUrl: string): Promise<LatestRelease> {
   let response: Response;
   try {
     response = await fetch(releaseApiUrl, {
       headers: requestHeaders(),
-      redirect: 'follow',
+      redirect: 'manual',
       signal: AbortSignal.timeout(RELEASE_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     throw new Error(`Could not check the latest Sky release: ${errorMessage(error)}`, {
       cause: error,
     });
+  }
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    const location = response.headers.get('location');
+    if (!location) throw new Error('The latest Sky release redirect had no location.');
+    return releaseFromRedirect(releaseApiUrl, location);
   }
   if (!response.ok) {
     throw new Error(`Could not check the latest Sky release: HTTP ${response.status}.`);
@@ -351,7 +373,7 @@ export async function updateStandalone(
     );
   }
 
-  const release = await fetchLatestRelease(options.releaseApiUrl ?? DEFAULT_RELEASE_API_URL);
+  const release = await fetchLatestRelease(options.releaseApiUrl ?? DEFAULT_RELEASE_URL);
   if (release.version === PRODUCT_VERSION) return { changed: false, version: PRODUCT_VERSION };
 
   const archiveName = `sky-${release.version}-darwin-arm64.tar.gz`;
@@ -396,8 +418,8 @@ export const updateCommand = new Command('update')
   .description('Update a standalone Sky installation and restart its daemon')
   .option(
     '--release-api-url <url>',
-    'Use an alternate latest-release API endpoint',
-    DEFAULT_RELEASE_API_URL,
+    'Use an alternate latest-release metadata endpoint',
+    DEFAULT_RELEASE_URL,
   )
   .action(async (options: { releaseApiUrl: string }) => {
     const result = await updateStandalone({ releaseApiUrl: options.releaseApiUrl });
