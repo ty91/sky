@@ -682,7 +682,7 @@ function installationChecks(
       null,
       executable
         ? null
-        : 'Reinstall Sky with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
+        : 'Add `$HOME/.local/bin` to PATH if Sky is installed there, or reinstall with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
     ),
   ];
 

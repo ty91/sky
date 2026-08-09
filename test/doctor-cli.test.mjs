@@ -74,6 +74,7 @@ test('doctor uses a read-only local fallback when Sky has not been initialized',
     const result = await runCli(['doctor', '--json'], {
       ...process.env,
       HOME: homeDir,
+      PATH: '/usr/bin:/bin',
       SKY_HOME: skyHome,
     });
 
@@ -92,6 +93,9 @@ test('doctor uses a read-only local fallback when Sky has not been initialized',
     ]);
     assert.equal(report.checks.some((check) => check.id === 'runtime.control'), true);
     assert.equal(report.checks.some((check) => check.id === 'filesystem.root'), true);
+    const executable = report.checks.find((check) => check.id === 'installation.executable');
+    assert.equal(executable?.status, 'warn');
+    assert.match(executable?.remediation ?? '', /\.local\/bin/);
     assert.equal(
       report.checks.find((check) => check.id === 'configuration.settings')?.status,
       'fail',

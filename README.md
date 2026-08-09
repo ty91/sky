@@ -61,8 +61,8 @@ sky update
 기존 Sky home은 Homebrew keg 밖의 `~/.sky` 또는 `SKY_HOME`에 있으므로 package를 제거해도 삭제되지 않습니다. Custom root를 사용한다면 기존 LaunchAgent와 같은 `SKY_HOME`을 명시한 상태에서 다음 절차를 실행합니다.
 
 ```bash
-export SKY_HOME="${SKY_HOME:-$HOME/.sky}"
-sky_home_identity=$(stat -f '%d:%i' "$SKY_HOME")
+sky_home="${SKY_HOME:-$HOME/.sky}"
+sky_home_identity=$(stat -f '%d:%i' "$sky_home")
 test "$(sky --version)" = '0.2.3'
 brew uninstall sky
 curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh
@@ -70,7 +70,7 @@ export PATH="$HOME/.local/bin:$PATH"
 sky service install
 sky restart
 sky doctor
-test "$(stat -f '%d:%i' "$SKY_HOME")" = "$sky_home_identity"
+test "$(stat -f '%d:%i' "$sky_home")" = "$sky_home_identity"
 ```
 
 `sky service install`은 기존 plist의 `/opt/homebrew/bin/skyd`를 `~/.local/bin/skyd`로 바꾸면서 같은 Sky home과 LaunchAgent label을 유지합니다. 마지막 `stat` 비교는 마이그레이션 전후 Sky home이 같은 directory인지 확인합니다.
@@ -382,6 +382,8 @@ git push origin v<version>
 ```
 
 Tag workflow는 macOS arm64에서 tag와 `package.json` version 일치, lint, typecheck, 전체 테스트, standalone 실행과 실제 LaunchAgent lifecycle, archive·checksum 계약을 검증합니다. 통과한 `sky-<version>-darwin-arm64.tar.gz`와 checksum만 GitHub Release에 발행합니다. 발행 후 별도 job은 공개 release에서 install하고 낮은 version standalone을 `sky update`로 올린 뒤 service lifecycle과 `sky doctor`를 다시 검증합니다.
+
+첫 standalone 안정판으로 전환할 때는 이 문서와 legacy 배포 경로 제거를 merge한 직후 stable tag를 발행해야 합니다. Stable release 전까지 `/releases/latest`는 standalone asset이 없는 v0.2.3을 가리키므로 무옵션 install script가 동작하지 않습니다. Release candidate를 검증할 때는 `sh -s -- --version <version>`으로 install script에 version을 명시합니다.
 
 ## 운영 메모
 

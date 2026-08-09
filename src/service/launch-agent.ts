@@ -191,7 +191,7 @@ function resolveExecutable(name: string, searchPath = process.env.PATH): string 
   if (found) return found;
   throw new ServiceLifecycleError(
     'skyd_wrapper_not_found',
-    'Could not find the skyd executable on PATH. Reinstall Sky with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
+    'Could not find the skyd executable on PATH. Add `$HOME/.local/bin` to PATH if Sky is installed there, or reinstall with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
   );
 }
 
