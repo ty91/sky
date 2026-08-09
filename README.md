@@ -26,19 +26,19 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 
 ## 준비물
 
-- [Homebrew](https://brew.sh/)
 - Apple Silicon macOS
 - Slack workspace에 앱을 설치할 수 있는 권한
 - 선택한 backend에서 사용할 모델 인증 설정
 
-Node.js는 따로 준비하지 않아도 됩니다. formula가 `node@24`를 의존성으로 함께 설치하고, `sky`와 `skyd` wrapper가 그 Node를 PATH에 올린 뒤 실행하므로 사용자의 Node 설치 상태와 무관하게 동작합니다.
+Node.js, Bun과 GitHub CLI는 설치에 필요하지 않습니다. GitHub Release의 standalone executable에 runtime과 필요한 asset이 들어 있습니다.
 
 Slack app은 `slack-app-manifest.json` 한 장으로 만듭니다. scope와 event를 콘솔에서 하나씩 체크할 필요가 없습니다. 자세한 절차는 [Slack app 만들기](#slack-app-만들기)를 참고하세요.
 
 ## 설치
 
 ```bash
-brew install ty91/tap/sky
+curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 sky --version
 sky service install
 sky slack manifest --open
@@ -46,22 +46,38 @@ sky init
 sky status
 ```
 
-의존성을 설치 시점에 공개 npm registry에서 받으므로 첫 설치는 몇 분 걸리고 디스크를 약 500 MB 사용합니다. 대부분은 Claude Agent SDK와 Pi coding agent의 플랫폼 바이너리입니다.
-
-Homebrew는 배포만 담당합니다. LaunchAgent는 Sky가 계속 소유하므로 `brew services`가 아니라 `sky service install`로 등록합니다.
+설치 스크립트는 최신 release의 Apple Silicon macOS artifact와 checksum을 내려받아 검증한 뒤 `~/.local/bin/sky`와 같은 executable을 가리키는 `~/.local/bin/skyd` symlink를 설치합니다. `~/.local/bin`이 PATH에 없으면 추가 방법을 출력합니다. LaunchAgent는 `sky service install`이 소유합니다.
 
 ### 업그레이드
 
 ```bash
-brew upgrade sky
-sky restart
+sky update
 ```
 
-`brew upgrade`는 파일만 교체하고 실행 중인 daemon은 이전 코드를 그대로 유지합니다. 이때 이전 설치 디렉터리는 삭제되므로 daemon이 디스크에서 읽는 admin 자산이 먼저 깨집니다. `sky doctor`는 이 상태를 `installation.drift` FAIL로 보고하며, `sky restart`가 유일한 해결책입니다.
+`sky update`는 최신 release와 현재 version을 비교하고 checksum과 architecture를 검증한 뒤 executable을 원자적으로 교체하고 daemon을 재시작합니다. 이미 최신이면 파일이나 daemon을 바꾸지 않습니다. 검증이나 재시작이 실패하면 기존 executable과 daemon을 보존하거나 복원합니다.
+
+### v0.2.3 Homebrew 설치에서 마이그레이션
+
+기존 Sky home은 Homebrew keg 밖의 `~/.sky` 또는 `SKY_HOME`에 있으므로 package를 제거해도 삭제되지 않습니다. Custom root를 사용한다면 기존 LaunchAgent와 같은 `SKY_HOME`을 명시한 상태에서 다음 절차를 실행합니다.
+
+```bash
+export SKY_HOME="${SKY_HOME:-$HOME/.sky}"
+sky_home_identity=$(stat -f '%d:%i' "$SKY_HOME")
+test "$(sky --version)" = '0.2.3'
+brew uninstall sky
+curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+sky service install
+sky restart
+sky doctor
+test "$(stat -f '%d:%i' "$SKY_HOME")" = "$sky_home_identity"
+```
+
+`sky service install`은 기존 plist의 `/opt/homebrew/bin/skyd`를 `~/.local/bin/skyd`로 바꾸면서 같은 Sky home과 LaunchAgent label을 유지합니다. 마지막 `stat` 비교는 마이그레이션 전후 Sky home이 같은 directory인지 확인합니다.
 
 ### 개발 checkout
 
-개발 및 package release toolchain은 `mise.toml`에 고정되어 있습니다.
+개발 및 standalone release toolchain은 `mise.toml`에 고정되어 있습니다.
 
 ```bash
 git clone https://github.com/ty91/sky.git
@@ -70,7 +86,7 @@ mise install
 mise exec -- pnpm install --frozen-lockfile
 ```
 
-`mise exec -- node --version`, `mise exec -- pnpm --version`, `mise exec -- bun --version`이 각각 Node.js `24.16.0`, pnpm `11.10.0`, Bun `1.3.14`를 출력해야 합니다. Node.js와 pnpm은 기존 개발 및 package 경로에, Bun은 standalone release build에 사용합니다.
+`mise exec -- node --version`, `mise exec -- pnpm --version`, `mise exec -- bun --version`이 각각 Node.js `24.16.0`, pnpm `11.10.0`, Bun `1.3.14`를 출력해야 합니다. Node.js와 pnpm은 개발과 공통 검증에, Bun은 standalone release build에 사용합니다.
 
 ## Sky home과 private filesystem
 
@@ -222,13 +238,7 @@ node --test test/agent-session-contract.test.mjs
 
 필요하면 `SKY_PI_AGENT_BACKEND_SMOKE_MODEL`, `SKY_AGENT_BACKEND_SMOKE_WORKSPACE`로 smoke 전용 model과 workspace를 지정할 수 있습니다.
 
-개발 checkout의 CLI를 전역으로 연결하려면:
-
-```bash
-pnpm link --global
-```
-
-이후 아래 커맨드를 쓸 수 있습니다:
+설치된 CLI에서는 아래 커맨드를 쓸 수 있습니다:
 
 ```bash
 sky service install
@@ -236,6 +246,7 @@ sky init
 sky start
 sky stop
 sky restart
+sky update
 sky status
 sky doctor
 sky admin
@@ -346,14 +357,18 @@ daemon이 살아 있으면 CLI는 `GET /logs` history와 `GET /logs/stream` live
 
 daemon control socket에 연결할 수 없으면 Sky home의 `logs/skyd.jsonl`과 최대 5개 archive, `logs/launchd.stderr.log`를 read-only fallback으로 조회합니다. `--json`은 record 하나당 JSON 한 줄을 출력합니다. 외부 `tail` process는 사용하지 않습니다.
 
-## Package 검증과 release
+## Standalone 검증과 release
 
-`pnpm test:package`는 clean build로 tarball을 만들고 repository 밖의 격리된 pnpm home에 전역 설치한 다음 `sky`와 `skyd` bin, admin asset, login bootstrap, authenticated overview, secret 비노출과 configure → connection check → restart → 새 session reconnect 흐름을 검증합니다. package에는 `dist`, `package.json`, `README.md`만 포함될 수 있습니다. `pnpm test:launchd`는 GitHub-hosted macOS runner에서만 실제 LaunchAgent lifecycle을 검증하며 로컬 실행에서는 skip됩니다. `pnpm test:homebrew`는 릴리스가 tap을 갱신한 뒤에만 의미가 있어 `SKY_HOMEBREW_SMOKE=1`이 있을 때만 실행됩니다.
+Standalone 검증은 checkout 밖의 Node.js 없는 환경에서 executable과 admin asset을 실행하고, release archive와 checksum 계약, install·update 경로, 실제 LaunchAgent lifecycle을 확인합니다.
 
 ```bash
-pnpm test:package
-pnpm test:launchd
-pnpm pack --dry-run --json
+pnpm build:standalone
+pnpm test:standalone
+pnpm test:launchd:standalone
+pnpm package:standalone
+pnpm test:standalone:package
+pnpm test:standalone:install
+pnpm test:standalone:update
 ```
 
 release version의 원본은 `package.json`입니다. version을 올리고 검증한 뒤 동일한 `vX.Y.Z` tag를 push합니다.
@@ -361,17 +376,12 @@ release version의 원본은 `package.json`입니다. version을 올리고 검�
 ```bash
 pnpm version <version> --no-git-tag-version
 pnpm test
-pnpm test:package
 pnpm release:check-tag -- v<version>
 git tag v<version>
 git push origin v<version>
 ```
 
-tag workflow는 macOS arm64에서 mise toolchain, lint, typecheck, 전체 테스트와 package smoke를 검증한 뒤 `@ty91/sky`를 private GitHub Packages에 publish합니다. tag와 `package.json` version이 다르면 publish하지 않습니다.
-
-이어서 `pnpm pack` tarball을 GitHub Release 에셋으로 올리고, 그 sha256으로 `packaging/homebrew/sky.rb.tmpl`을 렌더링해 `ty91/homebrew-tap`의 `Formula/sky.rb`를 갱신합니다. tap 갱신은 `TAP_REPO_TOKEN` secret을 사용합니다. `GITHUB_TOKEN`은 다른 repository에 push할 수 없기 때문입니다. 마지막 job은 갱신된 tap을 실제로 `brew install`하고, 이전 formula revision이 있으면 `brew upgrade`까지 거쳐 `sky restart`가 drift를 해소하는지 확인합니다.
-
-formula는 `dist`가 이미 들어 있는 `pnpm pack` tarball을 받으므로 설치 시점에 TypeScript build를 하지 않고 runtime 의존성만 `npm install`합니다. lockfile을 함께 배포하지 않으므로 transitive 의존성은 설치 시점에 다시 해석됩니다. 또 Homebrew가 설치한 Mach-O를 ad-hoc 재서명하면서 `darwin-universal` clipboard slice를 손상시키고 napi가 그 slice를 `darwin-arm64`보다 먼저 로드해 프로세스가 SIGKILL되므로, formula는 arm64가 아닌 prebuild를 모두 제거합니다.
+Tag workflow는 macOS arm64에서 tag와 `package.json` version 일치, lint, typecheck, 전체 테스트, standalone 실행과 실제 LaunchAgent lifecycle, archive·checksum 계약을 검증합니다. 통과한 `sky-<version>-darwin-arm64.tar.gz`와 checksum만 GitHub Release에 발행합니다. 발행 후 별도 job은 공개 release에서 install하고 낮은 version standalone을 `sky update`로 올린 뒤 service lifecycle과 `sky doctor`를 다시 검증합니다.
 
 ## 운영 메모
 
