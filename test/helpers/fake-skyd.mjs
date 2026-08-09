@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -20,7 +20,7 @@ const status = {
     uptimeMs: 0,
   },
   runtime: { state: runtimeState },
-  productVersion: 'test',
+  productVersion: process.env.SKY_FAKE_PRODUCT_VERSION ?? 'test',
   slack: {
     state: runtimeState === 'needs_configuration' ? 'not_configured' : 'connected',
     attempts: 0,
@@ -37,9 +37,16 @@ const status = {
 async function replaceForRestart() {
   await new Promise((resolve) => server.close(resolve));
   await rm(socketFile, { force: true });
+  const env = { ...process.env };
+  const versionExecutable = process.env.SKY_FAKE_PRODUCT_VERSION_EXECUTABLE;
+  if (versionExecutable) {
+    env.SKY_FAKE_PRODUCT_VERSION = execFileSync(versionExecutable, ['--version'], {
+      encoding: 'utf8',
+    }).trim();
+  }
   const child = spawn(process.execPath, [process.env.SKY_FAKE_DAEMON], {
     detached: true,
-    env: process.env,
+    env,
     stdio: 'ignore',
   });
   child.unref();

@@ -13,6 +13,7 @@ pnpm test:standalone
 pnpm package:standalone
 pnpm test:standalone:package
 pnpm test:standalone:install
+pnpm test:standalone:update
 ```
 
 `pnpm test`는 공통 agent session contract와 Claude Agent SDK의 resume, interrupt, Sky MCP tool wiring을 검증한다. `pnpm test:standalone`은 빌드된 artifact를 checkout 밖의 임시 디렉터리에서 실행하며 다음 조건을 확인한다.
@@ -40,6 +41,10 @@ shasum -a 256 -c sky-<version>-darwin-arm64.tar.gz.sha256
 루트의 `install.sh`는 옵션이 없으면 GitHub의 latest release를 조회하고, `--version <version>`으로 release를 고정할 수 있다. 선택한 release의 archive와 checksum을 모두 내려받아 checksum, 단일 `sky` 내용물, 실행 권한과 version을 검증한 뒤에만 `~/.local/bin/sky`를 교체하고 같은 디렉터리에 `sky`를 가리키는 `skyd` 상대 symlink를 만든다. `~/.local/bin`이 `PATH`에 없으면 설치 후 추가 방법을 출력한다.
 
 `--artifact-base-url <url>`은 지정한 version의 두 asset을 가져올 source를 바꾼다. 이 옵션은 `--version`과 함께 사용해야 한다. `pnpm test:standalone:install`은 `file://` source와 격리된 `HOME`, `/usr/bin:/bin`만 있는 `PATH`에서 checksum 실패의 무변경 보장, 첫 설치, PATH 안내, 재설치 멱등성과 설치된 `sky --version`을 실제 `/bin/sh` 프로세스로 검증한다.
+
+Standalone 설치 후 `sky update`는 GitHub의 latest release API를 무인증으로 조회한다. 현재 version과 같으면 artifact나 daemon을 건드리지 않고 종료한다. 새 version이면 정확한 이름의 archive와 checksum asset을 제한된 시간·크기 안에서 내려받아 checksum, 단일 `sky` 내용물, 실행 권한, darwin-arm64 Mach-O architecture와 version을 검증한 뒤 실행 중인 `sky`와 같은 directory에 staging file과 이전 executable의 backup을 만들고 원자적으로 교체한다. 교체가 끝난 뒤에는 기존 graceful restart 경로를 호출하고 새 daemon의 version까지 확인한다. Restart가 실패하거나 다른 version이 시작되면 이전 executable을 원자적으로 복원하고 기존 daemon restart를 다시 시도한다. Node.js 개발 runtime에서는 package 또는 checkout의 update 경로를 사용하도록 안내하고 실행을 거부한다.
+
+`pnpm test:standalone:update`는 mock latest-release API와 release asset 서버를 사용해 이미 최신인 경우의 무변경, download·checksum·architecture 실패 시 executable·daemon 무변경, restart 실패 시 이전 executable 복원, 성공 시 원자적 교체와 target version daemon restart, Node.js runtime 거부를 검증한다. 이 smoke는 `bun run build:standalone` 뒤에 실행한다. `--release-api-url <url>`은 이 mock server처럼 latest-release API endpoint를 명시적으로 바꿔야 하는 검증 환경을 위한 override다.
 
 메타파일 audit 자체는 합성된 duplicate와 non-target 입력을 `pnpm test`에서 별도로 거부한다.
 

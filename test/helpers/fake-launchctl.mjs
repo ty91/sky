@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 
 const stateFile = process.env.SKY_FAKE_LAUNCHCTL_STATE;
@@ -40,9 +40,16 @@ async function startDaemon(state, plistFile) {
     return;
   }
 
+  const env = { ...process.env };
+  const versionExecutable = process.env.SKY_FAKE_PRODUCT_VERSION_EXECUTABLE;
+  if (versionExecutable) {
+    env.SKY_FAKE_PRODUCT_VERSION = execFileSync(versionExecutable, ['--version'], {
+      encoding: 'utf8',
+    }).trim();
+  }
   const child = spawn(process.execPath, [process.env.SKY_FAKE_DAEMON], {
     detached: true,
-    env: process.env,
+    env,
     stdio: 'ignore',
   });
   child.unref();
