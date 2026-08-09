@@ -191,7 +191,7 @@ function resolveExecutable(name: string, searchPath = process.env.PATH): string 
   if (found) return found;
   throw new ServiceLifecycleError(
     'skyd_wrapper_not_found',
-    'Could not find the skyd executable on PATH. Reinstall Sky with `brew install ty91/tap/sky`.',
+    'Could not find the skyd executable on PATH. Reinstall Sky with `curl -fsSL https://raw.githubusercontent.com/ty91/sky/main/install.sh | sh`.',
   );
 }
 

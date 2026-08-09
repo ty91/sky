@@ -3,13 +3,6 @@
   "version": "0.2.3",
   "description": "Slack chatbot with per-thread Pi AgentSession conversations",
   "type": "module",
-  "files": [
-    "dist"
-  ],
-  "bin": {
-    "sky": "dist/index.js",
-    "skyd": "dist/skyd.js"
-  },
   "scripts": {
     "dev": "tsx src/bot.ts",
     "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -27,13 +20,9 @@
     "test": "pnpm build && node --test test/*.test.mjs && vitest run --config admin/vite.config.ts",
     "test:standalone": "node --test test/standalone-release.smoke.mjs",
     "test:standalone:package": "node --test test/standalone-package.smoke.mjs",
-    "test:package": "node --test test/package-release.smoke.mjs",
-    "test:launchd": "node --test test/launchd-package.smoke.mjs",
     "test:launchd:standalone": "node --test test/launchd-standalone.smoke.mjs",
-    "test:homebrew": "node --test test/homebrew-install.smoke.mjs",
     "release:check-tag": "node scripts/verify-release-tag.mjs",
     "manifest:sync": "pnpm build && node scripts/write-slack-manifest.mjs",
-    "prepack": "pnpm build",
     "test:admin": "vitest run --config admin/vite.config.ts",
     "dev:admin": "vite --config admin/vite.config.ts",
     "test:standalone:install": "node --test test/standalone-install.smoke.mjs",
@@ -46,9 +35,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ty91/sky.git"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   },
   "license": "MIT",
   "devDependencies": {
@@ -83,5 +69,6 @@
   },
   "optionalDependencies": {
     "@mariozechner/clipboard-darwin-arm64": "0.3.9"
-  }
+  },
+  "private": true
 }
