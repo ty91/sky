@@ -38,8 +38,8 @@ test('maintenance ticker collapses overlapping interval callbacks into one tick'
       return '2026-08-09';
     },
     recordDreamSuccess() {},
-    getOperation() {
-      return undefined;
+    waitForOperation() {
+      throw new Error('no dream operation expected');
     },
     submitOperation(request) {
       submissions.push(request);

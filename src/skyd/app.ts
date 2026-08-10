@@ -38,6 +38,7 @@ import {
 import { createMaintenanceStateStore } from './maintenance-state.js';
 import {
   createOperationRegistry,
+  type OperationRecord,
   type OperationRegistry,
   type OperationRegistryOptions,
   type OperationRunner,
@@ -88,7 +89,7 @@ export type StartSkydOptions = {
   maintenanceTicker?: Omit<
     MaintenanceTickerOptions,
     | 'submitOperation'
-    | 'getOperation'
+    | 'waitForOperation'
     | 'loadDreamWatermark'
     | 'recordDreamSuccess'
     | 'isConfigurationReady'
@@ -106,6 +107,34 @@ export type StartSkydOptions = {
   configurationEnv?: NodeJS.ProcessEnv;
   inspectLaunchAgent?: () => LaunchdStatus | Promise<LaunchdStatus>;
 };
+
+function operationIsTerminal(operation: OperationRecord): boolean {
+  return (
+    operation.state === 'succeeded' ||
+    operation.state === 'failed' ||
+    operation.state === 'cancelled'
+  );
+}
+
+function waitForOperationTerminal(
+  operations: OperationRegistry,
+  operationId: string,
+): Promise<OperationRecord> {
+  const observed = operations.events(operationId);
+  if (!observed) return Promise.reject(new Error('Scheduled operation was not found.'));
+  if (operationIsTerminal(observed.operation)) return Promise.resolve(observed.operation);
+  return new Promise((resolve, reject) => {
+    const unsubscribe = observed.subscribe((event) => {
+      if (event.type !== 'succeeded' && event.type !== 'failed' && event.type !== 'cancelled') {
+        return;
+      }
+      unsubscribe();
+      const operation = operations.get(operationId);
+      if (operation) resolve(operation);
+      else reject(new Error('Scheduled operation was not found after completion.'));
+    });
+  });
+}
 
 export type Skyd = {
   paths: SkyHome;
@@ -204,7 +233,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const maintenanceState = createMaintenanceStateStore(paths);
   const maintenanceTicker = createMaintenanceTicker({
     submitOperation: (request) => operations.create(request),
-    getOperation: (operationId) => operations.get(operationId),
+    waitForOperation: (operationId) => waitForOperationTerminal(operations, operationId),
     loadDreamWatermark: (latestDueDate) => {
       const workspace = configuration.resolveRuntime().settings.workspace;
       return maintenanceState.loadOrBootstrap(workspace, latestDueDate);
@@ -492,13 +521,14 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
     mutable.runtimeState = 'draining';
     mutable.nextRetryAt = null;
-    await maintenanceTicker.stop();
+    const tickerStopping = maintenanceTicker.stop();
     const drain = await runtimeController.drain();
     if (drain.timedOut) {
       addError('drain_timeout');
       logger.log('warn', 'runtime', 'Drain deadline exceeded; aborting remaining activity.');
       operations.cancelActive();
     }
+    await tickerStopping;
     await runtime?.close();
     runtime = undefined;
     scheduledJobStore.close();

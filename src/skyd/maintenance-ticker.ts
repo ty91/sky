@@ -14,6 +14,12 @@ const DEFAULT_TICK_INTERVAL_MS = 30_000;
 const DEFAULT_DREAM_RETRY_COOLDOWN_MS = 5 * 60 * 1_000;
 
 type IntervalHandle = unknown;
+type ScheduledDream = {
+  operationId: string;
+  targetDate: string;
+  state: 'active' | 'persistence_pending';
+  completion: Promise<void>;
+};
 
 export type MaintenanceTicker = {
   start(): void;
@@ -26,7 +32,7 @@ export type MaintenanceTickerOptions = {
       | Extract<OperationRequest, { type: 'memory' }>
       | { type: 'dream'; date: string },
   ): CreateOperationResult | Promise<CreateOperationResult>;
-  getOperation(operationId: string): OperationRecord | undefined;
+  waitForOperation(operationId: string): Promise<OperationRecord>;
   loadDreamWatermark(latestDueDate: string): string | null | Promise<string | null>;
   recordDreamSuccess(targetDate: string): void | Promise<void>;
   isConfigurationReady(): boolean | Promise<boolean>;
@@ -64,7 +70,7 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
     options.clearInterval ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
   let nextMemoryRunAt: number | undefined;
   let dreamRetryAt = 0;
-  let scheduledDream: { operationId: string; targetDate: string } | undefined;
+  let scheduledDream: ScheduledDream | undefined;
   let intervalHandle: IntervalHandle | undefined;
   let activeTick: Promise<void> | undefined;
 
@@ -72,46 +78,63 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
     dreamRetryAt = currentTime + dreamRetryCooldownMs;
   };
 
-  const reconcileScheduledDream = async (currentTime: number): Promise<boolean> => {
-    if (!scheduledDream) return false;
-    const currentDream = scheduledDream;
-    const operation = options.getOperation(currentDream.operationId);
-    if (operation?.state === 'queued' || operation?.state === 'running') return true;
-    if (operation?.state === 'succeeded') {
-      if (currentTime < dreamRetryAt) return false;
-      try {
-        await options.recordDreamSuccess(currentDream.targetDate);
-        options.logger.log('info', 'maintenance', 'Dream maintenance watermark advanced.', {
-          operationId: currentDream.operationId,
-          targetDate: currentDream.targetDate,
-        });
-        scheduledDream = undefined;
-        dreamRetryAt = 0;
-      } catch (error) {
-        delayDreamRetry(currentTime);
-        options.logger.log(
-          'error',
-          'maintenance',
-          `Dream maintenance watermark update failed (${error instanceof Error ? error.name : 'unknown_error'}).`,
-          {
-            operationId: currentDream.operationId,
-            targetDate: currentDream.targetDate,
-          },
-        );
-      }
-      return false;
+  const persistDreamSuccess = async (dream: ScheduledDream) => {
+    try {
+      await options.recordDreamSuccess(dream.targetDate);
+      options.logger.log('info', 'maintenance', 'Dream maintenance watermark advanced.', {
+        operationId: dream.operationId,
+        targetDate: dream.targetDate,
+      });
+      if (scheduledDream === dream) scheduledDream = undefined;
+      dreamRetryAt = 0;
+    } catch (error) {
+      dream.state = 'persistence_pending';
+      delayDreamRetry(now());
+      options.logger.log(
+        'error',
+        'maintenance',
+        `Dream maintenance watermark update failed (${error instanceof Error ? error.name : 'unknown_error'}).`,
+        {
+          operationId: dream.operationId,
+          targetDate: dream.targetDate,
+          retryAt: new Date(dreamRetryAt).toISOString(),
+        },
+      );
     }
+  };
 
-    const operationId = currentDream.operationId;
-    const targetDate = currentDream.targetDate;
+  const completeScheduledDream = async (dream: ScheduledDream) => {
+    let operation: OperationRecord;
+    try {
+      operation = await options.waitForOperation(dream.operationId);
+    } catch (error) {
+      if (scheduledDream !== dream) return;
+      scheduledDream = undefined;
+      delayDreamRetry(now());
+      options.logger.log(
+        'error',
+        'maintenance',
+        `Scheduled dream observation failed (${error instanceof Error ? error.name : 'unknown_error'}).`,
+        {
+          operationId: dream.operationId,
+          targetDate: dream.targetDate,
+          retryAt: new Date(dreamRetryAt).toISOString(),
+        },
+      );
+      return;
+    }
+    if (scheduledDream !== dream) return;
+    if (operation.state === 'succeeded') {
+      await persistDreamSuccess(dream);
+      return;
+    }
     scheduledDream = undefined;
-    delayDreamRetry(currentTime);
+    delayDreamRetry(now());
     options.logger.log('warn', 'maintenance', 'Scheduled dream operation did not succeed.', {
-      operationId,
-      targetDate,
+      operationId: dream.operationId,
+      targetDate: dream.targetDate,
       retryAt: new Date(dreamRetryAt).toISOString(),
     });
-    return false;
   };
 
   const submitDueDream = async (currentTime: number): Promise<boolean> => {
@@ -127,7 +150,14 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
       if (result.code === 'operation_active') delayDreamRetry(currentTime);
       return true;
     }
-    scheduledDream = { operationId: result.operation.id, targetDate };
+    const dream: ScheduledDream = {
+      operationId: result.operation.id,
+      targetDate,
+      state: 'active',
+      completion: Promise.resolve(),
+    };
+    scheduledDream = dream;
+    dream.completion = completeScheduledDream(dream);
     options.logger.log('info', 'maintenance', 'Scheduled dream operation submitted.', {
       operationId: result.operation.id,
       targetDate,
@@ -135,12 +165,32 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
     return true;
   };
 
+  const runDream = async (currentTime: number): Promise<boolean> => {
+    try {
+      if (scheduledDream?.state === 'active') return true;
+      if (scheduledDream?.state === 'persistence_pending') {
+        if (currentTime < dreamRetryAt) return false;
+        await persistDreamSuccess(scheduledDream);
+        if (scheduledDream) return false;
+      }
+      return await submitDueDream(currentTime);
+    } catch (error) {
+      delayDreamRetry(currentTime);
+      options.logger.log(
+        'error',
+        'maintenance',
+        `Dream maintenance check failed (${error instanceof Error ? error.name : 'unknown_error'}).`,
+        { retryAt: new Date(dreamRetryAt).toISOString() },
+      );
+      return false;
+    }
+  };
+
   const runTick = async () => {
     const currentTime = now();
     if (!(await options.isConfigurationReady())) return;
 
-    if (await reconcileScheduledDream(currentTime)) return;
-    if (await submitDueDream(currentTime)) return;
+    if (await runDream(currentTime)) return;
     if (nextMemoryRunAt === undefined || currentTime < nextMemoryRunAt) return;
 
     const result = await options.submitOperation({ type: 'memory' });
@@ -180,6 +230,7 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
         intervalHandle = undefined;
       }
       await activeTick;
+      await scheduledDream?.completion;
     },
   };
 }

@@ -1037,7 +1037,6 @@ test('failed scheduled dreams keep their watermark across cooldown and daemon re
       await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
       await clock.advanceBy(30_000);
       await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
-      await clock.advanceBy(30_000);
       await clock.advanceBy(5 * 60 * 1_000 - 1);
       assert.equal(starts.filter(({ type }) => type === 'dream').length, 1);
 
@@ -1071,13 +1070,85 @@ test('failed scheduled dreams keep their watermark across cooldown and daemon re
       await restartedClock.advanceBy(30_000);
       await waitForStatus(restarted.paths.socketFile, (status) => status.activeWorkCount === 0);
       assert.deepEqual(restartedStarts[0], { type: 'dream', date: '2026-08-08' });
-      await restartedClock.advanceBy(30_000);
       assert.deepEqual(JSON.parse(await readFile(restarted.paths.maintenanceStateFile, 'utf8')), {
         schemaVersion: 1,
         dream: { lastSuccessfulTargetDate: '2026-08-08' },
       });
     } finally {
       await restarted.close();
+    }
+  });
+});
+
+test('a scheduled dream that succeeds during drain persists its watermark before shutdown', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-07');
+    const clock = createFakeMaintenanceClock('2026-08-09T18:00:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await clock.advanceBy(30_000);
+      const [dream] = await runner.waitForStarts(1);
+      assert.deepEqual(dream.request, { type: 'dream', date: '2026-08-08' });
+
+      const closing = daemon.close();
+      dream.release();
+      await closing;
+
+      assert.deepEqual(JSON.parse(await readFile(daemon.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-08' },
+      });
+    } finally {
+      for (const start of runner.starts) start.release();
+      await daemon.close();
+    }
+  });
+});
+
+test('unsafe dream state does not stop due memory maintenance', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-08');
+    const clock = createFakeMaintenanceClock('2026-08-09T16:55:01.000Z');
+    const starts = [];
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request) => {
+        starts.push(request);
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const outside = path.join(homeDir, 'outside-maintenance-state.json');
+      await writeFile(outside, '{"outside":true}', { mode: 0o600 });
+      await rm(daemon.paths.maintenanceStateFile);
+      await symlink(outside, daemon.paths.maintenanceStateFile);
+
+      await clock.sleepBy(5 * 60 * 1_000);
+
+      assert.deepEqual(starts, [{ type: 'memory' }]);
+      assert.equal(await readFile(outside, 'utf8'), '{"outside":true}');
+    } finally {
+      await daemon.close();
     }
   });
 });
