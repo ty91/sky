@@ -184,7 +184,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     logger,
     run:
       options.runOperation ??
-      createMaintenanceOperationRunner(paths, logger, configuration, claudeDiagnostics),
+      createMaintenanceOperationRunner(paths, logger, configuration, { claudeDiagnostics }),
     ...options.operationRegistry,
   });
   const adminAuthentication = createAdminAuthentication({

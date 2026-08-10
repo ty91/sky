@@ -17,6 +17,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SlackStartupError } from '../dist/bot.js';
+import { createConfiguration } from '../dist/configuration.js';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { ControlError } from '../dist/skyd/control.js';
 import {
@@ -31,9 +32,11 @@ import {
   watchOperation,
 } from '../dist/skyd/control-uds.js';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
+import { createMaintenanceOperationRunner } from '../dist/skyd/maintenance.js';
 import { createOperationRegistry } from '../dist/skyd/operations.js';
 import { PRODUCT_VERSION } from '../dist/product-version.js';
 import { createRuntimeController } from '../dist/runtime/controller.js';
+import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 
 function permissions(stats) {
   return stats.mode & 0o777;
@@ -137,6 +140,76 @@ function createAbortableOperationRunner() {
       return started ?? new Promise((resolve) => startWaiters.push(resolve));
     },
   };
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
+function createMaintenanceSessionFactory(options = {}) {
+  const promptStarted = createDeferred();
+  const abortStarted = createDeferred();
+  const abortReleased = createDeferred();
+  let sessionCount = 0;
+  let resolvePrompt;
+  let delayedSessionDisposed = false;
+
+  const createSession = async () => {
+    sessionCount += 1;
+    const delayed = options.delayFirstAbort !== false && sessionCount === 1;
+    const listeners = new Set();
+    return {
+      sessionId: `maintenance-session-${sessionCount}`,
+      async prompt() {
+        if (delayed) {
+          promptStarted.resolve();
+          await new Promise((resolve) => {
+            resolvePrompt = resolve;
+          });
+          return;
+        }
+        for (const listener of listeners) {
+          listener({ type: 'assistant_message', text: 'completed' });
+          listener({ type: 'turn_end', text: 'completed' });
+        }
+      },
+      async abort() {
+        if (!delayed) return;
+        abortStarted.resolve();
+        resolvePrompt();
+        await abortReleased.promise;
+      },
+      dispose() {
+        if (delayed) delayedSessionDisposed = true;
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+  };
+  createSession.backend = 'pi';
+
+  return {
+    createSession,
+    promptStarted: promptStarted.promise,
+    abortStarted: abortStarted.promise,
+    releaseAbort: abortReleased.resolve,
+    delayedSessionDisposed: () => delayedSessionDisposed,
+    sessionCount: () => sessionCount,
+  };
+}
+
+async function writeUnreadTranscript(paths) {
+  const transcriptDirectory = path.join(paths.transcriptsDir, 'chat-1');
+  await mkdir(transcriptDirectory, { recursive: true });
+  await writeFile(path.join(transcriptDirectory, 'session-1.md'), '### user\n\nhello\n\n', {
+    mode: 0o600,
+  });
 }
 
 function rawControlRequest(socketFile, method, requestPath) {
@@ -674,6 +747,114 @@ test('maintenance defaults time out memory and dream operations and release runt
     } finally {
       await daemon.close();
     }
+  });
+});
+
+test('maintenance timeout retains operation ownership until the agent session finishes closing', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const paths = createSkyHome({ homeDir });
+    prepareSkyHome(paths);
+    await writeUnreadTranscript(paths);
+    const clock = createFakeClock('2026-08-10T00:00:00.000Z');
+    const sessions = createMaintenanceSessionFactory();
+    const configuration = createConfiguration(paths, { env: {} });
+    const runOperation = createMaintenanceOperationRunner(
+      paths,
+      createJsonlLogger(path.join(paths.logsDir, 'maintenance-test.jsonl'), { now: clock.now }),
+      configuration,
+      { createSession: sessions.createSession },
+    );
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation,
+      operationRegistry: {
+        now: clock.now,
+        timeouts: { memory: 25 },
+        timer: clock.timer,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const memory = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+      await sessions.promptStarted;
+      clock.advanceBy(25);
+      await sessions.abortStarted;
+
+      assert.equal(sessions.delayedSessionDisposed(), false);
+      assert.equal((await getOperation(daemon.paths.socketFile, memory.operationId)).state, 'running');
+      assert.equal((await getDaemonStatus(daemon.paths.socketFile)).activeWorkCount, 1);
+      await assert.rejects(
+        createOperation(daemon.paths.socketFile, { type: 'dream' }),
+        (error) => error instanceof ControlRequestError && error.code === 'operation_active',
+      );
+
+      sessions.releaseAbort();
+      for await (const event of watchOperation(daemon.paths.socketFile, memory.operationId)) {
+        assert.ok(event.sequence > 0);
+      }
+      assert.equal(sessions.delayedSessionDisposed(), true);
+      assert.equal((await getDaemonStatus(daemon.paths.socketFile)).activeWorkCount, 0);
+
+      const dream = await createOperation(daemon.paths.socketFile, {
+        type: 'dream',
+        step: 'summarize',
+      });
+      for await (const event of watchOperation(daemon.paths.socketFile, dream.operationId)) {
+        assert.ok(event.sequence > 0);
+      }
+      assert.equal((await getOperation(daemon.paths.socketFile, dream.operationId)).state, 'succeeded');
+    } finally {
+      sessions.releaseAbort();
+      await daemon.close();
+    }
+  });
+});
+
+test('a maintenance operation cancelled while queued never creates an agent session', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const paths = createSkyHome({ homeDir });
+    prepareSkyHome(paths);
+    await writeUnreadTranscript(paths);
+    const clock = createFakeClock('2026-08-10T00:00:00.000Z');
+    const sessions = createMaintenanceSessionFactory({ delayFirstAbort: false });
+    const runOperation = createMaintenanceOperationRunner(
+      paths,
+      createJsonlLogger(path.join(paths.logsDir, 'queued-cancel-test.jsonl'), { now: clock.now }),
+      createConfiguration(paths, { env: {} }),
+      { createSession: sessions.createSession },
+    );
+    const runtimeController = createRuntimeController({ supervisionMode: 'foreground' });
+    const registry = createOperationRegistry({
+      runtimeController,
+      logger: createJsonlLogger(path.join(paths.logsDir, 'queued-cancel-registry.jsonl'), {
+        now: clock.now,
+      }),
+      run: runOperation,
+      now: clock.now,
+      createId: () => 'queued-cancel',
+      timer: clock.timer,
+    });
+    const created = registry.create({ type: 'memory' });
+    assert.equal(created.ok, true);
+    const terminal = new Promise((resolve) => {
+      const subscription = registry.events(created.operation.id);
+      const unsubscribe = subscription.subscribe((event) => {
+        if (event.type !== 'cancelled') return;
+        unsubscribe();
+        resolve(event);
+      });
+    });
+
+    registry.cancelActive();
+    await terminal;
+
+    assert.equal(sessions.sessionCount(), 0);
+    assert.equal(registry.get(created.operation.id).state, 'cancelled');
+    assert.equal(runtimeController.activeCount(), 0);
+    assert.deepEqual(clock.pendingDelays(), []);
   });
 });
 
