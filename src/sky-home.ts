@@ -25,6 +25,7 @@ export type SkyHome = Readonly<{
   databaseShmFile: string;
   transcriptsDir: string;
   memoryCursorFile: string;
+  maintenanceStateFile: string;
   workspaceDir: string;
   source: 'default' | 'override';
 }>;
@@ -224,6 +225,7 @@ export function prepareSkyHome(home: SkyHome): void {
     home.databaseWalFile,
     home.databaseShmFile,
     home.memoryCursorFile,
+    home.maintenanceStateFile,
   ]) {
     ensurePrivateFile(file);
   }
@@ -263,6 +265,7 @@ export function createSkyHome(options: CreateSkyHomeOptions = {}): SkyHome {
     databaseShmFile: `${databaseFile}-shm`,
     transcriptsDir: path.join(rootDir, 'transcripts'),
     memoryCursorFile: path.join(rootDir, 'memory-cursors.json'),
+    maintenanceStateFile: path.join(rootDir, 'maintenance-state.json'),
     workspaceDir: path.join(rootDir, 'workspace'),
     source,
   });
