@@ -31,7 +31,9 @@ import {
   watchOperation,
 } from '../dist/skyd/control-uds.js';
 import { createJsonlLogger } from '../dist/skyd/logger.js';
+import { createOperationRegistry } from '../dist/skyd/operations.js';
 import { PRODUCT_VERSION } from '../dist/product-version.js';
+import { createRuntimeController } from '../dist/runtime/controller.js';
 
 function permissions(stats) {
   return stats.mode & 0o777;
@@ -76,6 +78,65 @@ async function waitForStatus(socketFile, predicate, timeoutMs = 2_000) {
   assert.fail(
     `status did not reach expected state: ${JSON.stringify(lastStatus)} ${lastError?.message ?? ''}`,
   );
+}
+
+function createFakeClock(initial) {
+  let nowMs = Date.parse(initial);
+  let nextTimerId = 0;
+  const timers = new Map();
+
+  return {
+    now: () => new Date(nowMs),
+    timer: {
+      setTimeout(callback, delayMs) {
+        nextTimerId += 1;
+        timers.set(nextTimerId, { callback, dueAt: nowMs + delayMs });
+        return nextTimerId;
+      },
+      clearTimeout(timerId) {
+        timers.delete(timerId);
+      },
+    },
+    advanceBy(milliseconds) {
+      nowMs += milliseconds;
+      while (true) {
+        const due = [...timers.entries()]
+          .filter(([, timer]) => timer.dueAt <= nowMs)
+          .toSorted((left, right) => left[1].dueAt - right[1].dueAt || left[0] - right[0])[0];
+        if (!due) return;
+        timers.delete(due[0]);
+        due[1].callback();
+      }
+    },
+    pendingDelays: () =>
+      [...timers.values()]
+        .map((timer) => timer.dueAt - nowMs)
+        .toSorted((left, right) => left - right),
+  };
+}
+
+function createAbortableOperationRunner() {
+  const pendingStarts = [];
+  const startWaiters = [];
+
+  return {
+    async run(request, context) {
+      const started = { request, signal: context.signal };
+      const waiter = startWaiters.shift();
+      if (waiter) waiter(started);
+      else pendingStarts.push(started);
+
+      await new Promise((resolve) => {
+        if (context.signal.aborted) resolve();
+        else context.signal.addEventListener('abort', resolve, { once: true });
+      });
+      return { summary: 'private agent output xoxb-operation-secret' };
+    },
+    nextStart() {
+      const started = pendingStarts.shift();
+      return started ?? new Promise((resolve) => startWaiters.push(resolve));
+    },
+  };
 }
 
 function rawControlRequest(socketFile, method, requestPath) {
@@ -555,6 +616,150 @@ test('maintenance operations are single-flight, observable, and included in daem
     } finally {
       releaseOperation();
       await daemon.close();
+    }
+  });
+});
+
+test('maintenance defaults time out memory and dream operations and release runtime ownership', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const clock = createFakeClock('2026-08-10T00:00:00.000Z');
+    const runner = createAbortableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      operationRegistry: { now: clock.now, timer: clock.timer },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+
+      const memory = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+      const memoryStart = await runner.nextStart();
+      assert.equal(memoryStart.request.type, 'memory');
+      assert.deepEqual(clock.pendingDelays(), [10 * 60 * 1_000]);
+      clock.advanceBy(10 * 60 * 1_000 - 1);
+      assert.equal((await getOperation(daemon.paths.socketFile, memory.operationId)).state, 'running');
+      clock.advanceBy(1);
+      const memoryEvents = [];
+      for await (const event of watchOperation(daemon.paths.socketFile, memory.operationId)) {
+        memoryEvents.push(event);
+      }
+      assert.equal(memoryStart.signal.aborted, true);
+      assert.deepEqual(memoryEvents.map((event) => event.type), ['queued', 'running', 'failed']);
+      const failedMemory = await getOperation(daemon.paths.socketFile, memory.operationId);
+      assert.equal(failedMemory.state, 'failed');
+      assert.equal(failedMemory.finishedAt, '2026-08-10T00:10:00.000Z');
+      assert.equal(failedMemory.result, null);
+      assert.deepEqual(failedMemory.error, { code: 'operation_failed' });
+      assert.equal((await getDaemonStatus(daemon.paths.socketFile)).activeWorkCount, 0);
+
+      const dream = await createOperation(daemon.paths.socketFile, { type: 'dream' });
+      const dreamStart = await runner.nextStart();
+      assert.equal(dreamStart.request.type, 'dream');
+      assert.deepEqual(clock.pendingDelays(), [60 * 60 * 1_000]);
+      clock.advanceBy(60 * 60 * 1_000);
+      for await (const event of watchOperation(daemon.paths.socketFile, dream.operationId)) {
+        assert.ok(event.sequence > 0);
+      }
+      assert.equal(dreamStart.signal.aborted, true);
+      assert.equal((await getOperation(daemon.paths.socketFile, dream.operationId)).state, 'failed');
+      assert.equal((await getDaemonStatus(daemon.paths.socketFile)).activeWorkCount, 0);
+      assert.deepEqual(clock.pendingDelays(), []);
+
+      const logs = await readFile(daemon.paths.logFile, 'utf8');
+      assert.match(logs, /memory operation timed out after 600000ms/);
+      assert.match(logs, /dream operation timed out after 3600000ms/);
+      assert.doesNotMatch(logs, /private agent output|xoxb-operation-secret/);
+    } finally {
+      await daemon.close();
+    }
+  });
+});
+
+test('a completed maintenance operation clears its timer without a late abort or event', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const clock = createFakeClock('2026-08-10T00:00:00.000Z');
+    let operationSignal;
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (_request, context) => {
+        operationSignal = context.signal;
+        return { ok: true };
+      },
+      operationRegistry: { now: clock.now, timer: clock.timer },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const { operationId } = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+      const events = [];
+      for await (const event of watchOperation(daemon.paths.socketFile, operationId)) {
+        events.push(event);
+      }
+      assert.deepEqual(clock.pendingDelays(), []);
+      assert.equal(operationSignal.aborted, false);
+
+      clock.advanceBy(24 * 60 * 60 * 1_000);
+
+      assert.equal(operationSignal.aborted, false);
+      assert.equal((await getOperation(daemon.paths.socketFile, operationId)).state, 'succeeded');
+      assert.deepEqual(events.map((event) => event.type), ['queued', 'running', 'succeeded']);
+    } finally {
+      await daemon.close();
+    }
+  });
+});
+
+test('operation registry resolves the load-bearing timeout and drain race once', async () => {
+  await withTempHome(async (homeDir) => {
+    for (const first of ['timeout', 'drain']) {
+      const clock = createFakeClock('2026-08-10T00:00:00.000Z');
+      const runner = createAbortableOperationRunner();
+      const runtimeController = createRuntimeController({ supervisionMode: 'foreground' });
+      const registry = createOperationRegistry({
+        runtimeController,
+        logger: createJsonlLogger(path.join(homeDir, `${first}.jsonl`), { now: clock.now }),
+        run: runner.run,
+        now: clock.now,
+        createId: () => first,
+        timeouts: { memory: 25, dream: 50 },
+        timer: clock.timer,
+      });
+      const created = registry.create({ type: first === 'timeout' ? 'memory' : 'dream' });
+      assert.equal(created.ok, true);
+      const started = await runner.nextStart();
+      assert.deepEqual(clock.pendingDelays(), [first === 'timeout' ? 25 : 50]);
+      const terminal = new Promise((resolve) => {
+        const subscription = registry.events(created.operation.id);
+        const unsubscribe = subscription.subscribe((event) => {
+          if (event.type !== 'failed' && event.type !== 'cancelled') return;
+          unsubscribe();
+          resolve(event);
+        });
+      });
+
+      if (first === 'timeout') {
+        clock.advanceBy(25);
+        registry.cancelActive();
+      } else {
+        registry.cancelActive();
+        clock.advanceBy(50);
+      }
+
+      const terminalEvent = await terminal;
+      assert.equal(started.signal.aborted, true);
+      assert.equal(terminalEvent.type, first === 'timeout' ? 'failed' : 'cancelled');
+      assert.equal(registry.get(created.operation.id).state, terminalEvent.type);
+      assert.equal(
+        registry
+          .events(created.operation.id)
+          .events.filter((event) => event.type === 'failed' || event.type === 'cancelled').length,
+        1,
+      );
+      assert.equal(runtimeController.activeCount(), 0);
+      assert.deepEqual(clock.pendingDelays(), []);
     }
   });
 });
