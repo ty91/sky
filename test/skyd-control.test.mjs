@@ -184,12 +184,12 @@ function createControllableOperationRunner() {
   const waiters = [];
 
   return {
-    async run(request) {
+    async run(request, context) {
       let release;
       const gate = new Promise((resolve) => {
         release = resolve;
       });
-      const start = { request, release };
+      const start = { request, signal: context.signal, release };
       starts.push(start);
       for (const resolve of waiters.splice(0)) resolve();
       await gate;
@@ -1112,6 +1112,47 @@ test('a scheduled dream that succeeds during drain persists its watermark before
       });
     } finally {
       for (const start of runner.starts) start.release();
+      await daemon.close();
+    }
+  });
+});
+
+test('drain timeout abandons a scheduled dream that ignores abort', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-07');
+    const clock = createFakeMaintenanceClock('2026-08-09T18:00:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      stopDrainTimeoutMs: 25,
+      operationRegistry: { timeouts: { dream: 1_000 } },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    let closing;
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await clock.advanceBy(30_000);
+      const [dream] = await runner.waitForStarts(1);
+      assert.deepEqual(dream.request, { type: 'dream', date: '2026-08-08' });
+
+      closing = daemon.close();
+      const outcome = await Promise.race([
+        closing.then(() => 'closed'),
+        new Promise((resolve) => setTimeout(() => resolve('timed_out'), 200)),
+      ]);
+
+      assert.equal(outcome, 'closed');
+      assert.equal(dream.signal.aborted, true);
+    } finally {
+      for (const start of runner.starts) start.release();
+      await closing;
       await daemon.close();
     }
   });

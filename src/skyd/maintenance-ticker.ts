@@ -19,11 +19,14 @@ type ScheduledDream = {
   targetDate: string;
   state: 'active' | 'persistence_pending';
   completion: Promise<void>;
+  observer: AbortController;
 };
 
 export type MaintenanceTicker = {
   start(): void;
   stop(): Promise<void>;
+  waitForScheduledDream(): Promise<void>;
+  abandonScheduledDream(): void;
 };
 
 export type MaintenanceTickerOptions = {
@@ -32,7 +35,7 @@ export type MaintenanceTickerOptions = {
       | Extract<OperationRequest, { type: 'memory' }>
       | { type: 'dream'; date: string },
   ): CreateOperationResult | Promise<CreateOperationResult>;
-  waitForOperation(operationId: string): Promise<OperationRecord>;
+  waitForOperation(operationId: string, signal: AbortSignal): Promise<OperationRecord>;
   loadDreamWatermark(latestDueDate: string): string | null | Promise<string | null>;
   recordDreamSuccess(targetDate: string): void | Promise<void>;
   isConfigurationReady(): boolean | Promise<boolean>;
@@ -106,7 +109,7 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
   const completeScheduledDream = async (dream: ScheduledDream) => {
     let operation: OperationRecord;
     try {
-      operation = await options.waitForOperation(dream.operationId);
+      operation = await options.waitForOperation(dream.operationId, dream.observer.signal);
     } catch (error) {
       if (scheduledDream !== dream) return;
       scheduledDream = undefined;
@@ -155,6 +158,7 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
       targetDate,
       state: 'active',
       completion: Promise.resolve(),
+      observer: new AbortController(),
     };
     scheduledDream = dream;
     dream.completion = completeScheduledDream(dream);
@@ -230,7 +234,16 @@ export function createMaintenanceTicker(options: MaintenanceTickerOptions): Main
         intervalHandle = undefined;
       }
       await activeTick;
+    },
+
+    async waitForScheduledDream() {
       await scheduledDream?.completion;
+    },
+
+    abandonScheduledDream() {
+      const dream = scheduledDream;
+      scheduledDream = undefined;
+      dream?.observer.abort();
     },
   };
 }

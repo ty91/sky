@@ -119,20 +119,28 @@ function operationIsTerminal(operation: OperationRecord): boolean {
 function waitForOperationTerminal(
   operations: OperationRegistry,
   operationId: string,
+  signal: AbortSignal,
 ): Promise<OperationRecord> {
+  if (signal.aborted) return Promise.reject(new Error('Scheduled operation observation aborted.'));
   const observed = operations.events(operationId);
   if (!observed) return Promise.reject(new Error('Scheduled operation was not found.'));
   if (operationIsTerminal(observed.operation)) return Promise.resolve(observed.operation);
   return new Promise((resolve, reject) => {
+    const abort = () => {
+      unsubscribe();
+      reject(new Error('Scheduled operation observation aborted.'));
+    };
     const unsubscribe = observed.subscribe((event) => {
       if (event.type !== 'succeeded' && event.type !== 'failed' && event.type !== 'cancelled') {
         return;
       }
       unsubscribe();
+      signal.removeEventListener('abort', abort);
       const operation = operations.get(operationId);
       if (operation) resolve(operation);
       else reject(new Error('Scheduled operation was not found after completion.'));
     });
+    signal.addEventListener('abort', abort, { once: true });
   });
 }
 
@@ -233,7 +241,8 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const maintenanceState = createMaintenanceStateStore(paths);
   const maintenanceTicker = createMaintenanceTicker({
     submitOperation: (request) => operations.create(request),
-    waitForOperation: (operationId) => waitForOperationTerminal(operations, operationId),
+    waitForOperation: (operationId, signal) =>
+      waitForOperationTerminal(operations, operationId, signal),
     loadDreamWatermark: (latestDueDate) => {
       const workspace = configuration.resolveRuntime().settings.workspace;
       return maintenanceState.loadOrBootstrap(workspace, latestDueDate);
@@ -521,14 +530,16 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
     mutable.runtimeState = 'draining';
     mutable.nextRetryAt = null;
-    const tickerStopping = maintenanceTicker.stop();
+    await maintenanceTicker.stop();
     const drain = await runtimeController.drain();
     if (drain.timedOut) {
       addError('drain_timeout');
       logger.log('warn', 'runtime', 'Drain deadline exceeded; aborting remaining activity.');
       operations.cancelActive();
+      maintenanceTicker.abandonScheduledDream();
+    } else {
+      await maintenanceTicker.waitForScheduledDream();
     }
-    await tickerStopping;
     await runtime?.close();
     runtime = undefined;
     scheduledJobStore.close();
