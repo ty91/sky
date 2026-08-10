@@ -903,14 +903,18 @@ test('maintenance ticker rejects a due operation once daemon drain begins', asyn
         clearInterval: clock.clearInterval,
       },
     });
-    await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
 
-    const closing = daemon.close();
-    await clock.advanceBy(5 * 60 * 1_000);
-    await closing;
+      const closing = daemon.close();
+      await clock.advanceBy(5 * 60 * 1_000);
+      await closing;
 
-    assert.deepEqual(starts, []);
-    assert.equal(clock.activeCount(), 0);
+      assert.deepEqual(starts, []);
+      assert.equal(clock.activeCount(), 0);
+    } finally {
+      await daemon.close();
+    }
   });
 });
 
