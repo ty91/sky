@@ -151,8 +151,10 @@ function latestDailyEpisode(workspace: string, latestDueDate: string): string | 
           entry.name.slice(0, -3) <= latestDueDate,
       )
       .map((entry) => entry.name.slice(0, -3))
-      .toSorted()
-      .at(-1) ?? null;
+      .reduce<string | null>(
+        (latest, dateKey) => (latest === null || dateKey > latest ? dateKey : latest),
+        null,
+      );
   } catch {
     return null;
   }
