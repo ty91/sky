@@ -32,6 +32,10 @@ import {
 import { createJsonlLogger, type JsonlLoggerOptions } from './logger.js';
 import { createMaintenanceOperationRunner } from './maintenance.js';
 import {
+  createMaintenanceTicker,
+  type MaintenanceTickerOptions,
+} from './maintenance-ticker.js';
+import {
   createOperationRegistry,
   type OperationRegistry,
   type OperationRegistryOptions,
@@ -80,6 +84,10 @@ export type StartSkydOptions = {
   stopDrainTimeoutMs?: number;
   runOperation?: OperationRunner;
   operationRegistry?: Omit<OperationRegistryOptions, 'runtimeController' | 'logger' | 'run'>;
+  maintenanceTicker?: Omit<
+    MaintenanceTickerOptions,
+    'submitOperation' | 'isConfigurationReady' | 'logger'
+  >;
   admin?:
     | false
     | {
@@ -186,6 +194,18 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       options.runOperation ??
       createMaintenanceOperationRunner(paths, logger, configuration, { claudeDiagnostics }),
     ...options.operationRegistry,
+  });
+  const maintenanceTicker = createMaintenanceTicker({
+    submitOperation: (request) => operations.create(request),
+    isConfigurationReady: () => {
+      try {
+        return configuration.inspect().public.complete;
+      } catch {
+        return false;
+      }
+    },
+    logger,
+    ...options.maintenanceTicker,
   });
   const adminAuthentication = createAdminAuthentication({
     now: adminOptions?.now,
@@ -377,6 +397,8 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     }
   }
 
+  maintenanceTicker.start();
+
   const startRuntime = options.startRuntime ?? startBotRuntime;
   const runtimeTask = (async () => {
     let settings: Settings;
@@ -457,6 +479,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
 
     mutable.runtimeState = 'draining';
     mutable.nextRetryAt = null;
+    await maintenanceTicker.stop();
     const drain = await runtimeController.drain();
     if (drain.timedOut) {
       addError('drain_timeout');
