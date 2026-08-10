@@ -338,6 +338,26 @@ sky operation watch <operation-id>
 
 `memory`와 `dream`은 합쳐서 한 번에 하나만 실행됩니다. 이미 실행 중이면 새 요청은 active operation ID와 함께 거부됩니다. 완료 record는 최대 100개이면서 완료 후 24시간 이내인 것만, event는 operation당 최근 1,000개만 daemon 메모리에 남습니다. daemon을 재시작하면 operation registry는 복원되지 않습니다.
 
+`skyd`는 유효한 configuration이 준비되면 Slack 연결 상태와 무관하게 `*/5 * * * *`, `Asia/Seoul` schedule로 memory operation을 제출합니다. 30초 ticker가 절전이나 긴 operation 때문에 여러 occurrence를 놓쳐도 후속 실행은 한 번으로 합치며, 다른 memory 또는 dream operation이 active이면 queue를 만들지 않고 다음 tick에서 다시 확인합니다.
+
+#### Scheduled memory cutover
+
+기존 사용자 crontab의 `sky memory`에서 내장 ticker로 전환할 때는 두 실행 경로가 겹치지 않도록 다음 순서를 지킵니다.
+
+1. ticker가 포함된 새 build를 아직 시작하지 않은 상태에서 `crontab -l`로 현재 memory와 dream entry를 확인하고 별도 private 파일에 백업합니다.
+2. 새 build를 처음 시작하기 직전에 `crontab -e`를 열어 `sky memory`를 호출하는 entry 한 줄만 제거합니다. `sky dream` entry와 다른 모든 entry는 그대로 둡니다.
+3. `crontab -l`에서 memory entry가 사라지고 dream entry가 남아 있는지 다시 확인합니다.
+4. 새 build를 설치하고 `skyd`를 시작합니다. cron의 memory entry를 제거하기 전에 ticker build를 먼저 시작하면 안 됩니다.
+5. 다음 5분 occurrence와 30초 tick을 기다리면서 `sky logs --json --follow`에서 scope가 `maintenance`이고 message가 `Scheduled memory operation submitted.`인 record의 `operationId`를 확인합니다.
+6. 같은 ID를 `sky operation status <operation-id> --json` 또는 `sky operation watch <operation-id>`로 조회해 `succeeded`가 된 것을 확인한 뒤 cutover를 완료합니다. 제출 record와 같은 `operationId`의 `memory operation succeeded.` structured log도 같은 증거로 사용할 수 있습니다.
+
+첫 내부 실행을 검증하지 못했다면 다음 순서로 rollback합니다.
+
+1. `sky stop`으로 ticker가 포함된 daemon을 먼저 멈추고 종료를 확인합니다.
+2. `crontab -e`에서 백업해 둔 memory entry 한 줄만 복원합니다. 전체 crontab을 백업본으로 덮어쓰거나 dream entry를 변경하지 않습니다.
+3. `crontab -l`에서 memory와 dream entry가 각각 한 번씩만 존재하는지 확인합니다.
+4. daemon이 필요하면 ticker가 없는 이전 build를 복원한 뒤 시작합니다. ticker build를 다시 시작하려면 memory cron entry를 먼저 제거하고 위 cutover를 처음부터 반복합니다.
+
 control interface의 operation endpoint는 다음과 같습니다.
 
 - `POST /operations`: `{"type":"memory"}` 또는 `{"type":"dream","date":"YYYY-MM-DD","step":"summarize|knowledge"}`를 받아 `202`와 operation ID를 반환합니다.
