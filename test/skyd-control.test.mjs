@@ -885,6 +885,35 @@ test('skyd schedules coalesced memory operations independently of Slack and stop
   });
 });
 
+test('maintenance ticker rejects a due operation once daemon drain begins', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const clock = createFakeMaintenanceClock('2026-08-10T00:00:01.000Z');
+    const starts = [];
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request) => {
+        starts.push(request);
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+
+    const closing = daemon.close();
+    await clock.advanceBy(5 * 60 * 1_000);
+    await closing;
+
+    assert.deepEqual(starts, []);
+    assert.equal(clock.activeCount(), 0);
+  });
+});
+
 test('maintenance defaults time out memory and dream operations and release runtime ownership', async () => {
   await withTempHome(async (homeDir) => {
     await writeValidSettings(homeDir);
