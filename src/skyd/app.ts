@@ -35,8 +35,10 @@ import {
   createMaintenanceTicker,
   type MaintenanceTickerOptions,
 } from './maintenance-ticker.js';
+import { createMaintenanceStateStore } from './maintenance-state.js';
 import {
   createOperationRegistry,
+  type OperationRecord,
   type OperationRegistry,
   type OperationRegistryOptions,
   type OperationRunner,
@@ -86,7 +88,12 @@ export type StartSkydOptions = {
   operationRegistry?: Omit<OperationRegistryOptions, 'runtimeController' | 'logger' | 'run'>;
   maintenanceTicker?: Omit<
     MaintenanceTickerOptions,
-    'submitOperation' | 'isConfigurationReady' | 'logger'
+    | 'submitOperation'
+    | 'waitForOperation'
+    | 'loadDreamWatermark'
+    | 'recordDreamSuccess'
+    | 'isConfigurationReady'
+    | 'logger'
   >;
   admin?:
     | false
@@ -100,6 +107,42 @@ export type StartSkydOptions = {
   configurationEnv?: NodeJS.ProcessEnv;
   inspectLaunchAgent?: () => LaunchdStatus | Promise<LaunchdStatus>;
 };
+
+function operationIsTerminal(operation: OperationRecord): boolean {
+  return (
+    operation.state === 'succeeded' ||
+    operation.state === 'failed' ||
+    operation.state === 'cancelled'
+  );
+}
+
+function waitForOperationTerminal(
+  operations: OperationRegistry,
+  operationId: string,
+  signal: AbortSignal,
+): Promise<OperationRecord> {
+  if (signal.aborted) return Promise.reject(new Error('Scheduled operation observation aborted.'));
+  const observed = operations.events(operationId);
+  if (!observed) return Promise.reject(new Error('Scheduled operation was not found.'));
+  if (operationIsTerminal(observed.operation)) return Promise.resolve(observed.operation);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      unsubscribe();
+      reject(new Error('Scheduled operation observation aborted.'));
+    };
+    const unsubscribe = observed.subscribe((event) => {
+      if (event.type !== 'succeeded' && event.type !== 'failed' && event.type !== 'cancelled') {
+        return;
+      }
+      unsubscribe();
+      signal.removeEventListener('abort', abort);
+      const operation = operations.get(operationId);
+      if (operation) resolve(operation);
+      else reject(new Error('Scheduled operation was not found after completion.'));
+    });
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
 
 export type Skyd = {
   paths: SkyHome;
@@ -195,8 +238,16 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       createMaintenanceOperationRunner(paths, logger, configuration, { claudeDiagnostics }),
     ...options.operationRegistry,
   });
+  const maintenanceState = createMaintenanceStateStore(paths);
   const maintenanceTicker = createMaintenanceTicker({
     submitOperation: (request) => operations.create(request),
+    waitForOperation: (operationId, signal) =>
+      waitForOperationTerminal(operations, operationId, signal),
+    loadDreamWatermark: (latestDueDate) => {
+      const workspace = configuration.resolveRuntime().settings.workspace;
+      return maintenanceState.loadOrBootstrap(workspace, latestDueDate);
+    },
+    recordDreamSuccess: (targetDate) => maintenanceState.recordDreamSuccess(targetDate),
     isConfigurationReady: () => {
       try {
         return configuration.inspect().public.complete;
@@ -485,6 +536,9 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       addError('drain_timeout');
       logger.log('warn', 'runtime', 'Drain deadline exceeded; aborting remaining activity.');
       operations.cancelActive();
+      maintenanceTicker.abandonScheduledDream();
+    } else {
+      await maintenanceTicker.waitForScheduledDream();
     }
     await runtime?.close();
     runtime = undefined;

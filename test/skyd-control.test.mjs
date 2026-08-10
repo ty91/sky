@@ -65,6 +65,19 @@ async function writeValidSettings(homeDir) {
   );
 }
 
+async function writeMaintenanceState(homeDir, targetDate) {
+  const stateFile = path.join(homeDir, '.sky', 'maintenance-state.json');
+  await mkdir(path.dirname(stateFile), { recursive: true });
+  await writeFile(
+    stateFile,
+    JSON.stringify({
+      schemaVersion: 1,
+      dream: { lastSuccessfulTargetDate: targetDate },
+    }),
+    { mode: 0o600 },
+  );
+}
+
 async function waitForStatus(socketFile, predicate, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
   let lastStatus;
@@ -147,10 +160,18 @@ function createFakeMaintenanceClock(initial) {
         nowMs = due[1].nextAt;
         due[1].nextAt += due[1].delayMs;
         due[1].callback();
-        await Promise.resolve();
-        await Promise.resolve();
+        for (let index = 0; index < 10; index += 1) await Promise.resolve();
       }
       nowMs = target;
+    },
+    async sleepBy(milliseconds) {
+      nowMs += milliseconds;
+      for (const interval of intervals.values()) {
+        if (interval.nextAt > nowMs) continue;
+        interval.nextAt = nowMs + interval.delayMs;
+        interval.callback();
+      }
+      for (let index = 0; index < 10; index += 1) await Promise.resolve();
     },
     startedCount: () => startedCount,
     activeCount: () => intervals.size,
@@ -163,12 +184,12 @@ function createControllableOperationRunner() {
   const waiters = [];
 
   return {
-    async run(request) {
+    async run(request, context) {
       let release;
       const gate = new Promise((resolve) => {
         release = resolve;
       });
-      const start = { request, release };
+      const start = { request, signal: context.signal, release };
       starts.push(start);
       for (const resolve of waiters.splice(0)) resolve();
       await gate;
@@ -762,6 +783,7 @@ test('maintenance operations are single-flight, observable, and included in daem
 test('maintenance ticker uses the next five-minute KST occurrence while Slack reconnects', async () => {
   await withTempHome(async (homeDir) => {
     await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-09');
     const clock = createFakeMaintenanceClock('2026-08-10T00:00:01.000Z');
     const starts = [];
     const daemon = await startSkyd({
@@ -822,6 +844,7 @@ test('skyd schedules coalesced memory operations independently of Slack and stop
       await clock.advanceBy(5 * 60 * 1_000);
       assert.deepEqual(runner.starts, []);
 
+      await writeMaintenanceState(homeDir, '2026-08-09');
       await writeValidSettings(homeDir);
       const manual = await createOperation(daemon.paths.socketFile, { type: 'dream' });
       const [manualStart] = await runner.waitForStarts(1);
@@ -885,9 +908,296 @@ test('skyd schedules coalesced memory operations independently of Slack and stop
   });
 });
 
+test('dream becomes due at 02:00 KST and retries an active-operation collision after cooldown', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-08');
+    const clock = createFakeMaintenanceClock('2026-08-09T16:59:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+        dreamRetryCooldownMs: 60_000,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const manual = await createOperation(daemon.paths.socketFile, { type: 'memory' });
+      const [manualStart] = await runner.waitForStarts(1);
+
+      await clock.advanceBy(30_000);
+      assert.equal(runner.starts.length, 1);
+      await clock.advanceBy(30_000);
+      assert.equal(runner.starts.length, 1);
+      assert.deepEqual(JSON.parse(await readFile(daemon.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-08' },
+      });
+
+      manualStart.release();
+      for await (const event of watchOperation(daemon.paths.socketFile, manual.operationId)) {
+        assert.ok(event.sequence > 0);
+      }
+      await clock.advanceBy(59_000);
+      assert.deepEqual(runner.starts[1].request, { type: 'memory' });
+      runner.starts[1].release();
+      await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
+      await clock.advanceBy(1_000);
+
+      const starts = await runner.waitForStarts(3);
+      assert.deepEqual(starts[2].request, { type: 'dream', date: '2026-08-09' });
+      starts[2].release();
+      await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
+      await clock.advanceBy(30_000);
+      assert.deepEqual(JSON.parse(await readFile(daemon.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-09' },
+      });
+    } finally {
+      for (const start of runner.starts) start.release();
+      await daemon.close();
+    }
+  });
+});
+
+test('skyd catches up successful dream dates before coalesced memory after sleep', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-07');
+    const clock = createFakeMaintenanceClock('2026-08-10T18:00:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await clock.sleepBy(5 * 60 * 1_000);
+
+      const targetDates = ['2026-08-08', '2026-08-09', '2026-08-10'];
+      for (const [index, targetDate] of targetDates.entries()) {
+        const starts = await runner.waitForStarts(index + 1);
+        const current = starts[index];
+        assert.deepEqual(current.request, { type: 'dream', date: targetDate });
+        current.release();
+        await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
+        await clock.advanceBy(30_000);
+      }
+
+      const starts = await runner.waitForStarts(4);
+      assert.deepEqual(starts.map(({ request }) => request), [
+        { type: 'dream', date: '2026-08-08' },
+        { type: 'dream', date: '2026-08-09' },
+        { type: 'dream', date: '2026-08-10' },
+        { type: 'memory' },
+      ]);
+      assert.deepEqual(JSON.parse(await readFile(daemon.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-10' },
+      });
+    } finally {
+      for (const start of runner.starts) start.release();
+      await daemon.close();
+    }
+  });
+});
+
+test('failed scheduled dreams keep their watermark across cooldown and daemon restart', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-07');
+    const clock = createFakeMaintenanceClock('2026-08-09T18:00:01.000Z');
+    const starts = [];
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request) => {
+        starts.push(request);
+        if (request.type === 'dream') throw new Error('dream failed');
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await clock.advanceBy(30_000);
+      await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
+      await clock.advanceBy(5 * 60 * 1_000 - 1);
+      assert.equal(starts.filter(({ type }) => type === 'dream').length, 1);
+
+      await clock.advanceBy(1);
+      assert.equal(starts.filter(({ type }) => type === 'dream').length, 2);
+      assert.deepEqual(JSON.parse(await readFile(daemon.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-07' },
+      });
+    } finally {
+      await daemon.close();
+    }
+
+    const restartedClock = createFakeMaintenanceClock('2026-08-09T18:10:01.000Z');
+    const restartedStarts = [];
+    const restarted = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request) => {
+        restartedStarts.push(request);
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: restartedClock.now,
+        setInterval: restartedClock.setInterval,
+        clearInterval: restartedClock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(restarted.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await restartedClock.advanceBy(30_000);
+      await waitForStatus(restarted.paths.socketFile, (status) => status.activeWorkCount === 0);
+      assert.deepEqual(restartedStarts[0], { type: 'dream', date: '2026-08-08' });
+      assert.deepEqual(JSON.parse(await readFile(restarted.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-08' },
+      });
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test('a scheduled dream that succeeds during drain persists its watermark before shutdown', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-07');
+    const clock = createFakeMaintenanceClock('2026-08-09T18:00:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await clock.advanceBy(30_000);
+      const [dream] = await runner.waitForStarts(1);
+      assert.deepEqual(dream.request, { type: 'dream', date: '2026-08-08' });
+
+      const closing = daemon.close();
+      dream.release();
+      await closing;
+
+      assert.deepEqual(JSON.parse(await readFile(daemon.paths.maintenanceStateFile, 'utf8')), {
+        schemaVersion: 1,
+        dream: { lastSuccessfulTargetDate: '2026-08-08' },
+      });
+    } finally {
+      for (const start of runner.starts) start.release();
+      await daemon.close();
+    }
+  });
+});
+
+test('drain timeout abandons a scheduled dream that ignores abort', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-07');
+    const clock = createFakeMaintenanceClock('2026-08-09T18:00:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: runner.run,
+      stopDrainTimeoutMs: 25,
+      operationRegistry: { timeouts: { dream: 1_000 } },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    let closing;
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      await clock.advanceBy(30_000);
+      const [dream] = await runner.waitForStarts(1);
+      assert.deepEqual(dream.request, { type: 'dream', date: '2026-08-08' });
+
+      closing = daemon.close();
+      const outcome = await Promise.race([
+        closing.then(() => 'closed'),
+        new Promise((resolve) => setTimeout(() => resolve('timed_out'), 200)),
+      ]);
+
+      assert.equal(outcome, 'closed');
+      assert.equal(dream.signal.aborted, true);
+    } finally {
+      for (const start of runner.starts) start.release();
+      await closing;
+      await daemon.close();
+    }
+  });
+});
+
+test('unsafe dream state does not stop due memory maintenance', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-08');
+    const clock = createFakeMaintenanceClock('2026-08-09T16:55:01.000Z');
+    const starts = [];
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request) => {
+        starts.push(request);
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+      const outside = path.join(homeDir, 'outside-maintenance-state.json');
+      await writeFile(outside, '{"outside":true}', { mode: 0o600 });
+      await rm(daemon.paths.maintenanceStateFile);
+      await symlink(outside, daemon.paths.maintenanceStateFile);
+
+      await clock.sleepBy(5 * 60 * 1_000);
+
+      assert.deepEqual(starts, [{ type: 'memory' }]);
+      assert.equal(await readFile(outside, 'utf8'), '{"outside":true}');
+    } finally {
+      await daemon.close();
+    }
+  });
+});
+
 test('maintenance ticker rejects a due operation once daemon drain begins', async () => {
   await withTempHome(async (homeDir) => {
     await writeValidSettings(homeDir);
+    await writeMaintenanceState(homeDir, '2026-08-09');
     const clock = createFakeMaintenanceClock('2026-08-10T00:00:01.000Z');
     const starts = [];
     const daemon = await startSkyd({

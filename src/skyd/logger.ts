@@ -15,6 +15,8 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogContext = {
   operationId?: string;
   sessionId?: string;
+  targetDate?: string;
+  retryAt?: string;
 };
 
 export type LogCursor = string;
@@ -27,6 +29,8 @@ export type LogRecord = {
   message: string;
   operationId?: string;
   sessionId?: string;
+  targetDate?: string;
+  retryAt?: string;
 };
 
 export type LogHistory = {
@@ -209,6 +213,10 @@ export function createJsonlLogger(
           ? { operationId: sanitize(context.operationId, protectedValues) }
           : {}),
         ...(context.sessionId ? { sessionId: sanitize(context.sessionId, protectedValues) } : {}),
+        ...(context.targetDate
+          ? { targetDate: sanitize(context.targetDate, protectedValues) }
+          : {}),
+        ...(context.retryAt ? { retryAt: sanitize(context.retryAt, protectedValues) } : {}),
       };
       const line = `${JSON.stringify(record)}\n`;
       const currentBytes = statSync(filePath).size;
