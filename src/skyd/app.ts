@@ -35,6 +35,7 @@ import {
   createMaintenanceTicker,
   type MaintenanceTickerOptions,
 } from './maintenance-ticker.js';
+import { createMaintenanceStateStore } from './maintenance-state.js';
 import {
   createOperationRegistry,
   type OperationRegistry,
@@ -86,7 +87,12 @@ export type StartSkydOptions = {
   operationRegistry?: Omit<OperationRegistryOptions, 'runtimeController' | 'logger' | 'run'>;
   maintenanceTicker?: Omit<
     MaintenanceTickerOptions,
-    'submitOperation' | 'isConfigurationReady' | 'logger'
+    | 'submitOperation'
+    | 'getOperation'
+    | 'loadDreamWatermark'
+    | 'recordDreamSuccess'
+    | 'isConfigurationReady'
+    | 'logger'
   >;
   admin?:
     | false
@@ -195,8 +201,15 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       createMaintenanceOperationRunner(paths, logger, configuration, { claudeDiagnostics }),
     ...options.operationRegistry,
   });
+  const maintenanceState = createMaintenanceStateStore(paths);
   const maintenanceTicker = createMaintenanceTicker({
     submitOperation: (request) => operations.create(request),
+    getOperation: (operationId) => operations.get(operationId),
+    loadDreamWatermark: (latestDueDate) => {
+      const workspace = configuration.resolveRuntime().settings.workspace;
+      return maintenanceState.loadOrBootstrap(workspace, latestDueDate);
+    },
+    recordDreamSuccess: (targetDate) => maintenanceState.recordDreamSuccess(targetDate),
     isConfigurationReady: () => {
       try {
         return configuration.inspect().public.complete;

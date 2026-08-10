@@ -34,6 +34,13 @@ test('maintenance ticker collapses overlapping interval callbacks into one tick'
       readinessChecks += 1;
       return readiness.promise;
     },
+    loadDreamWatermark() {
+      return '2026-08-09';
+    },
+    recordDreamSuccess() {},
+    getOperation() {
+      return undefined;
+    },
     submitOperation(request) {
       submissions.push(request);
       return {

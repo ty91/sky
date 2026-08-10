@@ -12,6 +12,14 @@ export function nextCronRun(cronExpr: string, timezone: string, after: number): 
   return interval.next().toDate().getTime();
 }
 
+export function previousCronRun(cronExpr: string, timezone: string, before: number): number {
+  const interval = CronExpressionParser.parse(cronExpr, {
+    currentDate: new Date(before),
+    tz: timezone,
+  });
+  return interval.prev().toDate().getTime();
+}
+
 /** Returns true when `cronExpr` is a valid standard cron expression. */
 export function isValidCronExpr(cronExpr: string): boolean {
   try {

@@ -15,7 +15,6 @@ import {
   ensurePrivateDirectory,
   ensurePrivateFile,
   inspectPrivateFile,
-  UnsafeSkyPathError,
   type SkyHome,
 } from '../sky-home.js';
 
@@ -152,7 +151,7 @@ function latestDailyEpisode(workspace: string, latestDueDate: string): string | 
           entry.name.slice(0, -3) <= latestDueDate,
       )
       .map((entry) => entry.name.slice(0, -3))
-      .sort()
+      .toSorted()
       .at(-1) ?? null;
   } catch {
     return null;
@@ -169,6 +168,16 @@ export function createMaintenanceStateStore(home: SkyHome): MaintenanceStateStor
         );
       }
       const existing = readDocument(home.maintenanceStateFile);
+      if (
+        existing?.dream.lastSuccessfulTargetDate !== null &&
+        existing?.dream.lastSuccessfulTargetDate !== undefined &&
+        existing.dream.lastSuccessfulTargetDate > latestDueDate
+      ) {
+        throw new MaintenanceStateError(
+          'maintenance_state_invalid',
+          'The dream maintenance watermark is later than the latest due date.',
+        );
+      }
       if (existing) return existing.dream.lastSuccessfulTargetDate;
       const lastSuccessfulTargetDate = latestDailyEpisode(workspace, latestDueDate);
       writeDocument(home.maintenanceStateFile, {
