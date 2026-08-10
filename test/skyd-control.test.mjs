@@ -118,6 +118,72 @@ function createFakeClock(initial) {
   };
 }
 
+function createFakeMaintenanceClock(initial) {
+  let nowMs = Date.parse(initial);
+  let nextTimerId = 0;
+  let startedCount = 0;
+  const intervals = new Map();
+  const delays = [];
+
+  return {
+    now: () => nowMs,
+    setInterval(callback, delayMs) {
+      nextTimerId += 1;
+      startedCount += 1;
+      delays.push(delayMs);
+      intervals.set(nextTimerId, { callback, delayMs, nextAt: nowMs + delayMs });
+      return nextTimerId;
+    },
+    clearInterval(timerId) {
+      intervals.delete(timerId);
+    },
+    async advanceBy(milliseconds) {
+      const target = nowMs + milliseconds;
+      while (true) {
+        const due = [...intervals.entries()]
+          .filter(([, interval]) => interval.nextAt <= target)
+          .toSorted((left, right) => left[1].nextAt - right[1].nextAt || left[0] - right[0])[0];
+        if (!due) break;
+        nowMs = due[1].nextAt;
+        due[1].nextAt += due[1].delayMs;
+        due[1].callback();
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      nowMs = target;
+    },
+    startedCount: () => startedCount,
+    activeCount: () => intervals.size,
+    delays: () => [...delays],
+  };
+}
+
+function createControllableOperationRunner() {
+  const starts = [];
+  const waiters = [];
+
+  return {
+    async run(request) {
+      let release;
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      const start = { request, release };
+      starts.push(start);
+      for (const resolve of waiters.splice(0)) resolve();
+      await gate;
+      return { ok: true };
+    },
+    async waitForStarts(count) {
+      while (starts.length < count) {
+        await new Promise((resolve) => waiters.push(resolve));
+      }
+      return starts;
+    },
+    starts,
+  };
+}
+
 function createAbortableOperationRunner() {
   const pendingStarts = [];
   const startWaiters = [];
@@ -688,6 +754,165 @@ test('maintenance operations are single-flight, observable, and included in daem
       assert.doesNotMatch(logText, /private agent output/);
     } finally {
       releaseOperation();
+      await daemon.close();
+    }
+  });
+});
+
+test('maintenance ticker uses the next five-minute KST occurrence while Slack reconnects', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const clock = createFakeMaintenanceClock('2026-08-10T00:00:01.000Z');
+    const starts = [];
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => {
+        throw new SlackStartupError(new Error('Slack is unavailable.'));
+      },
+      backoff: { baseMs: 60_000, maxMs: 60_000, jitterRatio: 0 },
+      runOperation: async (request) => {
+        starts.push(request);
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      const degraded = await waitForStatus(
+        daemon.paths.socketFile,
+        (status) => status.runtime.state === 'degraded',
+      );
+      assert.equal(degraded.slack.state, 'retrying');
+      assert.deepEqual(clock.delays(), [30_000]);
+
+      await clock.advanceBy(5 * 60 * 1_000 - 1);
+      assert.deepEqual(starts, []);
+      await clock.advanceBy(1);
+      assert.deepEqual(starts, [{ type: 'memory' }]);
+    } finally {
+      await daemon.close();
+    }
+  });
+});
+
+test('skyd schedules coalesced memory operations independently of Slack and stops the ticker on drain', { timeout: 5_000 }, async () => {
+  await withTempHome(async (homeDir) => {
+    const clock = createFakeMaintenanceClock('2026-08-10T00:00:01.000Z');
+    const runner = createControllableOperationRunner();
+    const daemon = await startSkyd({
+      homeDir,
+      runOperation: runner.run,
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(
+        daemon.paths.socketFile,
+        (status) => status.runtime.state === 'needs_configuration',
+      );
+      assert.equal(clock.startedCount(), 1);
+      assert.equal(clock.activeCount(), 1);
+
+      await clock.advanceBy(5 * 60 * 1_000);
+      assert.deepEqual(runner.starts, []);
+
+      await writeValidSettings(homeDir);
+      const manual = await createOperation(daemon.paths.socketFile, { type: 'dream' });
+      const [manualStart] = await runner.waitForStarts(1);
+      assert.equal(manualStart.request.type, 'dream');
+
+      await clock.advanceBy(30_000);
+      assert.equal(runner.starts.length, 1);
+
+      manualStart.release();
+      for await (const event of watchOperation(daemon.paths.socketFile, manual.operationId)) {
+        assert.ok(event.sequence > 0);
+      }
+
+      await clock.advanceBy(30_000);
+      const scheduledStarts = await runner.waitForStarts(2);
+      assert.deepEqual(scheduledStarts.map(({ request }) => request.type), ['dream', 'memory']);
+
+      await clock.advanceBy(11 * 60 * 1_000);
+      assert.equal(runner.starts.length, 2);
+
+      scheduledStarts[1].release();
+      await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
+      await clock.advanceBy(30_000);
+      const coalescedStarts = await runner.waitForStarts(3);
+      assert.deepEqual(coalescedStarts.map(({ request }) => request.type), [
+        'dream',
+        'memory',
+        'memory',
+      ]);
+
+      coalescedStarts[2].release();
+      await waitForStatus(daemon.paths.socketFile, (status) => status.activeWorkCount === 0);
+      const records = (await readFile(daemon.paths.logFile, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      const submissions = records.filter(
+        (record) =>
+          record.scope === 'maintenance' && record.message === 'Scheduled memory operation submitted.',
+      );
+      assert.equal(submissions.length, 2);
+      for (const submission of submissions) {
+        assert.ok(
+          records.some(
+            (record) =>
+              record.scope === 'operation' &&
+              record.operationId === submission.operationId &&
+              record.message === 'memory operation succeeded.',
+          ),
+        );
+      }
+    } finally {
+      for (const start of runner.starts) start.release();
+      await daemon.close();
+    }
+
+    assert.equal(clock.activeCount(), 0);
+    const startCount = runner.starts.length;
+    await clock.advanceBy(10 * 60 * 1_000);
+    assert.equal(runner.starts.length, startCount);
+  });
+});
+
+test('maintenance ticker rejects a due operation once daemon drain begins', async () => {
+  await withTempHome(async (homeDir) => {
+    await writeValidSettings(homeDir);
+    const clock = createFakeMaintenanceClock('2026-08-10T00:00:01.000Z');
+    const starts = [];
+    const daemon = await startSkyd({
+      homeDir,
+      startRuntime: async () => ({ close: async () => {} }),
+      runOperation: async (request) => {
+        starts.push(request);
+        return { ok: true };
+      },
+      maintenanceTicker: {
+        now: clock.now,
+        setInterval: clock.setInterval,
+        clearInterval: clock.clearInterval,
+      },
+    });
+    try {
+      await waitForStatus(daemon.paths.socketFile, (status) => status.runtime.state === 'ready');
+
+      const closing = daemon.close();
+      await clock.advanceBy(5 * 60 * 1_000);
+      await closing;
+
+      assert.deepEqual(starts, []);
+      assert.equal(clock.activeCount(), 0);
+    } finally {
       await daemon.close();
     }
   });
