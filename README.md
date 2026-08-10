@@ -338,7 +338,9 @@ sky operation watch <operation-id>
 
 `memory`와 `dream`은 합쳐서 한 번에 하나만 실행됩니다. 이미 실행 중이면 새 요청은 active operation ID와 함께 거부됩니다. 완료 record는 최대 100개이면서 완료 후 24시간 이내인 것만, event는 operation당 최근 1,000개만 daemon 메모리에 남습니다. daemon을 재시작하면 operation registry는 복원되지 않습니다.
 
-`skyd`는 유효한 configuration이 준비되면 Slack 연결 상태와 무관하게 `*/5 * * * *`, `Asia/Seoul` schedule로 memory operation을 제출합니다. 30초 ticker가 절전이나 긴 operation 때문에 여러 occurrence를 놓쳐도 후속 실행은 한 번으로 합치며, 다른 memory 또는 dream operation이 active이면 queue를 만들지 않고 다음 tick에서 다시 확인합니다.
+`skyd`는 유효한 configuration이 준비되면 Slack 연결 상태와 무관하게 memory와 dream을 예약 실행합니다. Memory는 `*/5 * * * *`, dream은 `0 2 * * *`, 모두 `Asia/Seoul` 기준입니다. 30초 ticker가 절전이나 긴 operation 때문에 여러 memory occurrence를 놓쳐도 후속 실행은 한 번으로 합칩니다. Dream은 같은 tick의 memory보다 먼저 검사하며, 마지막 성공 target date 다음 날부터 어제까지 누락된 날짜를 오래된 순서로 한 번씩 실행합니다.
+
+Dream의 전체 summarize·knowledge operation이 `succeeded`가 된 뒤에만 Sky home의 `maintenance-state.json` watermark가 원자적으로 전진합니다. 이 private state는 versioned JSON document이며 mode `0600`인 regular file이어야 합니다. 최초 state가 없을 때만 workspace의 가장 최근 due daily episode를 완료된 날짜로 bootstrap합니다. 이후에는 daily 파일 존재로 성공을 추론하지 않습니다. 실패, timeout 또는 active-operation 충돌은 watermark를 전진시키지 않고 5분 cooldown 뒤 재시도합니다.
 
 #### Scheduled memory cutover
 
@@ -357,6 +359,27 @@ sky operation watch <operation-id>
 2. `crontab -e`에서 백업해 둔 memory entry 한 줄만 복원합니다. 전체 crontab을 백업본으로 덮어쓰거나 dream entry를 변경하지 않습니다.
 3. `crontab -l`에서 memory와 dream entry가 각각 한 번씩만 존재하는지 확인합니다.
 4. daemon이 필요하면 ticker가 없는 이전 build를 복원한 뒤 시작합니다. ticker build를 다시 시작하려면 memory cron entry를 먼저 제거하고 위 cutover를 처음부터 반복합니다.
+
+#### Scheduled dream cutover
+
+Dream ticker를 처음 활성화할 때는 TY-57 cutover가 끝나 사용자 crontab에 memory entry는 없고 dream entry만 한 번 남아 있는 상태에서 시작합니다. 설치와 `sky update`는 crontab을 읽거나 변경하지 않으므로 이 전환은 명시적인 수동 작업입니다.
+
+1. dream ticker가 포함된 새 build를 아직 시작하지 않은 상태에서 `crontab -l`로 memory entry가 없고 dream entry가 정확히 한 번 있는지 확인합니다. 전체 crontab을 mode `0600`인 private 파일에 백업합니다.
+2. 새 build를 처음 활성화하기 직전에 `crontab -e`를 열어 Sky의 `dream` entry 한 줄만 제거합니다. 다른 사용자 entry는 변경하지 않습니다.
+3. `crontab -l`을 다시 읽어 Sky memory/dream entry가 모두 없고 다른 entry가 보존되었는지 확인합니다.
+4. 새 build를 설치하고 `skyd`를 시작합니다. dream cron entry를 제거하기 전에 ticker build를 시작하면 안 됩니다.
+5. 첫 30초 tick 뒤 `maintenance-state.json`이 생기고 가장 최근 existing due daily episode를 한 번만 bootstrap했는지 확인합니다. Watermark보다 최신인 due date가 있으면 `sky logs --json --follow`의 `Scheduled dream operation submitted.` record에서 `targetDate`와 `operationId`를 기록합니다. 이미 최신 due date까지 bootstrap되었다면 다음 KST 02:00 occurrence를 기다리며 state를 인위적으로 변경하지 않습니다.
+6. operation이 제출되면 `sky operation watch <operation-id> --json` 또는 `sky operation status <operation-id> --json`으로 전체 operation이 `succeeded`가 되었는지 확인합니다. 이어 같은 `operationId`와 `targetDate`를 가진 `Dream maintenance watermark advanced.` record를 확인합니다.
+7. 누락일이 여러 개면 각 날짜가 오래된 순서로 제출되고 성공한 날짜만 watermark를 전진시키는지 반복 확인합니다. 다음 5분 occurrence에서는 `Scheduled memory operation submitted.`도 계속 나타나야 합니다.
+8. `maintenance-state.json`이 현재 사용자 소유 regular file이고 mode `0600`인지 확인하고, `crontab -l`에 Sky maintenance entry가 없는 상태를 최종 기록합니다.
+
+내부 dream 실행이나 watermark를 검증하지 못했다면 다음 순서로 rollback합니다.
+
+1. `sky stop`으로 dream ticker build를 먼저 멈추고 daemon 종료를 확인합니다.
+2. ticker가 없는 이전 build를 복원하되 아직 daemon을 시작하지 않습니다.
+3. `crontab -e`에서 백업한 Sky dream entry 한 줄만 복원합니다. 전체 crontab을 백업본으로 덮어쓰지 않습니다.
+4. `crontab -l`에서 memory entry는 없고 dream entry가 정확히 한 번인지 확인한 뒤 이전 daemon을 시작합니다.
+5. ticker build를 다시 활성화하려면 외부 dream entry를 먼저 제거하고 cutover 절차를 처음부터 반복합니다. 외부 cron과 내장 ticker를 동시에 실행하지 않습니다.
 
 control interface의 operation endpoint는 다음과 같습니다.
 

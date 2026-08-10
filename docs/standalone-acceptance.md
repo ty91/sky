@@ -46,6 +46,8 @@ Standalone 설치 후 `sky update`는 GitHub의 latest release redirect를 무�
 
 `pnpm test:standalone:update`는 mock latest-release API와 release asset 서버를 사용해 이미 최신인 경우의 무변경, download·checksum·architecture 실패 시 executable·daemon 무변경, restart 실패 시 이전 executable 복원, 성공 시 원자적 교체와 target version daemon restart, 설정이 없는 daemon의 update, Node.js runtime 거부를 검증한다. 이 smoke는 `bun run build:standalone` 뒤에 실행한다. `--release-api-url <url>`은 이 mock server처럼 latest-release API endpoint를 명시적으로 바꿔야 하는 검증 환경을 위한 override다.
 
+Standalone installer와 `sky update`는 사용자 crontab을 읽거나 변경하지 않는다. Maintenance cutover는 release 설치와 분리된 수동 운영 절차이며, 설치·업데이트 acceptance에서도 기존 crontab이 그대로 유지되어야 한다.
+
 메타파일 audit 자체는 합성된 duplicate와 non-target 입력을 `pnpm test`에서 별도로 거부한다.
 
 ## 실제 launchd lifecycle 검증
@@ -93,6 +95,20 @@ foreground daemon은 충돌 없는 임시 admin port로 시작한다.
 ```
 
 다른 terminal에서도 같은 `HOME`, `SKY_HOME`, `PATH`를 설정한다. daemon이 실행 중인 상태에서 `sky init --from-stdin --json --no-restart`로 backend, model, workspace, Slack credential과 필요한 Claude credential을 저장한다. 입력 JSON은 mode `0600`인 임시 파일로 만들고 acceptance 종료 시 삭제한다. 설정 변경 후 foreground daemon을 종료하고 같은 명령으로 다시 시작해 새 설정을 적용한다.
+
+## 외부 cron 없는 maintenance acceptance
+
+실제 backend acceptance 환경에서 memory와 dream이 standalone daemon의 내장 ticker만으로 실행되는지 확인한다. 이 절차를 시작하기 전에 `crontab -l`을 읽어 Sky의 memory/dream entry가 모두 없는지 확인한다. 다른 crontab entry는 변경하지 않으며 installer나 `sky update`가 이 상태를 대신 만들 것이라고 가정하지 않는다.
+
+1. 유효한 backend, model, workspace와 credential을 설정한 격리 Sky home에서 `maintenance-state.json`과 due daily episode가 아직 없는 상태로 foreground daemon을 시작한다. 이 fixture는 bootstrap 직후 실행할 최신 due date가 하나 생기게 한다.
+2. 시작 후 첫 30초 tick에서 `sky logs --json --follow`의 `Scheduled dream operation submitted.` record를 확인하고 `operationId`와 `targetDate`를 기록한다. 기존 due daily episode가 있는 workspace라면 그 다음 날짜부터, 없으면 최신 due date부터 시작해야 한다.
+3. `sky operation watch <operation-id> --json`으로 summarize와 knowledge를 포함한 전체 dream operation이 `succeeded`가 되는지 확인한다.
+4. 같은 operation의 `Dream maintenance watermark advanced.` record를 확인한다. `maintenance-state.json`의 `schemaVersion`은 `1`, `dream.lastSuccessfulTargetDate`는 기록한 target date여야 하며 파일은 현재 사용자 소유 regular file, mode `0600`이어야 한다.
+5. daemon을 종료했다가 같은 Sky home으로 다시 시작한다. 이미 성공한 target date가 다시 제출되지 않고, 남은 누락일이 있으면 그 다음 날짜만 제출되는지 확인한다.
+6. 다음 5분 schedule과 30초 tick 안에 `Scheduled memory operation submitted.` record가 나타나고 해당 operation이 `succeeded`가 되는지 확인한다. 여러 occurrence 동안 daemon이 멈췄다가 재시작되어도 memory operation은 한 번으로 합쳐져야 한다.
+7. acceptance 종료 시 `crontab -l`을 다시 읽어 Sky memory/dream entry가 여전히 없고, 테스트 중 설치·업데이트·daemon 실행이 crontab을 변경하지 않았음을 기록한다.
+
+통과 조건은 외부 cron 없이 dream이 KST 02:00 기준의 최신 due target을 따라잡고 성공한 날짜만 영속화하며, memory가 KST 5분 schedule로 계속 실행되는 것이다. Operation 실패, timeout 또는 충돌을 유도한 경우에는 watermark가 그대로이고 다음 30초마다 새 dream을 만들지 않으며 cooldown 후 같은 target date를 재시도해야 한다. 실패 시 credential이나 transcript 본문 대신 operation ID, target date, terminal state와 안전하게 정리한 structured log만 기록한다.
 
 ## Pi turn과 resume
 
