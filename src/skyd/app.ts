@@ -34,6 +34,7 @@ import { createMaintenanceOperationRunner } from './maintenance.js';
 import {
   createOperationRegistry,
   type OperationRegistry,
+  type OperationRegistryOptions,
   type OperationRunner,
 } from './operations.js';
 import { ConfigurationError } from '../configuration.js';
@@ -78,13 +79,7 @@ export type StartSkydOptions = {
   restartDrainTimeoutMs?: number;
   stopDrainTimeoutMs?: number;
   runOperation?: OperationRunner;
-  operationRegistry?: {
-    completedLimit?: number;
-    retentionMs?: number;
-    eventLimit?: number;
-    now?: () => Date;
-    createId?: () => string;
-  };
+  operationRegistry?: Omit<OperationRegistryOptions, 'runtimeController' | 'logger' | 'run'>;
   admin?:
     | false
     | {
@@ -189,7 +184,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     logger,
     run:
       options.runOperation ??
-      createMaintenanceOperationRunner(paths, logger, configuration, claudeDiagnostics),
+      createMaintenanceOperationRunner(paths, logger, configuration, { claudeDiagnostics }),
     ...options.operationRegistry,
   });
   const adminAuthentication = createAdminAuthentication({

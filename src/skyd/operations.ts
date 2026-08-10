@@ -71,6 +71,13 @@ export type OperationRegistry = {
   cancelActive(): void;
 };
 
+export type OperationTimeouts = Record<OperationKind, number>;
+
+export type OperationTimer = {
+  setTimeout(callback: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+};
+
 export type OperationRegistryOptions = {
   runtimeController: RuntimeController;
   logger: JsonlLogger;
@@ -80,11 +87,18 @@ export type OperationRegistryOptions = {
   completedLimit?: number;
   retentionMs?: number;
   eventLimit?: number;
+  timeouts?: Partial<OperationTimeouts>;
+  timer?: OperationTimer;
 };
 
 const DEFAULT_COMPLETED_LIMIT = 100;
 const DEFAULT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_EVENT_LIMIT = 1_000;
+const DEFAULT_TIMEOUTS: OperationTimeouts = {
+  memory: 10 * 60 * 1_000,
+  dream: 60 * 60 * 1_000,
+};
+const OPERATION_TIMEOUT_REASON = 'operation_timeout';
 
 function publicRecord(operation: StoredOperation): OperationRecord {
   return {
@@ -106,6 +120,13 @@ export function createOperationRegistry(options: OperationRegistryOptions): Oper
   const completedLimit = options.completedLimit ?? DEFAULT_COMPLETED_LIMIT;
   const retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
   const eventLimit = options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+  const timeouts = { ...DEFAULT_TIMEOUTS, ...options.timeouts };
+  const timer: OperationTimer =
+    options.timer ??
+    {
+      setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+    };
   const operations = new Map<string, StoredOperation>();
   let activeOperationId: string | undefined;
 
@@ -183,17 +204,37 @@ export function createOperationRegistry(options: OperationRegistryOptions): Oper
           options.logger.log('info', 'operation', `${operation.type} operation started.`, {
             operationId: operation.id,
           });
+          const timeoutMs = timeouts[operation.type];
+          const timeout = timer.setTimeout(
+            () => operation.abortController.abort(OPERATION_TIMEOUT_REASON),
+            timeoutMs,
+          );
+          const finishAborted = () => {
+            if (operation.abortController.signal.reason === OPERATION_TIMEOUT_REASON) {
+              operation.state = 'failed';
+              operation.error = { code: 'operation_failed' };
+              emit(operation, 'failed');
+              options.logger.log(
+                'error',
+                'operation',
+                `${operation.type} operation timed out after ${timeoutMs}ms.`,
+                { operationId: operation.id },
+              );
+              return;
+            }
+            operation.state = 'cancelled';
+            emit(operation, 'cancelled');
+            options.logger.log('warn', 'operation', `${operation.type} operation cancelled.`, {
+              operationId: operation.id,
+            });
+          };
           try {
             const result = await options.run(request, {
               signal: operation.abortController.signal,
               progress: (message) => emit(operation, 'progress', message),
             });
             if (operation.abortController.signal.aborted) {
-              operation.state = 'cancelled';
-              emit(operation, 'cancelled');
-              options.logger.log('warn', 'operation', `${operation.type} operation cancelled.`, {
-                operationId: operation.id,
-              });
+              finishAborted();
             } else {
               operation.state = 'succeeded';
               operation.result = result;
@@ -204,11 +245,7 @@ export function createOperationRegistry(options: OperationRegistryOptions): Oper
             }
           } catch (error) {
             if (operation.abortController.signal.aborted) {
-              operation.state = 'cancelled';
-              emit(operation, 'cancelled');
-              options.logger.log('warn', 'operation', `${operation.type} operation cancelled.`, {
-                operationId: operation.id,
-              });
+              finishAborted();
             } else {
               operation.state = 'failed';
               operation.error = { code: 'operation_failed' };
@@ -221,6 +258,7 @@ export function createOperationRegistry(options: OperationRegistryOptions): Oper
               );
             }
           } finally {
+            timer.clearTimeout(timeout);
             operation.finishedAt = now().toISOString();
             if (activeOperationId === operation.id) activeOperationId = undefined;
             lease.release();

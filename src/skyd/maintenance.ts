@@ -7,12 +7,18 @@ import type { SkyHome } from '../sky-home.js';
 import type { JsonlLogger } from './logger.js';
 import type { OperationRunner } from './operations.js';
 import type { ClaudeQueryDiagnostics } from '../agents/backend/claude-observability.js';
+import type { AgentSessionFactory } from '../agents/backend/types.js';
+
+export type MaintenanceOperationRunnerOptions = {
+  claudeDiagnostics?: ClaudeQueryDiagnostics;
+  createSession?: AgentSessionFactory;
+};
 
 export function createMaintenanceOperationRunner(
   skyHome: SkyHome,
   logger: JsonlLogger,
   configuration: Configuration,
-  claudeDiagnostics?: ClaudeQueryDiagnostics,
+  options: MaintenanceOperationRunnerOptions = {},
 ): OperationRunner {
   return async (request, context) => {
     const settings = configuration.resolveRuntime().settings;
@@ -21,18 +27,26 @@ export function createMaintenanceOperationRunner(
       settings.slack.appToken,
       settings.claudeAgentSdk?.oauthToken ?? '',
     ]);
-    const createSession = resolveAgentSessionFactory(settings.agentBackend, {
-      claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
-      claudeDiagnostics,
-    });
+    const createSession =
+      options.createSession ??
+      resolveAgentSessionFactory(settings.agentBackend, {
+        claudeCodeOauthToken: settings.claudeAgentSdk?.oauthToken,
+        claudeDiagnostics: options.claudeDiagnostics,
+      });
     const conversationManager = createConversationManager({
       defaultCwd: settings.workspace,
       createSession,
     });
-    const abort = () => void conversationManager.closeAll();
-    context.signal.addEventListener('abort', abort, { once: true });
+    let closing: Promise<void> | undefined;
+    const closeAll = () => (closing ??= conversationManager.closeAll());
+    const abort = () => void closeAll();
+    if (context.signal.aborted) abort();
+    else context.signal.addEventListener('abort', abort, { once: true });
 
     try {
+      if (context.signal.aborted) {
+        throw new Error('Maintenance operation was aborted before it started.');
+      }
       if (request.type === 'memory') {
         context.progress('Running working-memory update.');
         return await runMemoryAgent({
@@ -55,8 +69,9 @@ export function createMaintenanceOperationRunner(
         dailyFile: dreamDailyFilePath(settings.workspace, result.targetDate),
       };
     } finally {
-      context.signal.removeEventListener('abort', abort);
+      await closing;
       await conversationManager.closeAll();
+      context.signal.removeEventListener('abort', abort);
     }
   };
 }
