@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createAgentSdk } from './helpers/agent-sdk.mjs';
 import { createConfiguration } from '../dist/configuration.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
@@ -27,30 +28,13 @@ function reminder(id, nextRunAt, overrides = {}) {
   };
 }
 
-function createAgentSdk(prompts) {
-  return Object.assign(async ({ key, resume, agent }) => {
-    let listener;
-    return {
-      sessionId: resume?.sessionId ?? `session-${key}`,
-      async prompt(text) {
-        prompts.push(text);
-        const tools = agent.customToolsFactory?.({ sessionKey: key }) ?? [];
-        const final = `reminder:${tools.map(({ name }) => name).join(',')}`;
-        listener?.({ type: 'assistant_message', text: final });
-        listener?.({ type: 'turn_end', text: final });
-      },
-      async abort() {}, dispose() {},
-      subscribe(callback) { listener = callback; return () => { listener = undefined; }; },
-    };
-  }, { backend: 'pi' });
-}
-
 test('a daemon preserves overdue one-shot reminders across offline restarts and skips missed cron occurrences', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'sky-scheduler-recovery-'));
   const skyHome = createSkyHome({ rootDir });
   prepareSkyHome(skyHome);
   const configuration = createConfiguration(skyHome, { env: {} });
-  configuration.patch(0, { agentBackend: 'pi', model: 'anthropic/test' });
+  configuration.patch(0, { agentBackend: 'claude-agent-sdk', model: 'anthropic/test' });
+  configuration.setSecret('claudeAgentSdk.oauthToken', 'test-oauth');
   configuration.setSecret('slack.botToken', 'xoxb-test');
   configuration.setSecret('slack.appToken', 'xapp-test');
   const store = openScheduledJobStore(skyHome);
@@ -70,7 +54,7 @@ test('a daemon preserves overdue one-shot reminders across offline restarts and 
   const options = {
     skyHome, configurationEnv: {}, backoff: { baseMs: 10, maxMs: 10, jitterRatio: 0 },
     runtimeDependencies: {
-      slackSdk: slack.sdk, createSession: createAgentSdk(prompts),
+      slackSdk: slack.sdk, createSession: createAgentSdk({ prompts }),
       scheduler: { now: () => now, setInterval: (callback) => { tick = callback; return 1; }, clearInterval() {} },
     },
   };
@@ -99,7 +83,7 @@ test('a daemon preserves overdue one-shot reminders across offline restarts and 
     assert.equal(posts.length, 1);
     assert.equal(posts[0].channel, 'D123');
     const sessions = await daemon.control.execute({ type: 'sessions.list' });
-    assert.ok(sessions.sessions.some(({ threadKey, backendSessionId }) => threadKey === 'D123:100.001' && backendSessionId === 'session-scheduled:once'));
+    assert.ok(sessions.sessions.some(({ threadKey, backendSessionId }) => threadKey === 'D123:100.001' && backendSessionId === 'sdk-session-1'));
     now = Date.parse('2026-09-09T00:12:00Z');
     tick();
     await eventually(() => assert.equal(store.get('cron').runCount, 1));
@@ -117,7 +101,8 @@ test('a lost delivery is recorded without replaying the agent and leaves later d
   const skyHome = createSkyHome({ rootDir });
   prepareSkyHome(skyHome);
   const configuration = createConfiguration(skyHome, { env: {} });
-  configuration.patch(0, { agentBackend: 'pi', model: 'anthropic/test' });
+  configuration.patch(0, { agentBackend: 'claude-agent-sdk', model: 'anthropic/test' });
+  configuration.setSecret('claudeAgentSdk.oauthToken', 'test-oauth');
   configuration.setSecret('slack.botToken', 'xoxb-test');
   configuration.setSecret('slack.appToken', 'xapp-test');
   const store = openScheduledJobStore(skyHome);
@@ -144,7 +129,7 @@ test('a lost delivery is recorded without replaying the agent and leaves later d
   const daemon = await startSkyd({
     skyHome, configurationEnv: {}, backoff: { baseMs: 10, maxMs: 10, jitterRatio: 0 },
     runtimeDependencies: {
-      slackSdk: slack.sdk, createSession: createAgentSdk(prompts),
+      slackSdk: slack.sdk, createSession: createAgentSdk({ prompts }),
       scheduler: { now: () => now, setInterval: (callback) => { tick = callback; return 1; }, clearInterval() {} },
     },
   });

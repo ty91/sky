@@ -3,34 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createAgentSdk } from './helpers/agent-sdk.mjs';
 import { createConfiguration } from '../dist/configuration.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { getConfiguration, getDaemonStatus } from '../dist/skyd/control-uds.js';
-
-function agentSdk(beforePrompt = async () => {}) {
-  return Object.assign(async ({ agent, key, resume }) => {
-    let listener;
-    let turns = 0;
-    const tools = agent.customToolsFactory?.({ sessionKey: key }) ?? [];
-    return {
-      sessionId: resume?.sessionId ?? `session-${key}`,
-      async prompt() {
-        await beforePrompt();
-        turns += 1;
-        const text = `${turns}:${tools.map(({ name }) => name).join(',')}`;
-        listener?.({ type: 'assistant_message', text });
-        listener?.({ type: 'turn_end', text });
-      },
-      async abort() {},
-      dispose() {},
-      subscribe(callback) {
-        listener = callback;
-        return () => { listener = undefined; };
-      },
-    };
-  }, { backend: 'pi' });
-}
 
 async function waitFor(socketFile, predicate) {
   for (let attempt = 0; attempt < 400; attempt += 1) {
@@ -47,9 +24,10 @@ test(`a daemon with ${partial ? 'partial' : 'no'} Slack configuration accepts in
   const skyHome = createSkyHome({ rootDir });
   prepareSkyHome(skyHome);
   const configuration = createConfiguration(skyHome, { env: {} });
-  configuration.patch(0, { agentBackend: 'pi', model: 'anthropic/test' });
+  configuration.patch(0, { agentBackend: 'claude-agent-sdk', model: 'anthropic/test' });
+  configuration.setSecret('claudeAgentSdk.oauthToken', 'test-oauth');
   if (partial) configuration.setSecret('slack.botToken', 'xoxb-partial');
-  const daemon = await startSkyd({ skyHome, configurationEnv: {}, runtimeDependencies: { createSession: agentSdk() } });
+  const daemon = await startSkyd({ skyHome, configurationEnv: {}, runtimeDependencies: { createSession: createAgentSdk() } });
   try {
     const status = await waitFor(skyHome.socketFile, ({ runtime }) => runtime.state !== 'starting');
     assert.equal(status.runtime.state, 'ready');
@@ -76,7 +54,8 @@ test('Slack authentication retries and socket reconnection preserve an active co
   const skyHome = createSkyHome({ rootDir });
   prepareSkyHome(skyHome);
   const configuration = createConfiguration(skyHome, { env: {} });
-  configuration.patch(0, { agentBackend: 'pi', model: 'anthropic/test' });
+  configuration.patch(0, { agentBackend: 'claude-agent-sdk', model: 'anthropic/test' });
+  configuration.setSecret('claudeAgentSdk.oauthToken', 'test-oauth');
   configuration.setSecret('slack.botToken', 'xoxb-private-test');
   configuration.setSecret('slack.appToken', 'xapp-private-test');
   let available = false;
@@ -87,7 +66,7 @@ test('Slack authentication retries and socket reconnection preserve an active co
   const daemon = await startSkyd({
     skyHome, configurationEnv: {},
     backoff: { baseMs: 10, maxMs: 10, jitterRatio: 0 },
-    runtimeDependencies: { createSession: agentSdk(), slackSdk: slack.sdk },
+    runtimeDependencies: { createSession: createAgentSdk(), slackSdk: slack.sdk },
   });
   try {
     const retrying = await waitFor(skyHome.socketFile, ({ slack: connection }) => connection.state === 'retrying');
@@ -122,7 +101,8 @@ test('draining cancels a stalled Slack startup while allowing the active interna
   const skyHome = createSkyHome({ rootDir });
   prepareSkyHome(skyHome);
   const configuration = createConfiguration(skyHome, { env: {} });
-  configuration.patch(0, { agentBackend: 'pi', model: 'anthropic/test' });
+  configuration.patch(0, { agentBackend: 'claude-agent-sdk', model: 'anthropic/test' });
+  configuration.setSecret('claudeAgentSdk.oauthToken', 'test-oauth');
   configuration.setSecret('slack.botToken', 'xoxb-test');
   configuration.setSecret('slack.appToken', 'xapp-test');
   let release;
@@ -132,7 +112,7 @@ test('draining cancels a stalled Slack startup while allowing the active interna
   const slack = createSlackSdk({ authenticate: () => new Promise(() => {}) });
   const daemon = await startSkyd({
     skyHome, configurationEnv: {},
-    runtimeDependencies: { slackSdk: slack.sdk, createSession: agentSdk(async () => { started(); await gate; }) },
+    runtimeDependencies: { slackSdk: slack.sdk, createSession: createAgentSdk({ beforePrompt: async () => { started(); await gate; } }) },
   });
   try {
     await waitFor(skyHome.socketFile, ({ runtime }) => runtime.state === 'ready');
