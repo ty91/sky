@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('package runtime dependencies no longer include ACP app-server adapters', async () => {
-  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.doesNotMatch(pkg.description, /ACP|app-server/i);
   for (const name of [
@@ -16,7 +16,7 @@ test('package runtime dependencies no longer include ACP app-server adapters', a
 });
 
 test('README describes Pi operation without ACP or Codex app-server setup', async () => {
-  const readme = await readFile('README.md', 'utf8');
+  const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
 
   assert.match(readme, /Pi coding agent/);
   assert.doesNotMatch(readme, /ACP|Codex|app-server|codex-home|@agentclientprotocol|CODEX_|OPENAI_API_KEY/i);

@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { startSkyd } from './helpers/start-skyd.mjs';
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
-const fakeLaunchctl = path.join(repositoryRoot, 'test', 'helpers', 'fake-launchctl.mjs');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
+const fakeLaunchctl = fileURLToPath(new URL('../../../test/helpers/fake-launchctl.mjs', import.meta.url));
 
 async function runCli(args, env) {
   const { stdout, stderr } = await execFileAsync(process.execPath, [skyEntrypoint, ...args], {

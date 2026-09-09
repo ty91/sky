@@ -6,19 +6,19 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectRuntimeRole } from '../dist/runtime-entrypoint.js';
 
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
 const { version: packageVersion } = JSON.parse(
-  readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'),
+  readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
 );
 
 function runNodeEntrypoint(name, args) {
-  return spawnSync(process.execPath, [path.join(repositoryRoot, 'dist', `${name}.js`), ...args], {
+  return spawnSync(process.execPath, [path.join(appRoot, 'dist', `${name}.js`), ...args], {
     encoding: 'utf8',
   });
 }
 
 function runSharedEntrypoint(name, args) {
-  const moduleUrl = pathToFileURL(path.join(repositoryRoot, 'dist', 'runtime-entrypoint.js')).href;
+  const moduleUrl = pathToFileURL(path.join(appRoot, 'dist', 'runtime-entrypoint.js')).href;
   const script = [
     `import { runEntrypoint, runSelectedRuntime } from ${JSON.stringify(moduleUrl)};`,
     'await runEntrypoint(() => runSelectedRuntime(process.argv[1], process.argv.slice(2)));',
@@ -31,7 +31,7 @@ function runSharedEntrypoint(name, args) {
 }
 
 function runBunRuntimeIdentity() {
-  const moduleUrl = pathToFileURL(path.join(repositoryRoot, 'dist', 'runtime-identity.js')).href;
+  const moduleUrl = pathToFileURL(path.join(appRoot, 'dist', 'runtime-identity.js')).href;
   return spawnSync(
     'bun',
     [

@@ -27,8 +27,8 @@ import {
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { bootstrapWorkspace, WorkspaceBootstrapError } from '../dist/workspace-bootstrap.js';
 
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
 
 async function runCli(args, homeDir, input) {
   return new Promise((resolve, reject) => {

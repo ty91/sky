@@ -11,8 +11,8 @@ import { getOperation, watchOperation } from '../dist/skyd/control-uds.js';
 import { startSkyd } from './helpers/start-skyd.mjs';
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
 
 async function setupHome() {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-operation-cli-'));

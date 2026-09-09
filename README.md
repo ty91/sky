@@ -88,6 +88,30 @@ mise exec -- pnpm install --frozen-lockfile
 
 `mise exec -- node --version`, `mise exec -- pnpm --version`, `mise exec -- bun --version`이 각각 Node.js `24.16.0`, pnpm `11.10.0`, Bun `1.3.14`를 출력해야 합니다. Node.js와 pnpm은 개발과 공통 검증에, Bun은 standalone release build에 사용합니다.
 
+### 모노레포 구조
+
+| 위치 | 책임 |
+| --- | --- |
+| `apps/sky` (`@ty91/sky`) | CLI, 데몬, 에이전트, Slack 연결과 해당 구현의 테스트 |
+| `apps/admin` (`@ty91/sky-admin`) | React 관리 화면과 UI 테스트 |
+| `scripts`, `test` | 제품 빌드·패키징·릴리스 도구와 설치·업데이트 등 제품 전체 검증 |
+| 루트 `package.json` | 전체 작업 명령, 공통 개발 도구와 제품 버전 |
+
+의존성은 사용하는 앱의 manifest에 선언합니다. pnpm workspace와 하나의 lockfile을 사용하며, 앱 패키지는 private이고 별도 버전을 갖지 않습니다. CLI·데몬·admin은 루트 제품 버전으로 함께 배포합니다. 분리 근거와 앱 확장 후속 작업은 [ADR-0009](./docs/adr/0009-adopt-pnpm-workspaces.md)에 정리되어 있습니다.
+
+Admin은 `@ty91/sky/admin-types`에서 기존 관리 인터페이스의 타입만 가져옵니다. 이 진입점은 workspace 내부의 `import type` 용도이며 데몬 구현을 브라우저에서 실행하는 경로는 제공하지 않습니다. `react-router@7.18.2`의 선언 파일에 필요한 `@types/react` peer가 누락되어 있어, workspace의 `packageExtensions`로 이를 보완합니다. [pnpm의 타입 의존성 안내](https://pnpm.io/typescript#workspace-usage)를 따르며 타입 패키지를 루트로 끌어올리지 않습니다.
+
+루트에서 `pnpm build`, `pnpm typecheck`, `pnpm test`를 실행하면 각 workspace를 검증합니다. `pnpm build`는 기존 산출물을 지우고 Sky와 admin을 순서대로 빌드합니다. 일반 빌드 결과물은 각각 `apps/sky/dist`, `apps/admin/dist`에 두며, Node.js 데몬은 같은 checkout의 admin 결과물을 제공합니다. Standalone 빌드는 admin을 직접 빌드해 실행 파일에 포함하고, 기존처럼 루트 `dist/standalone`과 `dist/release`를 제품 산출물 경로로 사용합니다.
+
+개별 앱 작업은 다음처럼 실행할 수 있습니다. Sky의 개별 테스트는 빌드된 JavaScript를 사용하므로 먼저 루트 빌드를 실행합니다.
+
+```bash
+pnpm build
+pnpm --filter @ty91/sky test
+pnpm test:admin
+pnpm dev:admin
+```
+
 ## Sky home과 private filesystem
 
 Sky가 소유하는 settings, secret store, control socket, log, SQLite DB, transcript, memory cursor와 기본 workspace는 하나의 **Sky home** 아래에 있습니다. 기본 root는 `~/.sky`입니다.
@@ -131,7 +155,7 @@ sky slack manifest --open
 
 app-level token은 manifest가 만들어 주지 못하므로 3번의 두 번째 항목만 콘솔에서 직접 생성합니다. `--open` 없이 실행하면 링크와 manifest JSON을 출력만 하고, `--json`은 자동화를 위한 안정된 JSON 문서를 냅니다.
 
-manifest의 scope와 event 목록은 `src/slack/manifest.ts` 한 곳에서 정의되고, repo 루트의 `slack-app-manifest.json`과 Slack 연결 검사가 같은 목록을 사용합니다. 체크인된 JSON은 생성물이므로 source를 고친 뒤 `pnpm manifest:sync`로 다시 쓰고, 어긋나면 `test/slack-manifest.test.mjs`가 실패합니다.
+manifest의 scope와 event 목록은 `apps/sky/src/slack/manifest.ts` 한 곳에서 정의되고, repo 루트의 `slack-app-manifest.json`과 Slack 연결 검사가 같은 목록을 사용합니다. 체크인된 JSON은 생성물이므로 source를 고친 뒤 `pnpm manifest:sync`로 다시 쓰고, 어긋나면 `apps/sky/test/slack-manifest.test.mjs`가 실패합니다.
 
 ### 기존 앱 갱신
 
@@ -233,7 +257,7 @@ pnpm test
 ```bash
 SKY_RUN_AGENT_BACKEND_SMOKE=1 \
 SKY_CLAUDE_AGENT_BACKEND_SMOKE_MODEL=anthropic/claude-opus-4-7 \
-node --test test/agent-session-contract.test.mjs
+pnpm --filter @ty91/sky exec node --test test/agent-session-contract.test.mjs
 ```
 
 필요하면 `SKY_PI_AGENT_BACKEND_SMOKE_MODEL`, `SKY_AGENT_BACKEND_SMOKE_WORKSPACE`로 smoke 전용 model과 workspace를 지정할 수 있습니다.

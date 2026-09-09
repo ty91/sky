@@ -19,10 +19,10 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
-const fakeLaunchctl = path.join(repositoryRoot, 'test', 'helpers', 'fake-launchctl.mjs');
-const fakeSkyd = path.join(repositoryRoot, 'test', 'helpers', 'fake-skyd.mjs');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
+const fakeLaunchctl = fileURLToPath(new URL('../../../test/helpers/fake-launchctl.mjs', import.meta.url));
+const fakeSkyd = fileURLToPath(new URL('../../../test/helpers/fake-skyd.mjs', import.meta.url));
 
 async function setup() {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-launch-agent-'));

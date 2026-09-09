@@ -1,23 +1,20 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
-import type { ControlConfiguration } from '../../src/skyd/control';
-import type { AdminOverview } from '../../src/skyd/types';
 import type {
+  AdminOverview,
+  ConnectionCheck,
+  ConnectionTarget,
+  ConnectionsSnapshot,
+  ControlConfiguration,
   RuntimeScheduledJobSummary,
   RuntimeScheduledJobsSnapshot,
   RuntimeSessionSummary,
   RuntimeSessionsSnapshot,
-} from '../../src/runtime/admin';
-import type {
-  ConnectionCheck,
-  ConnectionTarget,
-  ConnectionsSnapshot,
-} from '../../src/connections';
-import type { SecretName, SecretMetadata } from '../../src/configuration';
-import type {
+  SecretMetadata,
+  SecretName,
   WorkspacePrompt,
   WorkspacePromptSnapshot,
-} from '../../src/workspace-prompts';
+} from '@ty91/sky/admin-types';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
 import { ApiError, requestJson, type Session } from './api';
 import { LogsPage } from './LogsPage';
 import { SystemPage } from './SystemPage';

@@ -20,9 +20,9 @@ import {
 import { REQUIRED_SLACK_BOT_SCOPES as SCOPES_VIA_CONNECTIONS } from '../dist/connections.js';
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
-const manifestFile = path.join(repositoryRoot, 'slack-app-manifest.json');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
+const manifestFile = fileURLToPath(new URL('../../../slack-app-manifest.json', import.meta.url));
 
 async function runCli(args) {
   try {

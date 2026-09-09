@@ -4,7 +4,7 @@ declare const SKY_BUILD_VERSION: string | undefined;
 
 function packageVersion(): string {
   const { version } = JSON.parse(
-    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+    readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
   ) as { version: string };
   return version;
 }
