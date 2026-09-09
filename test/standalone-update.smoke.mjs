@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const standaloneSky = path.join(repositoryRoot, 'dist', 'standalone', 'darwin-arm64', 'sky');
-const nodeSky = path.join(repositoryRoot, 'dist', 'index.js');
+const nodeSky = path.join(repositoryRoot, 'apps', 'sky', 'dist', 'index.js');
 const fakeLaunchctl = path.join(repositoryRoot, 'test', 'helpers', 'fake-launchctl.mjs');
 const fakeSkyd = path.join(repositoryRoot, 'test', 'helpers', 'fake-skyd.mjs');
 const currentVersion = JSON.parse(

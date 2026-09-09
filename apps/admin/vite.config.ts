@@ -5,7 +5,7 @@ export default defineConfig({
   root: import.meta.dirname,
   plugins: [react()],
   build: {
-    outDir: '../dist/admin',
+    outDir: 'dist',
     emptyOutDir: true,
   },
   test: {

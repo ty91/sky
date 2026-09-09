@@ -15,7 +15,7 @@ export const DEFAULT_ADMIN_PORT = 4815;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const SESSION_COOKIE = 'sky_admin_session';
 const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
-const ADMIN_ASSET_DIRECTORY = fileURLToPath(new URL('../admin/', import.meta.url));
+const ADMIN_ASSET_DIRECTORY = fileURLToPath(new URL('../../../admin/dist/', import.meta.url));
 
 export type AdminAssetReader = {
   read(relativePath: string): Promise<Buffer | undefined>;

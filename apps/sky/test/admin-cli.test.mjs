@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { startSkyd } from '../dist/skyd/app.js';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
 
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
 
 function runCli(args, homeDir, extraEnv = {}) {
   return new Promise((resolve, reject) => {

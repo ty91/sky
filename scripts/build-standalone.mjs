@@ -18,28 +18,31 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const adminDirectory = path.join(repositoryRoot, 'dist', 'admin');
+const skyDirectory = path.join(repositoryRoot, 'apps', 'sky');
+const adminDirectory = path.join(repositoryRoot, 'apps', 'admin', 'dist');
 const standaloneRoot = path.join(repositoryRoot, 'dist', 'standalone');
 const artifactDirectory = path.join(standaloneRoot, 'darwin-arm64');
 const skyExecutable = path.join(artifactDirectory, 'sky');
 const skydExecutable = path.join(artifactDirectory, 'skyd');
 const metafilePath = path.join(standaloneRoot, 'darwin-arm64.metafile.json');
-const adminManifestModule = path.join(repositoryRoot, 'src', 'standalone-admin-manifest.ts');
-const adminSmokeEntrypoint = path.join(repositoryRoot, 'scripts', 'standalone-admin-smoke.ts');
-const piSmokeEntrypoint = path.join(repositoryRoot, 'scripts', 'standalone-pi-smoke.ts');
+const adminManifestModule = path.join(skyDirectory, 'src', 'standalone-admin-manifest.ts');
+const adminSmokeEntrypoint = path.join(skyDirectory, 'test', 'standalone-admin-smoke.ts');
+const piSmokeEntrypoint = path.join(skyDirectory, 'test', 'standalone-pi-smoke.ts');
 const claudeHelperManifestModule = path.join(
-  repositoryRoot,
+  skyDirectory,
   'src',
   'standalone-claude-helper-manifest.ts',
 );
 // pnpm keeps the SDK's platform package beside the SDK because it is an optional dependency.
-const require = createRequire(import.meta.url);
+const require = createRequire(path.join(skyDirectory, 'package.json'));
 const claudeAgentSdkEntry = require.resolve('@anthropic-ai/claude-agent-sdk');
 const claudeAgentSdkRequire = createRequire(claudeAgentSdkEntry);
 const claudeHelperPath = claudeAgentSdkRequire.resolve(
   '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
 );
-const piEntryPath = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
+const piEntryPath = fileURLToPath(
+  import.meta.resolve('@earendil-works/pi-coding-agent', path.join(skyDirectory, 'package.json')),
+);
 const piClipboardNativeModule = path.join(path.dirname(piEntryPath), 'utils', 'clipboard-native.js');
 const piClipboardAddonPath = require.resolve('@mariozechner/clipboard-darwin-arm64');
 
@@ -158,7 +161,7 @@ function run(executable, args, env = process.env) {
 function buildAdmin() {
   execFileSync(
     'pnpm',
-    ['exec', 'vite', 'build', '--config', 'admin/vite.config.ts', '--logLevel', 'error'],
+    ['--filter', '@ty91/sky-admin', 'build'],
     { cwd: repositoryRoot, stdio: 'inherit' },
   );
 }
@@ -394,7 +397,7 @@ async function main() {
   await mkdir(artifactDirectory, { recursive: true });
 
   const build = await Bun.build({
-    entrypoints: [path.join(repositoryRoot, 'src', 'standalone.ts')],
+    entrypoints: [path.join(skyDirectory, 'src', 'standalone.ts')],
     compile: {
       target: 'bun-darwin-arm64',
       outfile: skyExecutable,

@@ -1,5 +1,9 @@
+import type {
+  LogHistory,
+  LogLevel,
+  LogRecord,
+} from '@ty91/sky/admin-types';
 import { useEffect, useMemo, useState } from 'react';
-import type { LogHistory, LogLevel, LogRecord } from '../../src/skyd/logger';
 import { ApiError, requestJson } from './api';
 
 type LogsPageProps = {

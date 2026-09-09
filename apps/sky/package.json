@@ -1,0 +1,44 @@
+{
+  "type": "module",
+  "name": "@ty91/sky",
+  "private": true,
+  "description": "Slack chatbot with per-thread Pi AgentSession conversations",
+  "scripts": {
+    "dev": "tsx src/bot.ts",
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "start": "node dist/index.js start",
+    "stop": "node dist/index.js stop",
+    "restart": "node dist/index.js restart",
+    "status": "node dist/index.js status",
+    "foreground": "node dist/skyd.js --foreground"
+  },
+  "engines": {
+    "node": ">=24.16.0 <25"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.258",
+    "@anthropic-ai/sdk": "0.110.0",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@slack/bolt": "4.7.3",
+    "commander": "14.0.3",
+    "cron-parser": "5.7.0",
+    "undici": "7.24.5",
+    "zod": "4.3.6"
+  },
+  "optionalDependencies": {
+    "@mariozechner/clipboard-darwin-arm64": "0.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.20.6"
+  },
+  "exports": {
+    "./admin-types": {
+      "types": "./src/admin-types.ts"
+    }
+  }
+}

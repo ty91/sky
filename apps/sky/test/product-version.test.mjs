@@ -4,7 +4,7 @@ import test from 'node:test';
 import { resolveProductVersion } from '../dist/product-version.js';
 
 const { version: packageVersion } = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
 );
 
 test('the product version seam prefers a build-time literal', () => {

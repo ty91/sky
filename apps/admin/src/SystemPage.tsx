@@ -1,5 +1,7 @@
+import type {
+  SystemSnapshot,
+} from '@ty91/sky/admin-types';
 import { useCallback, useEffect, useState } from 'react';
-import type { SystemSnapshot } from '../../src/skyd/types';
 import { ApiError, requestJson, type Session } from './api';
 
 type SystemPageProps = {

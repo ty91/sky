@@ -1,12 +1,14 @@
-import type { AdminOverview, SystemSnapshot } from '../../src/skyd/types';
-import type { LogHistory } from '../../src/skyd/logger';
-import type { ControlConfiguration } from '../../src/skyd/control';
-import type { WorkspacePrompt, WorkspacePromptSnapshot } from '../../src/workspace-prompts';
-import type { ConnectionsSnapshot } from '../../src/connections';
 import type {
+  AdminOverview,
+  ConnectionsSnapshot,
+  ControlConfiguration,
+  LogHistory,
   RuntimeScheduledJobsSnapshot,
   RuntimeSessionsSnapshot,
-} from '../../src/runtime/admin';
+  SystemSnapshot,
+  WorkspacePrompt,
+  WorkspacePromptSnapshot,
+} from '@ty91/sky/admin-types';
 
 export function overviewFixture(
   overrides: Partial<AdminOverview> = {},

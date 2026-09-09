@@ -14,3 +14,9 @@ minimumReleaseAgeExclude:
   - '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.258'
   - '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.258'
   - '@anthropic-ai/claude-agent-sdk@0.3.258'
+packageExtensions:
+  react-router@7.18.2:
+    peerDependencies:
+      '@types/react': ^19.2.18
+packages:
+  - apps/*

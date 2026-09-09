@@ -15,8 +15,8 @@ import { openConversationStore } from '../dist/conversation/store.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
-const skyEntrypoint = path.join(repositoryRoot, 'dist', 'index.js');
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
+const skyEntrypoint = path.join(appRoot, 'dist', 'index.js');
 
 async function runCli(args, env) {
   try {

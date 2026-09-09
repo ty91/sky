@@ -54,6 +54,11 @@ jobs:
       - name: Test standalone package
         run: pnpm test:standalone:package
 
+      - name: Test standalone installer and updater
+        run: |
+          pnpm test:standalone:install
+          pnpm test:standalone:update
+
       - name: Resolve release assets
         id: release_assets
         run: |
