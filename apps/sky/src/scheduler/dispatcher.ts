@@ -1,39 +1,26 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import { withTimeout } from '../runtime/retry.js';
-import { runProactiveAgentTurn } from '../slack/proactive-turn.js';
-import { toThreadId } from '../slack/thread-id.js';
+import { runProactiveAgentTurn } from '../conversation/proactive-turn.js';
 import type { ScheduledJob } from './types.js';
 
-const SLACK_SCHEDULED_SEND_TIMEOUT_MS = 30_000;
-
-function scheduledSessionKey(job: ScheduledJob): string {
-  return `scheduled:${job.id}`;
-}
-
-function readPostedTs(response: unknown): string | undefined {
-  if (typeof response !== 'object' || response === null) {
-    return undefined;
+export class ScheduledDeliveryError extends Error {
+  constructor(cause: unknown) {
+    super(`Reminder delivery failed after agent execution: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'ScheduledDeliveryError';
   }
-  const ts = (response as { ts?: unknown }).ts;
-  return typeof ts === 'string' && ts.length > 0 ? ts : undefined;
 }
 
-export type ScheduledSlackMessage = {
-  channel: string;
-  text: string;
-};
-
-export type ScheduledJobDispatcher = {
-  dispatch(job: ScheduledJob): Promise<void>;
+export type ScheduledJobDelivery = {
+  isAvailable(job: ScheduledJob): boolean;
+  agent(job: ScheduledJob): AgentConfig;
+  send(job: ScheduledJob, text: string): Promise<string | undefined>;
   notifyFailure(job: ScheduledJob, error: Error, attempts: number): Promise<void>;
 };
 
-export type ScheduledJobDispatcherOptions = {
-  conversationManager: Pick<ConversationManager, 'runTurn' | 'rekey'>;
-  mainAgent: AgentConfig;
-  postMessage(message: ScheduledSlackMessage): Promise<unknown>;
-  sendTimeoutMs?: number;
+export type ScheduledJobDispatcher = {
+  isAvailable(job: ScheduledJob): boolean;
+  dispatch(job: ScheduledJob): Promise<void>;
+  notifyFailure(job: ScheduledJob, error: Error, attempts: number): Promise<void>;
 };
 
 function buildScheduledJobNotice(job: ScheduledJob): string {
@@ -49,59 +36,37 @@ function buildScheduledJobNotice(job: ScheduledJob): string {
   ].join('\n');
 }
 
-export function createScheduledJobDispatcher(
-  options: ScheduledJobDispatcherOptions,
-): ScheduledJobDispatcher {
-  const sendTimeoutMs = options.sendTimeoutMs ?? SLACK_SCHEDULED_SEND_TIMEOUT_MS;
-
+export function createScheduledJobDispatcher(options: {
+  conversationManager: Pick<ConversationManager, 'runTurn' | 'rekey'>;
+  delivery: ScheduledJobDelivery;
+}): ScheduledJobDispatcher {
+  const { delivery, conversationManager } = options;
   return {
-    async dispatch(job: ScheduledJob): Promise<void> {
-      const sessionKey = scheduledSessionKey(job);
-      let postedTs: string | undefined;
-
-      const sendFinal = async (text: string): Promise<void> => {
-        const response = await withTimeout(
-          options.postMessage({ channel: job.targetChannel, text }),
-          sendTimeoutMs,
-          'Slack scheduled reminder send',
-        );
-        // The reminder lands as a new root message; its ts becomes the thread_ts
-        // of any reply. Capture it so we can re-key the session below.
-        postedTs = readPostedTs(response) ?? postedTs;
-      };
-
+    isAvailable: (job) => delivery.isAvailable(job),
+    async dispatch(job) {
+      const sessionKey = `scheduled:${job.id}`;
+      let deliveredKey: string | undefined;
       const result = await runProactiveAgentTurn({
-        conversationManager: options.conversationManager,
-        mainAgent: options.mainAgent,
+        conversationManager,
+        mainAgent: delivery.agent(job),
         sessionKey,
         prompt: buildScheduledJobNotice(job),
-        deliverFinal: sendFinal,
+        deliverFinal: async (text) => {
+          try {
+            deliveredKey = await delivery.send(job, text);
+          } catch (error) {
+            throw new ScheduledDeliveryError(error);
+          }
+        },
       });
-
       if (result.kind === 'interrupted') {
         throw new Error(`Scheduled reminder ${job.id} agent turn was interrupted.`);
       }
-      if (result.kind === 'error') {
-        throw result.error;
-      }
-
-      // Move the just-completed proactive session onto the Slack thread key so a
-      // reply in the reminder's thread resumes this conversation instead of
-      // starting a fresh one. Without a delivered ts there's no thread to bind.
-      if (postedTs) {
-        options.conversationManager.rekey(sessionKey, toThreadId(job.targetChannel, postedTs));
-      }
+      if (result.kind === 'error') throw result.error;
+      if (deliveredKey) conversationManager.rekey(sessionKey, deliveredKey);
     },
-
-    async notifyFailure(job: ScheduledJob, error: Error, attempts: number): Promise<void> {
-      await withTimeout(
-        options.postMessage({
-          channel: job.targetChannel,
-          text: `리마인더 "${job.title}" 실행이 ${attempts}회 실패했습니다: ${error.message}`,
-        }),
-        sendTimeoutMs,
-        'Slack scheduled reminder failure send',
-      );
+    async notifyFailure(job, error, attempts) {
+      if (delivery.isAvailable(job)) await delivery.notifyFailure(job, error, attempts);
     },
   };
 }

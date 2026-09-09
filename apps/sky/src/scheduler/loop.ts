@@ -1,6 +1,6 @@
 import { nextCronRun } from './cron.js';
-import type { ScheduledJobDispatcher } from './dispatcher.js';
-import type { ScheduledJobStore } from './types.js';
+import { ScheduledDeliveryError, type ScheduledJobDispatcher } from './dispatcher.js';
+import type { ScheduledJob, ScheduledJobStore } from './types.js';
 import type { RuntimeController } from '../runtime/controller.js';
 
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -14,6 +14,7 @@ export type ScheduledJobScheduler = {
   start(): Promise<void>;
   stop(): Promise<void>;
   tick(): Promise<void>;
+  refreshAvailability(): void;
 };
 
 export type ScheduledJobSchedulerOptions = {
@@ -26,111 +27,79 @@ export type ScheduledJobSchedulerOptions = {
   runningTimeoutMs?: number;
   setInterval?: (callback: () => void, milliseconds: number) => IntervalHandle;
   clearInterval?: (handle: IntervalHandle) => void;
-  runtimeController?: Pick<RuntimeController, 'lease'>;
+  runtimeController?: Pick<RuntimeController, 'lease' | 'isAccepting'>;
 };
 
-export function createScheduledJobScheduler(
-  options: ScheduledJobSchedulerOptions,
-): ScheduledJobScheduler {
+export function createScheduledJobScheduler(options: ScheduledJobSchedulerOptions): ScheduledJobScheduler {
   const now = options.now ?? Date.now;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS;
   const runningTimeoutMs = options.runningTimeoutMs ?? DEFAULT_RUNNING_TIMEOUT_MS;
-  const setSchedulerInterval =
-    options.setInterval ?? ((callback, milliseconds) => setInterval(callback, milliseconds));
-  const clearSchedulerInterval =
-    options.clearInterval ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
+  const setSchedulerInterval = options.setInterval ?? ((callback, milliseconds) => setInterval(callback, milliseconds));
+  const clearSchedulerInterval = options.clearInterval ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
   let activeTick: Promise<void> | undefined;
   let intervalHandle: IntervalHandle | undefined;
 
+  async function notifyFailure(job: ScheduledJob, error: Error, attempts: number): Promise<void> {
+    try {
+      await options.dispatcher.notifyFailure(job, error, attempts);
+    } catch (cause) {
+      console.error(`[scheduler] failed to report job=${job.id}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
   async function recoverStaleJobs(currentTime: number): Promise<void> {
-    const restartError = new Error(
-      'Reminder execution became stale after a Sky restart or crash and was not retried to avoid duplicate delivery.',
-    );
-    const interrupted = options.store.failRunningBefore(
-      currentTime - runningTimeoutMs,
-      restartError.message,
-    );
-    for (const job of interrupted) {
-      try {
-        await options.dispatcher.notifyFailure(job, restartError, job.runCount);
-      } catch (notificationError) {
-        const message =
-          notificationError instanceof Error ? notificationError.message : String(notificationError);
-        console.error(`[scheduler] failed to report interrupted job=${job.id}: ${message}`);
-      }
+    const error = new Error('Reminder execution became stale after a Sky restart or crash and was not retried to avoid duplicate delivery.');
+    const interrupted = options.store.failRunningBefore(currentTime - runningTimeoutMs, error.message);
+    for (const job of interrupted) await notifyFailure(job, error, job.runCount);
+  }
+
+  function advanceMissedCron(starting = false): void {
+    const currentTime = now();
+    for (const job of options.store.list()) {
+      if (job.status !== 'pending' || job.kind !== 'cron' || job.nextRunAt > currentTime) continue;
+      if (starting ? job.nextRunAt >= currentTime : options.dispatcher.isAvailable(job)) continue;
+      options.store.advancePendingCron(job.id, nextCronRun(job.cronExpr ?? '', job.timezone, currentTime));
     }
   }
 
   async function runTick(): Promise<void> {
     const lease = options.runtimeController?.lease('scheduler_dispatch');
     if (options.runtimeController && !lease) return;
-
     try {
-      const currentTime = now();
-      await recoverStaleJobs(currentTime);
-      const jobs = options.store.claimDue(currentTime);
-      for (const job of jobs) {
-        try {
-          await options.dispatcher.dispatch(job);
-          options.store.markDone(job.id);
-        } catch (cause) {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          const outcome = options.store.recordFailure(
-            job.id,
-            error.message,
-            now() + retryDelayMs,
-            maxAttempts,
-          );
-          if (outcome === 'failed') {
-            try {
-              await options.dispatcher.notifyFailure(job, error, maxAttempts);
-            } catch (notificationError) {
-              const message =
-                notificationError instanceof Error
-                  ? notificationError.message
-                  : String(notificationError);
-              console.error(
-                `[scheduler] failed to send failure notice for job=${job.id}: ${message}`,
-              );
-            }
-          }
+      await recoverStaleJobs(now());
+      advanceMissedCron();
+      for (const candidate of options.store.list()) {
+        if (options.runtimeController && !options.runtimeController.isAccepting()) return;
+        if (candidate.status !== 'pending' || candidate.nextRunAt > now()) continue;
+        if (!options.dispatcher.isAvailable(candidate)) {
+          advanceMissedCron();
+          continue;
         }
-      }
-
-      const cronJobs = options.store.claimDueCron(currentTime);
-      for (const job of cronJobs) {
-        let lastError: string | null = null;
+        const job = options.store.claim(candidate.id, now());
+        if (!job) continue;
+        let failure: Error | undefined;
         try {
           await options.dispatcher.dispatch(job);
         } catch (cause) {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          lastError = error.message;
-          console.error(`[scheduler] cron job=${job.id} dispatch failed: ${error.message}`);
+          failure = cause instanceof Error ? cause : new Error(String(cause));
+        }
+        if (job.kind === 'cron') {
+          if (failure) await notifyFailure(job, failure, job.runCount);
           try {
-            await options.dispatcher.notifyFailure(job, error, job.runCount);
-          } catch (notificationError) {
-            const message =
-              notificationError instanceof Error
-                ? notificationError.message
-                : String(notificationError);
-            console.error(
-              `[scheduler] failed to send cron failure notice for job=${job.id}: ${message}`,
-            );
+            options.store.rearmCron(job.id, nextCronRun(job.cronExpr ?? '', job.timezone, now()), failure?.message ?? null);
+          } catch (cause) {
+            options.store.recordFailure(job.id, `cron re-arm failed: ${String(cause)}`, now(), 0);
           }
-        }
-        // Re-arm for the next occurrence regardless of success so a single failed
-        // run never kills the recurring schedule.
-        try {
-          const nextRunAt = nextCronRun(job.cronExpr ?? '', job.timezone, now());
-          options.store.rearmCron(job.id, nextRunAt, lastError);
-        } catch (cause) {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          // An unparseable cron expression cannot be rescheduled; fail it so it
-          // stops occupying a running slot.
-          options.store.recordFailure(job.id, `cron re-arm failed: ${error.message}`, now(), 0);
-          console.error(`[scheduler] cron job=${job.id} re-arm failed: ${error.message}`);
+        } else if (failure) {
+          const outcome = options.store.recordFailure(
+            job.id, failure.message, now() + retryDelayMs,
+            failure instanceof ScheduledDeliveryError ? 0 : maxAttempts,
+          );
+          if (outcome === 'failed') await notifyFailure(job, failure, job.runCount);
+        } else {
+          options.store.markDone(job.id);
         }
       }
     } finally {
@@ -139,42 +108,30 @@ export function createScheduledJobScheduler(
   }
 
   const scheduler: ScheduledJobScheduler = {
-    async start(): Promise<void> {
-      if (intervalHandle !== undefined) {
-        return;
-      }
-      const currentTime = now();
-      await recoverStaleJobs(currentTime);
-      const skipped = options.store.skipOverdue(currentTime);
-      if (skipped > 0) {
-        console.log(`[scheduler] skipped ${skipped} overdue job(s) at startup`);
-      }
+    async start() {
+      if (intervalHandle !== undefined) return;
+      await recoverStaleJobs(now());
+      advanceMissedCron(true);
       intervalHandle = setSchedulerInterval(() => {
         void scheduler.tick().catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`[scheduler] tick failed: ${message}`);
+          console.error(`[scheduler] tick failed: ${error instanceof Error ? error.message : String(error)}`);
         });
       }, tickIntervalMs);
     },
-
-    async stop(): Promise<void> {
+    async stop() {
       if (intervalHandle !== undefined) {
         clearSchedulerInterval(intervalHandle);
         intervalHandle = undefined;
       }
       await activeTick;
     },
-
-    tick(): Promise<void> {
-      if (activeTick) {
-        return activeTick;
-      }
-      activeTick = runTick().finally(() => {
-        activeTick = undefined;
-      });
+    tick() {
+      activeTick ??= runTick().finally(() => { activeTick = undefined; });
       return activeTick;
     },
+    refreshAvailability() {
+      advanceMissedCron();
+    },
   };
-
   return scheduler;
 }

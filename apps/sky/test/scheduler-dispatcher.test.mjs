@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
+import { createSlackScheduledDispatcher as createScheduledJobDispatcher } from '../dist/slack/scheduled.js';
 import { createSchedulerConversationManager } from './helpers/scheduler.mjs';
 
 const JOB = {

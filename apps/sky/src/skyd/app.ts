@@ -78,7 +78,7 @@ export type StartSkydOptions = {
   homeDir?: string;
   productVersion?: string;
   startRuntime?: RuntimeStarter;
-  runtimeDependencies?: Pick<BotRuntimeOptions, 'createSession' | 'slackSdk'>;
+  runtimeDependencies?: Pick<BotRuntimeOptions, 'createSession' | 'slackSdk' | 'scheduler'>;
   backoff?: BackoffOptions;
   random?: () => number;
   logger?: JsonlLoggerOptions;

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createSlackAgentConfig } from '../dist/slack/agent.js';
-import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
+import { createSlackScheduledDispatcher as createScheduledJobDispatcher } from '../dist/slack/scheduled.js';
 import { createScheduledJobScheduler } from '../dist/scheduler/loop.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
 import { createSchedulerConversationManager } from './helpers/scheduler.mjs';

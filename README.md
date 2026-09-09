@@ -469,8 +469,9 @@ Tag workflow는 macOS arm64에서 tag와 `package.json` version 일치, lint, ty
 - Sky home root와 `run`, `logs`, `transcripts`, 새 기본 `workspace`는 `0700`, control socket과 managed file은 `0600` 권한을 사용합니다.
 - Conversation resume 매핑은 Sky home의 `sky.db`에 저장됩니다.
 - 예약된 리마인더도 같은 `sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
-- 리마인더 실행이 실패하면 60초 간격으로 최대 3회 시도한 뒤 실패 알림을 보냅니다.
-- 봇이 꺼져 있는 동안 예정 시각이 지난 리마인더는 재시작 후 catch-up하지 않고 건너뜁니다.
+- 일회성 리마인더의 에이전트 실행 실패는 60초 간격으로 최대 3회 시도합니다. 실행 후 전달 실패는 별도로 기록하고 같은 작업을 자동 재실행하지 않습니다. 반복 예약은 실패를 기록한 뒤 다음 회차로 넘어갑니다.
+- Slack 전달이 불가능한 동안 예약은 실행 횟수를 소모하지 않고 대기합니다. 기한이 지난 대기 상태의 일회성 예약은 연결 복구·데몬 재시작 후 실행하며, 반복 예약의 누락 회차는 건너뛰고 다음 예정 시각부터 실행합니다. 이미 실행하다 중단된 작업은 중복 실행 방지를 위해 기존 stale-running 정책으로 실패 처리합니다.
+- 실행 결과의 영속 보관과 전달만 재시도하는 기능은 아직 없으므로, 실행 후 전달 실패의 자동 재전송은 보장하지 않습니다.
 - 저장 record에는 backend, session id, resume reference, agent 이름, model이 들어갑니다.
 - backend를 바꾸면 기존 record는 삭제하지 않고 새 backend record를 따로 만듭니다. 다시 이전 backend로 롤백하면 이전 Slack thread의 conversation을 복원할 수 있습니다.
 

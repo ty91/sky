@@ -34,8 +34,8 @@ export interface ScheduledJobStore {
   get(id: string): ScheduledJob | undefined;
   list(): ScheduledJob[];
   cancel(id: string): boolean;
-  claimDue(now: number): ScheduledJob[];
-  claimDueCron(now: number): ScheduledJob[];
+  claim(id: string, now: number): ScheduledJob | undefined;
+  advancePendingCron(id: string, nextRunAt: number): boolean;
   rearmCron(id: string, nextRunAt: number, lastError?: string | null): boolean;
   markDone(id: string): boolean;
   recordFailure(
@@ -44,7 +44,6 @@ export interface ScheduledJobStore {
     retryAt: number,
     maxAttempts: number,
   ): ScheduledJobFailureOutcome | undefined;
-  skipOverdue(before: number): number;
   failRunningBefore(before: number, error: string): ScheduledJob[];
   close(): void;
 }

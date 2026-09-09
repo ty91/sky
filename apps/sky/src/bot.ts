@@ -7,10 +7,11 @@ import { openConversationStore } from './conversation/store.js';
 import { openThreadModelStore } from './conversation/thread-model-store.js';
 import type { RuntimeController } from './runtime/controller.js';
 import { createRuntimeAdmin, type RuntimeAdmin } from './runtime/admin.js';
-import { createScheduledJobDispatcher } from './scheduler/dispatcher.js';
+import { createSlackScheduledDispatcher } from './slack/scheduled.js';
 import {
   createScheduledJobScheduler,
   type ScheduledJobScheduler,
+  type ScheduledJobSchedulerOptions,
 } from './scheduler/loop.js';
 import { openScheduledJobStore } from './scheduler/store.js';
 import type { ScheduledJobStore } from './scheduler/types.js';
@@ -37,6 +38,7 @@ export type BotRuntimeOptions = {
   slackSdk?: SlackSdk;
   backoff?: BackoffOptions;
   random?: () => number;
+  scheduler?: Pick<ScheduledJobSchedulerOptions, 'now' | 'setInterval' | 'clearInterval'>;
   onSlackStatus?: (status: DaemonStatus['slack']) => void;
   onSlackError?: (error: unknown) => void;
 };
@@ -123,9 +125,24 @@ export async function startBotRuntime(
   const signal = AbortSignal.any([slackAbort.signal, runtimeController.drainingSignal]);
   let slackStatus: DaemonStatus['slack'] = { state: 'not_configured', attempts: 0, nextRetryAt: null };
   const publishSlack = (patch: Partial<DaemonStatus['slack']>) => {
+    scheduledJobScheduler?.refreshAvailability();
     slackStatus = { ...slackStatus, ...patch };
     runtimeOptions.onSlackStatus?.(slackStatus);
   };
+  const dispatcher = createSlackScheduledDispatcher({
+    conversationManager,
+    mainAgent: (job) => createSlackAgentConfig({
+      ...agentOptions,
+      scheduledJobStore,
+      target: { channelId: job.targetChannel },
+    }),
+    isAvailable: () => slackStatus.state === 'connected' && slackApp !== undefined,
+    postMessage: (message) => slackApp!.client.chat.postMessage(message),
+  });
+  scheduledJobScheduler = createScheduledJobScheduler({
+    store: scheduledJobStore, dispatcher, runtimeController, ...runtimeOptions.scheduler,
+  });
+  await scheduledJobScheduler.start();
   const slackTask = (async () => {
     if (!settings.slack.botToken || !settings.slack.appToken) {
       publishSlack({ state: 'not_configured' });
@@ -152,15 +169,6 @@ export async function startBotRuntime(
             if (state === 'retrying') disconnected();
           },
         });
-        if (!scheduledJobScheduler) {
-          const dispatcher = createScheduledJobDispatcher({
-            conversationManager,
-            mainAgent: slackAgent,
-            postMessage: (message) => slackApp!.client.chat.postMessage(message),
-          });
-          scheduledJobScheduler = createScheduledJobScheduler({ store: scheduledJobStore, dispatcher, runtimeController });
-          await scheduledJobScheduler.start();
-        }
         if (!signal.aborted) await connectionEnded;
         if (signal.aborted) return;
         throw new Error('Slack connection was closed.');
