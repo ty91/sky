@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isValidCronExpr, nextCronRun } from '../dist/scheduler/cron.js';
-import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
+import { createSlackScheduledDispatcher as createScheduledJobDispatcher } from '../dist/slack/scheduled.js';
 import { createScheduledJobScheduler } from '../dist/scheduler/loop.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
 import { createSchedulerConversationManager } from './helpers/scheduler.mjs';
@@ -25,7 +25,7 @@ test('isValidCronExpr accepts standard expressions and rejects garbage', () => {
   assert.equal(isValidCronExpr('bogus'), false);
 });
 
-test('claimDueCron claims due cron jobs once and rearmCron reschedules them', () => {
+test('claim reserves a due cron occurrence once and rearmCron reschedules it', () => {
   const store = openScheduledJobStore(':memory:');
   store.create({
     id: 'cron-1',
@@ -41,12 +41,12 @@ test('claimDueCron claims due cron jobs once and rearmCron reschedules them', ()
     createdAt: 500,
   });
 
-  const claimed = store.claimDueCron(1_000);
+  const claimed = [store.claim('cron-1', 1_000)].filter(Boolean);
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].status, 'running');
   assert.equal(claimed[0].cronExpr, '30 8 * * *');
   // A claimed (running) job is not claimed again.
-  assert.deepEqual(store.claimDueCron(1_000), []);
+  assert.deepEqual([store.claim('cron-1', 1_000)].filter(Boolean), []);
 
   assert.equal(store.rearmCron('cron-1', 2_000, null), true);
   const job = store.list()[0];

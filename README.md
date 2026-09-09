@@ -21,13 +21,13 @@ Slack에서 Pi coding agent 또는 Claude Agent SDK 기반 에이전트 봇을 *
 - `memory`와 `dream`은 daemon operation으로 실행되며 CLI를 끊어도 계속 진행됩니다.
 - structured JSONL log는 control interface에서 history와 live stream으로 제공되고, `sky logs --follow`는 daemon 교체 뒤에도 cursor로 이어집니다.
 - 활성화된 도구는 `Bash`, `Glob`, `Grep`, `Read`, `Edit`, `Write`, `Skill`, `TaskOutput`, `TaskStop`, `TodoWrite`, `WebFetch`, `WebSearch`, `slack_attach_files`, `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 제한되어 있습니다.
-- main agent는 `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 one-shot 리마인더를 관리하고 예정 시각에 먼저 Slack DM을 보낼 수 있습니다.
+- Slack 대화의 main agent는 `schedule_reminder`, `list_scheduled`, `cancel_scheduled`로 one-shot 리마인더를 관리하고 예정 시각에 먼저 Slack DM을 보낼 수 있습니다.
 - 에이전트 작업 디렉토리(`cwd`)는 기본적으로 Sky home의 `workspace`로 고정됩니다.
 
 ## 준비물
 
 - Apple Silicon macOS
-- Slack workspace에 앱을 설치할 수 있는 권한
+- Slack 연결을 사용할 경우 Slack workspace에 앱을 설치할 수 있는 권한
 - 선택한 backend에서 사용할 모델 인증 설정
 
 Node.js, Bun과 GitHub CLI는 설치에 필요하지 않습니다. GitHub Release의 standalone executable에 runtime과 필요한 asset이 들어 있습니다.
@@ -212,7 +212,7 @@ Sky는 non-secret 설정을 schema version과 revision이 있는 `settings.json`
 - `backend` 또는 `agentBackend`: `pi`(기본값) 또는 `claude-agent-sdk`입니다.
 - `effort`: 선택적인 `medium`, `high`, `xhigh`입니다. `null`은 기존 값을 제거합니다.
 - `workspace`: 선택적인 절대경로입니다. 기본값은 선택한 Sky home의 `workspace`입니다.
-- `slack.botToken`, `slack.appToken`: 필수 Slack credential입니다.
+- `slack.botToken`, `slack.appToken`: 선택적인 Slack 연결에 필요한 credential입니다. 둘 다 있어야 연결하며, 미설정이나 부분 설정은 에이전트 기동을 막지 않습니다.
 - `claudeAgentSdk.oauthToken`: Claude Agent SDK backend에 필요합니다. `CLAUDE_CODE_OAUTH_TOKEN` 환경변수가 있으면 stored value보다 우선합니다.
 
 ## 실행
@@ -324,7 +324,7 @@ curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/stat
 curl --unix-socket "${SKY_HOME:-$HOME/.sky}/run/skyd.sock" http://localhost/configuration
 ```
 
-설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. Slack startup 오류는 `degraded` 상태에서 exponential backoff로 재시도합니다.
+설정이 없거나 잘못된 경우에도 `skyd`는 종료되지 않고 `needs_configuration` 상태로 control interface를 유지합니다. 에이전트 설정과 대화 실행 준비가 끝나면 Slack 상태와 무관하게 runtime은 `ready`가 됩니다. Slack은 선택적 연결이며 미설정은 `not_configured`, 연결 실패는 `retrying`으로 별도 표시합니다. 최초 연결과 연결 단절 모두 데몬이 exponential backoff로 재시도하고, 기존 대화 세션을 유지합니다. `ready`는 모델 제공자에 대한 실제 요청 성공을 보장하지 않습니다.
 
 `skyd --foreground`는 supervisor가 없으므로 control restart를 거부합니다. `sky status`의 `supervision` 항목에서 현재 daemon이 `launchd` 또는 `foreground`로 실행 중인지 확인할 수 있습니다.
 
@@ -469,8 +469,9 @@ Tag workflow는 macOS arm64에서 tag와 `package.json` version 일치, lint, ty
 - Sky home root와 `run`, `logs`, `transcripts`, 새 기본 `workspace`는 `0700`, control socket과 managed file은 `0600` 권한을 사용합니다.
 - Conversation resume 매핑은 Sky home의 `sky.db`에 저장됩니다.
 - 예약된 리마인더도 같은 `sky.db`에 저장되며 봇 프로세스의 30초 ticker가 실행합니다.
-- 리마인더 실행이 실패하면 60초 간격으로 최대 3회 시도한 뒤 실패 알림을 보냅니다.
-- 봇이 꺼져 있는 동안 예정 시각이 지난 리마인더는 재시작 후 catch-up하지 않고 건너뜁니다.
+- 일회성 리마인더의 에이전트 실행 실패는 60초 간격으로 최대 3회 시도합니다. 실행 후 전달 실패는 별도로 기록하고 같은 작업을 자동 재실행하지 않습니다. 반복 예약은 실패를 기록한 뒤 다음 회차로 넘어갑니다.
+- Slack 전달이 불가능한 동안 예약은 실행 횟수를 소모하지 않고 대기합니다. 기한이 지난 대기 상태의 일회성 예약은 연결 복구·데몬 재시작 후 실행하며, 반복 예약의 누락 회차는 건너뛰고 다음 예정 시각부터 실행합니다. 이미 실행하다 중단된 작업은 중복 실행 방지를 위해 기존 stale-running 정책으로 실패 처리합니다.
+- 실행 결과의 영속 보관과 전달만 재시도하는 기능은 아직 없으므로, 실행 후 전달 실패의 자동 재전송은 보장하지 않습니다.
 - 저장 record에는 backend, session id, resume reference, agent 이름, model이 들어갑니다.
 - backend를 바꾸면 기존 record는 삭제하지 않고 새 backend record를 따로 만듭니다. 다시 이전 backend로 롤백하면 이전 Slack thread의 conversation을 복원할 수 있습니다.
 

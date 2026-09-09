@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import {
-  SlackStartupError,
   startBotRuntime,
   type BotRuntime,
-  type BotRuntimeObservability,
+  type BotRuntimeOptions,
 } from '../bot.js';
 import { createConfiguration, type ConfigurationInspection } from '../configuration.js';
 import {
@@ -12,7 +11,8 @@ import {
   type RuntimeController,
   type SupervisionMode,
 } from '../runtime/controller.js';
-import { computeBackoffMs, isAbortError, sleep, type BackoffOptions } from '../runtime/retry.js';
+import type { BackoffOptions } from '../runtime/retry.js';
+import type { ConversationTurnOptions, ConversationTurnResult } from '../conversation/types.js';
 import type { Settings } from '../settings.js';
 import {
   createSkyHome,
@@ -69,7 +69,7 @@ export type RuntimeStarter = (
   runtimeController: RuntimeController,
   skyHome: SkyHome,
   scheduledJobStore: ScheduledJobStore,
-  observability?: BotRuntimeObservability,
+  runtimeOptions?: BotRuntimeOptions,
 ) => Promise<BotRuntime>;
 
 export type StartSkydOptions = {
@@ -78,6 +78,7 @@ export type StartSkydOptions = {
   homeDir?: string;
   productVersion?: string;
   startRuntime?: RuntimeStarter;
+  runtimeDependencies?: Pick<BotRuntimeOptions, 'createSession' | 'slackSdk' | 'scheduler'>;
   backoff?: BackoffOptions;
   random?: () => number;
   logger?: JsonlLoggerOptions;
@@ -149,6 +150,7 @@ export type Skyd = {
   control: DaemonControl;
   status(): DaemonStatus;
   finished: Promise<void>;
+  runTurn(key: string, text: string, options?: ConversationTurnOptions): Promise<ConversationTurnResult>;
   close(): Promise<void>;
 };
 
@@ -166,10 +168,6 @@ type MutableStatus = {
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
-}
-
-function causeMessage(error: SlackStartupError): string {
-  return error.cause instanceof Error ? error.cause.message : String(error.cause ?? error.message);
 }
 
 export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
@@ -478,41 +476,24 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
       settings.claudeAgentSdk?.oauthToken ?? '',
     ]);
 
-    let attempt = 0;
-    while (!runtimeController.drainingSignal.aborted) {
-      mutable.runtimeState = attempt === 0 ? 'starting' : 'degraded';
-      mutable.slackState = attempt === 0 ? 'connecting' : 'retrying';
-      mutable.nextRetryAt = null;
-
-      try {
-        runtime = await startRuntime(settings, runtimeController, paths, scheduledJobStore, {
-          claudeDiagnostics,
-        });
-      } catch (error) {
-        if (!(error instanceof SlackStartupError)) throw error;
-        attempt += 1;
-        mutable.runtimeState = 'degraded';
-        mutable.slackState = 'retrying';
-        mutable.slackAttempts = attempt;
+    runtime = await startRuntime(settings, runtimeController, paths, scheduledJobStore, {
+      ...options.runtimeDependencies,
+      claudeDiagnostics,
+      backoff: options.backoff,
+      random: options.random,
+      onSlackStatus: (slack) => {
+        mutable.slackState = slack.state;
+        mutable.slackAttempts = slack.attempts;
+        mutable.nextRetryAt = slack.nextRetryAt;
+      },
+      onSlackError: (error) => {
         addError('slack_startup_failed');
-        const delayMs = computeBackoffMs(attempt, options.backoff, options.random);
-        mutable.nextRetryAt = new Date(Date.now() + delayMs).toISOString();
-        logger.log('error', 'slack', `Slack startup failed: ${causeMessage(error)}`);
-        try {
-          await sleep(delayMs, runtimeController.drainingSignal);
-        } catch (sleepError) {
-          if (!isAbortError(sleepError)) throw sleepError;
-        }
-        continue;
-      }
-
-      mutable.runtimeState = 'ready';
-      mutable.slackState = 'connected';
-      mutable.nextRetryAt = null;
-      logger.log('info', 'runtime', 'Slack and agent runtime started.');
-      await waitForAbort(runtimeController.drainingSignal);
-      return;
-    }
+        logger.log('error', 'slack', `Slack connection failed: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    });
+    mutable.runtimeState = 'ready';
+    logger.log('info', 'runtime', 'Agent runtime started.');
+    await waitForAbort(runtimeController.drainingSignal);
   })().catch((error) => {
     addError('internal_error');
     logger.log('error', 'daemon', error instanceof Error ? error.message : String(error));
@@ -560,6 +541,10 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     control,
     status,
     finished: lifecycleTask,
+    async runTurn(key, text, turnOptions) {
+      if (!runtime || status().runtime.state !== 'ready') return { kind: 'interrupted' };
+      return runtime.runTurn(key, text, turnOptions);
+    },
     close() {
       runtimeController.requestStop();
       return lifecycleTask;

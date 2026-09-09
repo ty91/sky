@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
+import { createSlackScheduledDispatcher as createScheduledJobDispatcher } from '../dist/slack/scheduled.js';
 import { createScheduledJobScheduler } from '../dist/scheduler/loop.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
 import { createSchedulerConversationManager } from './helpers/scheduler.mjs';
@@ -127,30 +127,6 @@ test('scheduler retries a failed reminder three times before reporting failure',
   store.close();
 });
 
-test('scheduler start skips reminders missed while offline', async () => {
-  const store = openScheduledJobStore(':memory:');
-  createJob(store, { id: 'missed', nextRunAt: 999 });
-  const posts = [];
-  const { dispatcher, manager } = createDispatcher(posts, { finalText: '새 리마인더' });
-  const scheduler = createScheduledJobScheduler({
-    store,
-    dispatcher,
-    now: () => 1_000,
-    setInterval: () => ({ id: 'timer' }),
-    clearInterval: () => undefined,
-  });
-
-  await scheduler.start();
-
-  assert.equal(store.list()[0].status, 'done');
-  assert.equal(store.list()[0].runCount, 0);
-  assert.deepEqual(posts, []);
-  await scheduler.stop();
-
-  await manager.closeAll();
-  store.close();
-});
-
 test('scheduler start and stop manage a 30 second ticker', async () => {
   const store = openScheduledJobStore(':memory:');
   const posts = [];
@@ -176,35 +152,6 @@ test('scheduler start and stop manage a 30 second ticker', async () => {
   assert.equal(intervals[0].milliseconds, 30_000);
   assert.deepEqual(cleared, [intervals[0]]);
 
-  await manager.closeAll();
-  store.close();
-});
-
-test('scheduler start fails a stale interrupted reminder without redelivery', async () => {
-  const store = openScheduledJobStore(':memory:');
-  createJob(store);
-  store.claimDue(1_000);
-  const posts = [];
-  const { dispatcher, manager } = createDispatcher(posts, {
-    error: new Error('must not redeliver'),
-  });
-  const scheduler = createScheduledJobScheduler({
-    store,
-    dispatcher,
-    now: () => 3_602_000,
-    setInterval: () => ({ id: 'timer' }),
-    clearInterval: () => undefined,
-  });
-
-  await scheduler.start();
-
-  assert.equal(store.list()[0].status, 'failed');
-  assert.match(store.list()[0].lastError, /restart/i);
-  assert.equal(posts.length, 1);
-  assert.equal(posts[0].channel, 'D123');
-  assert.match(posts[0].text, /여권 챙기기/);
-
-  await scheduler.stop();
   await manager.closeAll();
   store.close();
 });

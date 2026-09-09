@@ -1,4 +1,5 @@
-import { App } from '@slack/bolt';
+import { App, SocketModeReceiver } from '@slack/bolt';
+import { withTimeout } from '../runtime/retry.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
 import type { ThreadModelStore } from '../conversation/thread-model-store.js';
@@ -25,7 +26,15 @@ import { createCachedSlackUserNameResolver } from './users.js';
 
 export { isPublicOrPrivateChannelMessage } from './channel-ingress.js';
 
+export type SlackSdk = {
+  createApp(options: ConstructorParameters<typeof App>[0]): App;
+  createReceiver(options: ConstructorParameters<typeof SocketModeReceiver>[0]): SocketModeReceiver;
+};
+
 export type SlackAppOptions = {
+  sdk?: SlackSdk;
+  signal?: AbortSignal;
+  onConnectionState?: (state: 'connected' | 'retrying') => void;
   botToken: string;
   appToken: string;
   conversationManager: ConversationManager;
@@ -36,103 +45,138 @@ export type SlackAppOptions = {
 };
 
 export async function startSlackApp(options: SlackAppOptions): Promise<App> {
-  const app = new App({
+  const receiver = options.sdk
+    ? options.sdk.createReceiver({ appToken: options.appToken, autoReconnectEnabled: false })
+    : new SocketModeReceiver({ appToken: options.appToken, autoReconnectEnabled: false });
+  const createApp = options.sdk?.createApp ?? ((settings) => new App(settings));
+  const app = createApp({
     token: options.botToken,
-    appToken: options.appToken,
-    socketMode: true,
+    receiver,
     // Sky performs and awaits auth.test below. Bolt's eager constructor check creates an
     // unobserved rejecting Promise for invalid tokens before startup can enter retry mode.
     tokenVerificationEnabled: false,
   });
 
-  const userNameResolver = createCachedSlackUserNameResolver(app.client);
-  const assistant = createSlackAssistant({
-    conversationManager: options.conversationManager,
-    mainAgent: options.mainAgent,
-    threadModelStore: options.threadModelStore,
-    userNameResolver,
-    runtimeController: options.runtimeController,
-    skyHome: options.skyHome,
-  });
+  let active = true;
+  const connected = () => { if (active) options.onConnectionState?.('connected'); };
+  const disconnected = () => { if (active) options.onConnectionState?.('retrying'); };
+  receiver.client.on('connected', connected);
+  receiver.client.on('reconnecting', disconnected);
+  receiver.client.on('disconnected', disconnected);
+  receiver.client.on('close', disconnected);
+  const detach = () => {
+    active = false;
+    receiver.client.off('connected', connected);
+    receiver.client.off('reconnecting', disconnected);
+    receiver.client.off('disconnected', disconnected);
+    receiver.client.off('close', disconnected);
+  };
+  slackCleanup.set(app, detach);
+  const startup = async () => {
+    const userNameResolver = createCachedSlackUserNameResolver(app.client);
+    const assistant = createSlackAssistant({
+      conversationManager: options.conversationManager,
+      mainAgent: options.mainAgent,
+      threadModelStore: options.threadModelStore,
+      userNameResolver,
+      runtimeController: options.runtimeController,
+      skyHome: options.skyHome,
+    });
 
-  app.assistant(assistant);
+    app.assistant(assistant);
 
-  const auth = await app.client.auth.test();
-  const botUserId = readAuthString(auth.user_id, 'Slack auth.test did not return user_id.');
-  const channelHandler = createSlackChannelHandler({
-    botUserId,
-    conversationManager: options.conversationManager,
-    mainAgent: options.mainAgent,
-    threadModelStore: options.threadModelStore,
-    slack: {
-      assistant: {
-        threads: {
-          setStatus: async (params) => app.client.assistant.threads.setStatus(params),
+    const auth = await app.client.auth.test();
+    const botUserId = readAuthString(auth.user_id, 'Slack auth.test did not return user_id.');
+    const channelHandler = createSlackChannelHandler({
+      botUserId,
+      conversationManager: options.conversationManager,
+      mainAgent: options.mainAgent,
+      threadModelStore: options.threadModelStore,
+      slack: {
+        assistant: {
+          threads: {
+            setStatus: async (params) => app.client.assistant.threads.setStatus(params),
+          },
+        },
+        chat: {
+          postMessage: async (message) => app.client.chat.postMessage(message),
+        },
+        fetchThreadMessages: async ({ channel, latest, threadTs }) =>
+          fetchThreadMessages(app, { channel, latest, threadTs }),
+        reactions: {
+          add: async (params) => app.client.reactions.add(params),
+          remove: async (params) => app.client.reactions.remove(params),
         },
       },
-      chat: {
-        postMessage: async (message) => app.client.chat.postMessage(message),
-      },
-      fetchThreadMessages: async ({ channel, latest, threadTs }) =>
-        fetchThreadMessages(app, { channel, latest, threadTs }),
-      reactions: {
-        add: async (params) => app.client.reactions.add(params),
-        remove: async (params) => app.client.reactions.remove(params),
-      },
-    },
-    userNameResolver,
-    runtimeController: options.runtimeController,
-    skyHome: options.skyHome,
-  });
-  const channelIngress = createSlackChannelIngress({
-    botUserId,
-    channelHandler,
-  });
-  const agentDmHandler = createSlackAgentDmHandler({
-    botUserId,
-    conversationManager: options.conversationManager,
-    mainAgent: options.mainAgent,
-    threadModelStore: options.threadModelStore,
-    slack: {
-      assistant: {
-        threads: {
-          setStatus: async (params) => app.client.assistant.threads.setStatus(params),
+      userNameResolver,
+      runtimeController: options.runtimeController,
+      skyHome: options.skyHome,
+    });
+    const channelIngress = createSlackChannelIngress({
+      botUserId,
+      channelHandler,
+    });
+    const agentDmHandler = createSlackAgentDmHandler({
+      botUserId,
+      conversationManager: options.conversationManager,
+      mainAgent: options.mainAgent,
+      threadModelStore: options.threadModelStore,
+      slack: {
+        assistant: {
+          threads: {
+            setStatus: async (params) => app.client.assistant.threads.setStatus(params),
+          },
         },
+        chat: {
+          postMessage: async (message) => app.client.chat.postMessage(message),
+        },
+        reactions: {
+          add: async (params) => app.client.reactions.add(params),
+          remove: async (params) => app.client.reactions.remove(params),
+        },
+        token: options.botToken,
       },
-      chat: {
-        postMessage: async (message) => app.client.chat.postMessage(message),
-      },
-      reactions: {
-        add: async (params) => app.client.reactions.add(params),
-        remove: async (params) => app.client.reactions.remove(params),
-      },
-      token: options.botToken,
-    },
-    userNameResolver,
-    runtimeController: options.runtimeController,
-    skyHome: options.skyHome,
-  });
+      userNameResolver,
+      runtimeController: options.runtimeController,
+      skyHome: options.skyHome,
+    });
 
-  app.event('app_mention', async ({ event }) => {
-    await channelIngress.handleAppMention({ event: event as SlackChannelEvent });
-  });
+    app.event('app_mention', async ({ event }) => {
+      await channelIngress.handleAppMention({ event: event as SlackChannelEvent });
+    });
 
-  app.message(async ({ message }) => {
-    const handledAgentDm = await agentDmHandler.handleMessage({ message: message as SlackAgentDmMessageEvent });
-    if (handledAgentDm) {
-      return;
+    app.message(async ({ message }) => {
+      const handledAgentDm = await agentDmHandler.handleMessage({ message: message as SlackAgentDmMessageEvent });
+      if (handledAgentDm) {
+        return;
+      }
+
+      await channelIngress.handleMessage({ message: message as SlackChannelMessageIngressEvent });
+    });
+
+    options.signal?.throwIfAborted();
+    if (!active) throw new Error('Slack startup was stopped.');
+    await app.start();
+    if (!active || options.signal?.aborted) {
+      await stopSlackApp(app);
+      throw new Error('Slack startup was stopped.');
     }
-
-    await channelIngress.handleMessage({ message: message as SlackChannelMessageIngressEvent });
-  });
-
-  await app.start();
-  console.log('[slack] bolt app started (socket mode)');
-
-  return app;
+    console.log('[slack] bolt app started (socket mode)');
+    return app;
+  };
+  try {
+    return await withTimeout(startup(), 30_000, 'Slack startup', options.signal);
+  } catch (error) {
+    await stopSlackApp(app);
+    throw error;
+  }
 }
 
+const slackCleanup = new WeakMap<App, () => void>();
+
 export async function stopSlackApp(app: App): Promise<void> {
+  slackCleanup.get(app)?.();
+  slackCleanup.delete(app);
   try {
     await app.stop();
     console.log('[slack] bolt app stopped');

@@ -207,13 +207,12 @@ async function interactiveInput(current: ControlConfiguration): Promise<InitInpu
   }
   const workspace = await question('Workspace', current.settings.workspace);
   if (!current.secrets['slack.botToken'].configured || !current.secrets['slack.appToken'].configured) {
-    await offerSlackAppCreation();
+    const setupSlack = await question('Set up optional Slack connection now? (yes/no)', 'no');
+    if (/^y(?:es)?$/i.test(setupSlack)) await offerSlackAppCreation();
   }
   const secretChanges: Partial<Record<SecretName, string | null>> = {};
   for (const name of SECRET_NAMES) {
     const required =
-      name === 'slack.botToken' ||
-      name === 'slack.appToken' ||
       (name === 'claudeAgentSdk.oauthToken' && agentBackend === 'claude-agent-sdk');
     const change = await secretChoice(name, current.secrets[name].configured, required);
     if (change !== undefined) secretChanges[name] = change;
@@ -292,7 +291,7 @@ function validateInput(input: InitInput, current: ControlConfiguration): void {
     return current.secrets[name].configured;
   };
   const missing = SECRET_NAMES.filter((name) => {
-    if (name === 'claudeAgentSdk.oauthToken' && input.settings.agentBackend !== 'claude-agent-sdk') {
+    if (name !== 'claudeAgentSdk.oauthToken' || input.settings.agentBackend !== 'claude-agent-sdk') {
       return false;
     }
     return !configuredAfterChanges(name);

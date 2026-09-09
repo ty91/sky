@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import http from 'node:http';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { getDaemonStatus } from '../dist/skyd/control-uds.js';
-import { SlackStartupError } from '../dist/bot.js';
+import { createSlackSdk } from './helpers/slack-sdk.mjs';
 import { PRODUCT_VERSION, runDiagnostics, withDaemonVersionDrift } from '../dist/diagnostics.js';
 import { openConversationStore } from '../dist/conversation/store.js';
 import { createSkyHome, prepareSkyHome } from '../dist/sky-home.js';
@@ -458,7 +458,7 @@ test('daemon diagnostics report a disk and active configuration mismatch as rest
   }
 });
 
-test('daemon diagnostics preserve needs-configuration, degraded, and draining runtime semantics', async (t) => {
+test('daemon diagnostics preserve needs-configuration, independent Slack, and draining runtime semantics', async (t) => {
   await t.test('needs_configuration', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-doctor-needs-config-'));
     const daemon = await startSkyd({ homeDir });
@@ -475,7 +475,7 @@ test('daemon diagnostics preserve needs-configuration, degraded, and draining ru
     }
   });
 
-  await t.test('degraded', async () => {
+  await t.test('Slack failure with ready agent', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-doctor-degraded-'));
     const skyHome = path.join(homeDir, '.sky');
     await mkdir(skyHome, { recursive: true });
@@ -492,16 +492,14 @@ test('daemon diagnostics preserve needs-configuration, degraded, and draining ru
     const daemon = await startSkyd({
       homeDir,
       backoff: { baseMs: 1_000, maxMs: 1_000, jitterRatio: 0 },
-      startRuntime: async () => {
-        throw new SlackStartupError(new Error('external Slack failure'));
-      },
+      runtimeDependencies: { slackSdk: createSlackSdk({ authenticate: async () => { throw new Error('external Slack failure'); } }).sdk },
     });
     try {
-      await waitForRuntime(daemon.paths.socketFile, 'degraded');
+      await waitForRuntime(daemon.paths.socketFile, 'ready');
       const result = await runCli(['doctor', '--json'], { ...process.env, HOME: homeDir });
-      assert.equal(result.code, 1);
+      assert.equal(result.code, 0);
       const report = JSON.parse(result.stdout);
-      assert.equal(report.checks.find((check) => check.id === 'runtime.state')?.status, 'fail');
+      assert.equal(report.checks.find((check) => check.id === 'runtime.state')?.status, 'pass');
       assert.equal(report.checks.find((check) => check.id === 'runtime.slack')?.status, 'warn');
       assert.match(
         report.checks.find((check) => check.id === 'runtime.errors')?.summary ?? '',
@@ -613,7 +611,7 @@ test('doctor identifies an unsupported settings schema without echoing the docum
   }
 });
 
-test('doctor distinguishes a valid settings document from missing secrets', async () => {
+test('doctor treats absent Slack credentials as an optional connection', async () => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-doctor-missing-secrets-'));
   const home = createSkyHome({ homeDir });
   prepareSkyHome(home);
@@ -635,7 +633,7 @@ test('doctor distinguishes a valid settings document from missing secrets', asyn
     assert.equal(report.checks.find((check) => check.id === 'configuration.settings')?.status, 'pass');
     assert.equal(
       report.checks.find((check) => check.id === 'configuration.slack_credentials')?.status,
-      'fail',
+      'pass',
     );
   } finally {
     await rm(homeDir, { recursive: true, force: true });

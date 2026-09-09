@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { SlackStartupError } from '../dist/bot.js';
+import { createSlackSdk } from './helpers/slack-sdk.mjs';
 import { createConfiguration } from '../dist/configuration.js';
 import { startSkyd } from './helpers/start-skyd.mjs';
 import { ControlError } from '../dist/skyd/control.js';
@@ -552,80 +552,6 @@ test('the skyd entrypoint stays foreground with invalid settings and shuts down 
   });
 });
 
-test('Slack startup failures degrade, redact credentials, and recover through retry', async () => {
-  await withTempHome(async (homeDir) => {
-    const skyDir = path.join(homeDir, '.sky');
-    const settingsFile = path.join(skyDir, 'settings.json');
-    await mkdir(skyDir, { recursive: true });
-    await writeFile(
-      settingsFile,
-      JSON.stringify({
-        slack: { botToken: 'xoxb-super-secret', appToken: 'xapp-super-secret' },
-        model: 'anthropic/test-model',
-        agentBackend: 'claude-agent-sdk',
-        claudeAgentSdk: { oauthToken: 'arbitrary-oauth-secret' },
-      }),
-      { mode: 0o644 },
-    );
-
-    let starts = 0;
-    let runtimeClosed = false;
-    const daemon = await startSkyd({
-      homeDir,
-      backoff: { baseMs: 30, maxMs: 30, jitterRatio: 0 },
-      startRuntime: async (settings) => {
-        starts += 1;
-        if (starts <= 2) {
-          throw new SlackStartupError(
-            new Error(
-              `tokens: ${settings.slack.botToken} ${settings.slack.appToken} ${settings.claudeAgentSdk.oauthToken}`,
-            ),
-          );
-        }
-        return {
-          activeWorkCount: () => 2,
-          close: async () => {
-            runtimeClosed = true;
-          },
-        };
-      },
-    });
-
-    try {
-      const degraded = await waitForStatus(
-        daemon.paths.socketFile,
-        (status) => status.runtime.state === 'degraded' && status.slack.attempts >= 1,
-      );
-      assert.equal(degraded.slack.state, 'retrying');
-      assert.ok(degraded.slack.nextRetryAt);
-
-      const ready = await waitForStatus(
-        daemon.paths.socketFile,
-        (status) => status.runtime.state === 'ready',
-      );
-      assert.equal(starts, 3);
-      assert.equal(ready.slack.state, 'connected');
-      assert.deepEqual(ready.agent, {
-        backend: 'claude-agent-sdk',
-        model: 'anthropic/test-model',
-      });
-      assert.equal(ready.activeWorkCount, 0);
-      assert.deepEqual(
-        ready.recentErrors.map(({ code }) => code),
-        ['slack_startup_failed', 'slack_startup_failed'],
-      );
-      assert.equal(permissions(await lstat(settingsFile)), 0o600);
-
-      const logs = await readFile(daemon.paths.logFile, 'utf8');
-      assert.doesNotMatch(logs, /super-secret|arbitrary-oauth-secret/);
-      assert.match(logs, /\[REDACTED\]/);
-    } finally {
-      await daemon.close();
-    }
-    assert.equal(runtimeClosed, true);
-  });
-});
-
 test('a live socket rejects a second daemon while a probed stale socket is recovered', async () => {
   await withTempHome(async (homeDir) => {
     const first = await startSkyd({ homeDir });
@@ -788,9 +714,7 @@ test('maintenance ticker uses the next five-minute KST occurrence while Slack re
     const starts = [];
     const daemon = await startSkyd({
       homeDir,
-      startRuntime: async () => {
-        throw new SlackStartupError(new Error('Slack is unavailable.'));
-      },
+      runtimeDependencies: { slackSdk: createSlackSdk({ authenticate: async () => { throw new Error('Slack is unavailable.'); } }).sdk },
       backoff: { baseMs: 60_000, maxMs: 60_000, jitterRatio: 0 },
       runOperation: async (request) => {
         starts.push(request);
@@ -805,7 +729,7 @@ test('maintenance ticker uses the next five-minute KST occurrence while Slack re
     try {
       const degraded = await waitForStatus(
         daemon.paths.socketFile,
-        (status) => status.runtime.state === 'degraded',
+        (status) => status.runtime.state === 'ready' && status.slack.state === 'retrying',
       );
       assert.equal(degraded.slack.state, 'retrying');
       assert.deepEqual(clock.delays(), [30_000]);

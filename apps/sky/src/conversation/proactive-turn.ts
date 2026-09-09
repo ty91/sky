@@ -2,7 +2,7 @@ import type { AgentConfig } from '../agents/types.js';
 import type {
   ConversationManager,
   ConversationTurnResult,
-} from '../conversation/manager.js';
+} from './manager.js';
 
 export type ProactiveAgentTurnOptions = {
   conversationManager: Pick<ConversationManager, 'runTurn'>;

@@ -36,12 +36,11 @@ type StoreHandles = {
   getStmt: StatementSync;
   listStmt: StatementSync;
   cancelStmt: StatementSync;
-  claimDueStmt: StatementSync;
-  claimDueCronStmt: StatementSync;
   rearmCronStmt: StatementSync;
   markDoneStmt: StatementSync;
   recordFailureStmt: StatementSync;
-  skipOverdueStmt: StatementSync;
+  claimStmt: StatementSync;
+  advancePendingCronStmt: StatementSync;
   failRunningBeforeStmt: StatementSync;
 };
 
@@ -114,28 +113,6 @@ export function openScheduledJobStore(
     cancelStmt: db.prepare(
       "UPDATE scheduled_jobs SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
     ),
-    claimDueStmt: db.prepare(`
-      UPDATE scheduled_jobs
-      SET status = 'running', last_run_at = ?, run_count = run_count + 1
-      WHERE id IN (
-        SELECT id
-        FROM scheduled_jobs
-        WHERE status = 'pending' AND kind = 'once' AND next_run_at <= ?
-        ORDER BY next_run_at, created_at, id
-      )
-      RETURNING *
-    `),
-    claimDueCronStmt: db.prepare(`
-      UPDATE scheduled_jobs
-      SET status = 'running', last_run_at = ?, run_count = run_count + 1
-      WHERE id IN (
-        SELECT id
-        FROM scheduled_jobs
-        WHERE status = 'pending' AND kind = 'cron' AND next_run_at <= ?
-        ORDER BY next_run_at, created_at, id
-      )
-      RETURNING *
-    `),
     rearmCronStmt: db.prepare(`
       UPDATE scheduled_jobs
       SET status = 'pending', next_run_at = ?, last_error = ?
@@ -153,10 +130,15 @@ export function openScheduledJobStore(
       WHERE id = ? AND status = 'running'
       RETURNING status
     `),
-    skipOverdueStmt: db.prepare(`
+    claimStmt: db.prepare(`
       UPDATE scheduled_jobs
-      SET status = 'done'
-      WHERE status = 'pending' AND kind = 'once' AND next_run_at < ?
+      SET status = 'running', last_run_at = ?, run_count = run_count + 1
+      WHERE id = ? AND status = 'pending' AND next_run_at <= ?
+      RETURNING *
+    `),
+    advancePendingCronStmt: db.prepare(`
+      UPDATE scheduled_jobs SET next_run_at = ?
+      WHERE id = ? AND kind = 'cron' AND status = 'pending'
     `),
     failRunningBeforeStmt: db.prepare(`
       UPDATE scheduled_jobs
@@ -205,26 +187,6 @@ export function openScheduledJobStore(
       return handles.cancelStmt.run(id).changes === 1;
     },
 
-    claimDue(now: number): ScheduledJob[] {
-      return (handles.claimDueStmt.all(now, now) as ScheduledJobRow[])
-        .map(toScheduledJob)
-        .sort((left, right) =>
-          left.nextRunAt - right.nextRunAt ||
-          left.createdAt - right.createdAt ||
-          left.id.localeCompare(right.id),
-        );
-    },
-
-    claimDueCron(now: number): ScheduledJob[] {
-      return (handles.claimDueCronStmt.all(now, now) as ScheduledJobRow[])
-        .map(toScheduledJob)
-        .sort((left, right) =>
-          left.nextRunAt - right.nextRunAt ||
-          left.createdAt - right.createdAt ||
-          left.id.localeCompare(right.id),
-        );
-    },
-
     rearmCron(id: string, nextRunAt: number, lastError: string | null = null): boolean {
       return handles.rearmCronStmt.run(nextRunAt, lastError, id).changes === 1;
     },
@@ -252,8 +214,13 @@ export function openScheduledJobStore(
       return row.status === 'failed' ? 'failed' : 'retrying';
     },
 
-    skipOverdue(before: number): number {
-      return Number(handles.skipOverdueStmt.run(before).changes);
+    claim(id: string, now: number): ScheduledJob | undefined {
+      const row = handles.claimStmt.get(now, id, now) as ScheduledJobRow | undefined;
+      return row ? toScheduledJob(row) : undefined;
+    },
+
+    advancePendingCron(id: string, nextRunAt: number): boolean {
+      return handles.advancePendingCronStmt.run(nextRunAt, id).changes === 1;
     },
 
     failRunningBefore(before: number, error: string): ScheduledJob[] {

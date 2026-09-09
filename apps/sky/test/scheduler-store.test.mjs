@@ -78,7 +78,7 @@ test('scheduled job store atomically claims each due reminder once', () => {
     });
   }
 
-  assert.deepEqual(store.claimDue(1_000), [
+  assert.deepEqual([store.claim('due', 1_000)], [
     {
       id: 'due',
       title: 'due',
@@ -97,38 +97,10 @@ test('scheduled job store atomically claims each due reminder once', () => {
       lastError: null,
     },
   ]);
-  assert.deepEqual(store.claimDue(1_000), []);
+  assert.equal(store.claim('due', 1_000), undefined);
+  assert.equal(store.claim('future', 1_000), undefined);
   assert.equal(store.list().find((job) => job.id === 'future').status, 'pending');
   assert.equal(store.list().find((job) => job.id === 'cron').status, 'pending');
-
-  store.close();
-});
-
-test('scheduled job store skips only overdue one-shot reminders', () => {
-  const store = openScheduledJobStore(':memory:');
-  for (const kind of ['once', 'cron']) {
-    store.create({
-      id: kind,
-      title: kind,
-      kind,
-      nextRunAt: 999,
-      timezone: 'Asia/Seoul',
-      targetChannel: 'D123',
-      threadStrategy: 'new-root',
-      deliveryMode: 'agent',
-      prompt: kind,
-      createdAt: 500,
-    });
-  }
-
-  assert.equal(store.skipOverdue(1_000), 1);
-  assert.deepEqual(
-    store.list().map(({ kind, status }) => ({ kind, status })),
-    [
-      { kind: 'cron', status: 'pending' },
-      { kind: 'once', status: 'done' },
-    ],
-  );
 
   store.close();
 });

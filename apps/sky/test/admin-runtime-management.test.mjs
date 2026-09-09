@@ -299,12 +299,12 @@ test('assembled admin HTTP lists safe scheduler fields, enforces conflicts, and 
     const auth = await authenticate(daemon);
     createJob(scheduledJobStore, 'pending', 5_000);
     createJob(scheduledJobStore, 'running', 100);
-    assert.deepEqual(scheduledJobStore.claimDue(100).map(({ id }) => id), ['running']);
+    assert.deepEqual([scheduledJobStore.claim('running', 100).id], ['running']);
     createJob(scheduledJobStore, 'done', 200);
-    assert.deepEqual(scheduledJobStore.claimDue(200).map(({ id }) => id), ['done']);
+    assert.deepEqual([scheduledJobStore.claim('done', 200).id], ['done']);
     assert.equal(scheduledJobStore.markDone('done'), true);
     createJob(scheduledJobStore, 'failed', 300);
-    assert.deepEqual(scheduledJobStore.claimDue(300).map(({ id }) => id), ['failed']);
+    assert.deepEqual([scheduledJobStore.claim('failed', 300).id], ['failed']);
     assert.equal(
       scheduledJobStore.recordFailure('failed', 'raw secret diagnostic', 300, 0),
       'failed',
@@ -345,7 +345,7 @@ test('assembled admin HTTP lists safe scheduler fields, enforces conflicts, and 
       headers: auth.headers,
     });
     const claimPromise = new Promise((resolve) => {
-      setImmediate(() => resolve(scheduledJobStore.claimDue(1_000)));
+      setImmediate(() => resolve([scheduledJobStore.claim('race', 1_000)].filter(Boolean)));
     });
     const [raceCancel, claimed] = await Promise.all([cancelPromise, claimPromise]);
     const cancelWon = raceCancel.statusCode === 200;

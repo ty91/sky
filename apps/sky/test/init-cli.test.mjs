@@ -248,7 +248,7 @@ test('configuration routes preserve disk state on invalid and conflicting update
     );
     snapshot = await deleteSecret(daemon.paths.socketFile, 'slack.botToken');
     assert.equal(snapshot.secrets['slack.botToken'].configured, false);
-    assert.equal(snapshot.complete, false);
+    assert.equal(snapshot.complete, true);
     await assert.rejects(
       putSecret(daemon.paths.socketFile, 'unknown.secret', 'never-print-this'),
       (error) => error instanceof ControlRequestError && error.code === 'unknown_secret',
@@ -365,6 +365,24 @@ test('workspace bootstrap follows valid directory symlinks and rejects broken, c
       (error) => error instanceof WorkspaceBootstrapError && error.code === 'workspace_invalid',
     );
   } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+
+test('sky init completes agent setup without Slack credentials', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'sky-init-optional-slack-'));
+  const daemon = await startSkyd({ homeDir, configurationEnv: {} });
+  try {
+    const result = await runCli(['init', '--from-stdin', '--no-restart', '--json'], homeDir,
+      JSON.stringify({ backend: 'pi', model: 'anthropic/test-model' }));
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const configuration = await getConfiguration(daemon.paths.socketFile);
+    assert.equal(configuration.complete, true);
+    assert.equal(configuration.secrets['slack.botToken'].configured, false);
+    assert.equal(configuration.secrets['slack.appToken'].configured, false);
+  } finally {
+    await daemon.close();
     await rm(homeDir, { recursive: true, force: true });
   }
 });

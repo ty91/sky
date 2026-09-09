@@ -182,3 +182,12 @@ function readUploadedFileId(response: unknown): string | undefined {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+export function createSlackFileUploaderProvider(
+  getSlackApp: () => { client: SlackUploadV2Client } | undefined,
+): () => SlackFileUploader | undefined {
+  return () => {
+    const slackApp = getSlackApp();
+    return slackApp ? createSlackFileUploader(slackApp.client) : undefined;
+  };
+}
