@@ -74,7 +74,7 @@ async function writeSecrets(home, secrets) {
 
 test('runtime resolution reports a stable secret-missing error without exposing configuration', async () => {
   await withConfiguration(async ({ configuration, home }) => {
-    await writeV1(home);
+    await writeV1(home, { agentBackend: 'claude-agent-sdk' });
 
     assert.throws(
       () => configuration.resolveRuntime(),

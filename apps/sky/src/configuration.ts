@@ -523,8 +523,6 @@ export function createConfiguration(
     ) as Record<SecretName, SecretMetadata>;
     const complete =
       settings !== undefined &&
-      metadata['slack.botToken'].configured &&
-      metadata['slack.appToken'].configured &&
       (settings.agentBackend !== 'claude-agent-sdk' ||
         metadata['claudeAgentSdk.oauthToken'].configured);
     const runtimeSettings = settings
@@ -567,8 +565,6 @@ export function createConfiguration(
       const resolved = settingsFromDocument(settings, secrets);
       const metadata = inspect().public.secrets;
       if (
-        !metadata['slack.botToken'].configured ||
-        !metadata['slack.appToken'].configured ||
         (settings.agentBackend === 'claude-agent-sdk' &&
           !metadata['claudeAgentSdk.oauthToken'].configured)
       ) {

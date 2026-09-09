@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMainAgentConfig } from '../dist/agents/main.js';
+import { createSlackAgentConfig } from '../dist/slack/agent.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
 
 test('main agent can schedule a reminder for the current Slack channel', async () => {
   const store = openScheduledJobStore(':memory:');
-  const agent = createMainAgentConfig({
+  const agent = createSlackAgentConfig({
     systemPrompt: 'system',
     scheduledJobStore: store,
     schedulerClock: () => 1_700_000_000_000,
@@ -60,7 +60,7 @@ test('main agent can list pending reminders', async () => {
     prompt: '여권을 챙기라고 알려줘',
     createdAt: 1_700_000_000_000,
   });
-  const agent = createMainAgentConfig({ systemPrompt: 'system', scheduledJobStore: store });
+  const agent = createSlackAgentConfig({ systemPrompt: 'system', scheduledJobStore: store });
   const list = agent
     .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
     .find((tool) => tool.name === 'list_scheduled');
@@ -99,7 +99,7 @@ test('main agent can cancel a pending reminder', async () => {
     prompt: '여권을 챙기라고 알려줘',
     createdAt: 1_700_000_000_000,
   });
-  const agent = createMainAgentConfig({ systemPrompt: 'system', scheduledJobStore: store });
+  const agent = createSlackAgentConfig({ systemPrompt: 'system', scheduledJobStore: store });
   const cancel = agent
     .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
     .find((tool) => tool.name === 'cancel_scheduled');

@@ -1,6 +1,6 @@
 export type SupervisionMode = 'launchd' | 'foreground';
 
-export type RuntimeActivityKind = 'slack_turn' | 'scheduler_dispatch' | 'maintenance';
+export type RuntimeActivityKind = 'agent_turn' | 'slack_turn' | 'scheduler_dispatch' | 'maintenance';
 
 export type RuntimeActivityLease = {
   release(): void;

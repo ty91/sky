@@ -1264,7 +1264,7 @@ function Dashboard({ onSessionExpired }: { onSessionExpired(): void }) {
       <div className="metric-grid">
         <Metric label="Daemon" value={overview.daemon.productVersion} detail={formatDuration(overview.daemon.process.uptimeMs)} />
         <Metric label="Runtime" value={labelState(overview.daemon.runtime.state)} detail={`${overview.daemon.activeWorkCount} active work`} tone={overview.daemon.runtime.state === 'ready' ? 'good' : 'warn'} />
-        <Metric label="Slack" value={labelState(overview.daemon.slack.state)} detail={overview.daemon.slack.attempts ? `${overview.daemon.slack.attempts} reconnect attempts` : 'Socket mode'} tone={overview.daemon.slack.state === 'connected' ? 'good' : 'warn'} />
+        <Metric label="Slack" value={labelState(overview.daemon.slack.state)} detail={overview.daemon.slack.state === 'not_configured' ? 'Optional connection' : overview.daemon.slack.attempts ? `${overview.daemon.slack.attempts} connection attempts` : 'Socket mode'} tone={overview.daemon.slack.state === 'connected' ? 'good' : overview.daemon.slack.state === 'not_configured' ? undefined : 'warn'} />
         <Metric label="Host" value={overview.host.hostname} detail={`${overview.host.platform} · ${overview.host.architecture}`} />
       </div>
 

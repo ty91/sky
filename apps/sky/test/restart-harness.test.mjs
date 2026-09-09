@@ -102,10 +102,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createMainAgentConfig } from './dist/agents/main.js';
+import { createSlackAgentConfig } from './dist/slack/agent.js';
 
-const agentWithoutUploader = createMainAgentConfig({ systemPrompt: 'system' });
-assert.ok(agentWithoutUploader.tools.includes('slack_attach_files'));
+const agentWithoutUploader = createSlackAgentConfig({ systemPrompt: 'system' });
+assert.equal(agentWithoutUploader.tools.includes('slack_attach_files'), false);
 assert.deepEqual(
   agentWithoutUploader.customToolsFactory({ sessionKey: 'C123:111.22' }).map((tool) => tool.name),
   [],
@@ -116,7 +116,7 @@ try {
   const filePath = path.join(tempDir, 'report.txt');
   await writeFile(filePath, 'report', 'utf8');
   const uploadCalls = [];
-  const agentWithUploader = createMainAgentConfig({
+  const agentWithUploader = createSlackAgentConfig({
     systemPrompt: 'system',
     slackFileUploaderProvider: () => ({
       uploadFiles: async (params) => {
@@ -180,8 +180,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createMainAgentConfig } from './dist/agents/main.js';
-import { createSlackFileUploaderProvider } from './dist/bot.js';
+import { createSlackAgentConfig } from './dist/slack/agent.js';
+import { createSlackFileUploaderProvider } from './dist/slack/files.js';
 
 let slackApp;
 const provider = createSlackFileUploaderProvider(() => slackApp);
@@ -192,7 +192,7 @@ try {
 const filePath = path.join(tempDir, 'report.txt');
 await writeFile(filePath, 'report', 'utf8');
 
-const agent = createMainAgentConfig({
+const agent = createSlackAgentConfig({
   systemPrompt: 'system',
   slackFileUploaderProvider: provider,
 });

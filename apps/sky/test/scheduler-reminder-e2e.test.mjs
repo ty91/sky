@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createMainAgentConfig } from '../dist/agents/main.js';
+import { createSlackAgentConfig } from '../dist/slack/agent.js';
 import { createScheduledJobDispatcher } from '../dist/scheduler/dispatcher.js';
 import { createScheduledJobScheduler } from '../dist/scheduler/loop.js';
 import { openScheduledJobStore } from '../dist/scheduler/store.js';
@@ -17,7 +17,7 @@ test('next Monday 09:00 KST reminder survives restart and initiates a Slack DM',
   let manager;
 
   try {
-    const registrationAgent = createMainAgentConfig({
+    const registrationAgent = createSlackAgentConfig({
       systemPrompt: 'system',
       scheduledJobStore: store,
       schedulerClock: () => Date.parse('2026-07-18T12:00:00+09:00'),
@@ -49,7 +49,7 @@ test('next Monday 09:00 KST reminder survives restart and initiates a Slack DM',
     manager = conversation.manager;
     const posts = [];
     const dispatcher = createScheduledJobDispatcher({
-      mainAgent: createMainAgentConfig({
+      mainAgent: createSlackAgentConfig({
         systemPrompt: 'system',
         scheduledJobStore: store,
       }),

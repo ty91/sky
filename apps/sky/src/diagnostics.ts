@@ -347,14 +347,16 @@ async function credentialChecks(
   const slackConfigured =
     configuration.public.secrets['slack.botToken'].configured &&
     configuration.public.secrets['slack.appToken'].configured;
+  const slackAbsent = !configuration.public.secrets['slack.botToken'].configured &&
+    !configuration.public.secrets['slack.appToken'].configured;
   const slack = check(
     'configuration.slack_credentials',
-    slackConfigured ? 'pass' : 'fail',
+    slackConfigured || slackAbsent ? 'pass' : 'warn',
     slackConfigured
       ? 'Slack bot and app credentials are configured.'
-      : 'One or more Slack credentials are missing.',
+      : slackAbsent ? 'Optional Slack connection is not configured.' : 'Slack connection configuration is incomplete.',
     null,
-    slackConfigured
+    slackConfigured || slackAbsent
       ? null
       : 'Create the Slack app with `sky slack manifest`, install it to the workspace, then run `sky init` to store the bot and app tokens.',
   );
@@ -816,11 +818,9 @@ function runtimeChecks(daemon: DaemonStatus | undefined): DiagnosticCheck[] {
         ? 'warn'
         : 'fail';
   const slackStatus: DiagnosticStatus =
-    daemon.slack.state === 'connected'
+    daemon.slack.state === 'connected' || daemon.slack.state === 'not_configured'
       ? 'pass'
-      : daemon.slack.state === 'not_configured'
-        ? 'fail'
-        : 'warn';
+      : 'warn';
   return [
     // Version drift lives in installation.drift, not here: these checks run
     // inside the daemon, so comparing PRODUCT_VERSION against daemon.productVersion
