@@ -1,5 +1,7 @@
 # Standalone acceptance
 
+[README](../README.md) · [배포](releasing.md) · [마이그레이션](migrations.md)
+
 이 문서는 Apple Silicon macOS용 standalone artifact가 개발 checkout과 JavaScript runtime 없이 동작하고, 실제 Pi 및 Claude credential로 turn·resume 계약을 지키는지 릴리스 전에 확인하는 절차다.
 
 ## 자동 검증
