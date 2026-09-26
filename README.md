@@ -454,6 +454,7 @@ Tag workflow는 macOS arm64에서 tag와 `package.json` version 일치, lint, ty
 
 ## 운영 메모
 
+- macOS 배포 서명 Mac, 인증서·공증 설정과 보관·복구 절차는 [배포 서명과 공증 인증](docs/macos-signing.md)을 참고합니다. 실제 앱 빌드 연결과 공증 파이프라인은 별도 후속 작업입니다.
 - `sky status`는 다음 정보를 보여줍니다.
   - LaunchAgent 설치/load 상태, launchd process state와 PID
   - control socket 도달 여부와 daemon runtime/Slack 상태
