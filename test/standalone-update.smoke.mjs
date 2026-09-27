@@ -28,6 +28,42 @@ const currentVersion = JSON.parse(
   await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
 ).version;
 
+test('Bun downloads a fully buffered response after consumption is deferred', { timeout: 30_000 }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'sky-buffered-download-'));
+  const expected = Buffer.alloc(280 * 1024, 0x61);
+  const destination = path.join(directory, 'asset');
+  const server = http.createServer((_request, response) => response.end(expected));
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const modulePath = path.join(repositoryRoot, 'apps/sky/dist/commands/update.js');
+    const code = `
+      const { downloadReleaseAsset } = await import(${JSON.stringify(modulePath)});
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (...args) => {
+        const response = await originalFetch(...args);
+        const body = response.body;
+        if (!body) throw new Error('Expected a response body');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return { ok: response.ok, headers: response.headers, body };
+      };
+      await downloadReleaseAsset(
+        { name: 'asset', browser_download_url: 'http://127.0.0.1:${server.address().port}/asset' },
+        ${JSON.stringify(destination)},
+        ${expected.length},
+      );
+    `;
+    const result = await run(standaloneSky, ['--eval', code], { ...process.env, BUN_BE_BUN: '1' });
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.deepEqual(await readFile(destination), expected);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 async function setup() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sky-standalone-update-'));
   const homeDir = path.join(root, 'home');

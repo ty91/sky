@@ -156,7 +156,7 @@ function requireAsset(release: LatestRelease, name: string): ReleaseAsset {
   return asset;
 }
 
-async function download(
+export async function downloadReleaseAsset(
   asset: ReleaseAsset,
   destination: string,
   maximumBytes: number,
@@ -201,7 +201,7 @@ async function download(
         }
       }
     } finally {
-      reader.releaseLock();
+      await reader.cancel();
     }
     await output.sync();
   } catch (error) {
@@ -384,8 +384,8 @@ export async function updateStandalone(
   try {
     const archivePath = path.join(temporaryDirectory, archiveName);
     const checksumPath = path.join(temporaryDirectory, checksumName);
-    await download(archiveAsset, archivePath, MAX_ARCHIVE_BYTES);
-    await download(checksumAsset, checksumPath, MAX_CHECKSUM_BYTES);
+    await downloadReleaseAsset(archiveAsset, archivePath, MAX_ARCHIVE_BYTES);
+    await downloadReleaseAsset(checksumAsset, checksumPath, MAX_CHECKSUM_BYTES);
     await verifyChecksum(archivePath, checksumPath, archiveName);
     const replacement = await extractExecutable(archivePath, temporaryDirectory);
     await verifyExecutableArchitecture(replacement);

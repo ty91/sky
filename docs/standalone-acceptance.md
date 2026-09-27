@@ -46,7 +46,9 @@ shasum -a 256 -c sky-<version>-darwin-arm64.tar.gz.sha256
 
 Standalone 설치 후 `sky update`는 GitHub의 latest release redirect를 무인증으로 조회한다. 현재 version과 같으면 artifact나 daemon을 건드리지 않고 종료한다. 새 version이면 정확한 이름의 archive와 checksum asset을 제한된 시간·크기 안에서 내려받아 checksum, 단일 `sky` 내용물, 실행 권한, darwin-arm64 Mach-O architecture와 version을 검증한 뒤 실행 중인 `sky`와 같은 directory에 staging file과 이전 executable의 backup을 만들고 원자적으로 교체한다. 교체가 끝난 뒤에는 설정 상태와 무관하게 launchd가 새 executable generation을 기동하도록 강제 restart하고 새 daemon의 version까지 확인한다. Restart가 실패하거나 다른 version이 시작되면 이전 executable을 원자적으로 복원하고 같은 방식으로 기존 daemon을 다시 기동한다. Node.js 개발 runtime에서는 package 또는 checkout의 update 경로를 사용하도록 안내하고 실행을 거부한다.
 
-`pnpm test:standalone:update`는 mock latest-release API와 release asset 서버를 사용해 이미 최신인 경우의 무변경, download·checksum·architecture 실패 시 executable·daemon 무변경, restart 실패 시 이전 executable 복원, 성공 시 원자적 교체와 target version daemon restart, 설정이 없는 daemon의 update, Node.js runtime 거부를 검증한다. 이 smoke는 `bun run build:standalone` 뒤에 실행한다. `--release-api-url <url>`은 이 mock server처럼 latest-release API endpoint를 명시적으로 바꿔야 하는 검증 환경을 위한 override다.
+`pnpm test:standalone:update`는 mock latest-release API와 release asset 서버를 사용해 이미 최신인 경우의 무변경, download·checksum·architecture 실패 시 executable·daemon 무변경, restart 실패 시 이전 executable 복원, 성공 시 원자적 교체와 target version daemon restart, 설정이 없는 daemon의 update, Node.js runtime 거부를 검증한다. 이 smoke는 `pnpm build`와 `pnpm build:standalone` 뒤에 실행한다. `--release-api-url <url>`은 이 mock server처럼 latest-release API endpoint를 명시적으로 바꿔야 하는 검증 환경을 위한 override다.
+
+응답이 완전히 버퍼링된 뒤 다운로드 소비를 시작하는 회귀 검사도 포함한다. 실제 standalone의 Bun runtime에서 빌드된 다운로드 모듈을 실행하고 파일 내용을 대조한다. Bun 1.3.14는 이 경우 `reader.releaseLock()`에서 TypeError를 낼 수 있어 다운로드는 사용한 reader를 cancel하여 정리한다. [Bun 이슈 #28952](https://github.com/oven-sh/bun/issues/28952)의 경로이며, 작은 응답이나 빠른 서버에서도 완료된 다운로드를 실패로 처리하지 않아야 한다.
 
 Standalone installer와 `sky update`는 사용자 crontab을 읽거나 변경하지 않는다. Maintenance cutover는 release 설치와 분리된 수동 운영 절차이며, 설치·업데이트 acceptance에서도 기존 crontab이 그대로 유지되어야 한다.
 
