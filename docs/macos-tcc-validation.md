@@ -37,7 +37,7 @@
 }
 ```
 
-첫 번째는 비보호 대조군, Desktop은 파일 및 폴더 권한, Mail 아래 테스트 디렉터리는 전체 디스크 접근 검증의 후보이다. 보호 위치의 동작은 OS에 따라 달라진다. 승인 전 실제 거부가 관찰되지 않으면 FDA 검증 성공으로 판정하지 않는다. 보호 위치의 fixture는 VM의 Finder와 편집기로 준비하고, 준비에 쓴 앱과 권한도 기록한다.
+첫 번째는 비보호 대조군, Desktop은 파일 및 폴더 권한, Mail 아래 테스트 디렉터리는 전체 디스크 접근 검증의 후보이다. 보호 위치의 동작은 OS에 따라 달라진다. 승인 전 실제 거부가 관찰되지 않으면 FDA 검증 성공으로 판정하지 않는다. 보호 위치의 fixture는 별도의 관찰자 경로로 준비하고, 준비에 쓴 앱과 권한도 기록한다. 관찰자의 접근 성공을 Sky의 접근 성공으로 간주하지 않는다.
 
 각 `input.txt`에는 서로 다른 임의 문자열 한 줄을 넣는다. 기대 문자열은 관찰자가 별도로 보관하며 요청·모델 프롬프트에 넣지 않는다. 읽기 결과와 이를 비교한다. 쓰기는 실행별 `output-<id>.txt`를 만들며 실제 내용이 응답의 `expectedContent`와 정확히 같은지 따로 확인한다.
 
@@ -100,16 +100,64 @@ log stream --style compact --predicate 'subsystem == "com.apple.TCC"'
 
 `EPERM`·`EACCES`는 접근 거부의 관찰 결과이며 단독으로 TCC 원인을 확정하지 않는다. 소유권·ACL, sandbox, Endpoint Security와 TCC 진단을 함께 확인한다. `ENOENT`, 잘못된 경로·파일 종류, 모델 인증 실패, 도구 미호출·timeout은 별도 오류 또는 미확인이다. FDA를 확정 조회하는 일반 API나 TCC DB 조회 결과를 판정 근거로 가정하지 않는다.
 
-각 OS·backend 버전·권한 종류에 대해 표를 따로 작성하고 각 셀에 실행 ID와 증거 파일을 연결한다. 두 배포물의 소스 커밋·checksum·공증 ID를 함께 기록한다. `미실행`, `미확인`, `거부 확인`, `허용 확인`, `귀속 실패`를 구분한다.
+## 2026-09-27 실측 결과
 
-| 실제 실행 경로 | 승인 전 | 승인 후 | 철회 후 | UI 종료 | 호스트 재시작 | 재로그인 | A→B 교체·재철회 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 호스트 직접 읽기·쓰기 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
-| Pi 파일 도구 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
-| Pi Bash | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
-| Claude 파일 도구 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
-| Claude Bash | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
+macOS 26.6.2(25G83), arm64 VM에서 SIP·Gatekeeper를 활성화한 채 측정했다. Pi 0.80.10은 `openai-codex/gpt-5.5`, Claude Agent SDK 0.3.283은 `anthropic/claude-opus-5-5`를 사용했다. 앱 최소 버전 13.0과 실측 OS 범위는 다르며 다른 macOS 버전의 결과는 미확인이다.
 
-이 표는 양식이며 통과 결과가 아니다. TY-66은 아직 실측 완료 전이다. 최종 ADR은 확인된 귀속과 남은 OS·실행 경로 제약을 근거로 작성한다.
+사용자 요청으로 Desktop 검증 후 실측을 종료했다. **FDA는 승인 전 Mail fixture 접근 거부까지만 확인했다. FDA 승인·철회·생명주기·버전 교체는 미실행이며 통과로 취급하지 않는다.** 작업용 VM과 복사본은 증거 보존 후 삭제했다. 이 기록은 TY-66의 전체 최초 검증표를 통과했다는 주장이 아니다.
+
+### 배포물과 측정 조건
+
+두 배포물 모두 코드 커밋 `6e1b6ae0dd9b`를 사용한다. B는 루트 패키지 버전만 0.2.12로 올려 빌드한 뒤 작업 트리를 0.2.11로 복원했다. A·B 각각 서명·공증·stapling·서명된 앱 이동 실행 검증을 통과했고, VM 설치 위치에서 서명과 Gatekeeper를 확인했다. 앱·호스트의 designated requirement는 두 버전에서 정확히 같다.
+
+| 배포물 | SHA-256 | 공증 요청 ID |
+| --- | --- | --- |
+| A 0.2.11 | `6712757c0ebcdec16e273b49e6a2de344b5a44daee32eca00b98011bf22ccc1b` | `5185038f-c3b5-47b2-99a7-b07c5d3a7da6` |
+| B 0.2.12 | `0096aa39e9ce85144b3cd70671e79890dda5c23b87a5ad7d7be83e75c7247df9` | `687f16dc-dbc4-4236-b418-35fe5c3c11f3` |
+
+관찰자는 VM의 원격 로그인 경로로 비민감 fixture를 홈에서 생성해 Desktop·Mail로 옮기고 쓰기 결과를 읽었다. 이 관찰자에는 `sshd-keygen-wrapper`의 기존 전체 디스크 접근이 있었으며, 호스트는 SSH에서 실행하지 않고 Finder로 연 앱의 SMAppService 등록을 통해 실행했다. Sky·Claude helper·Bash에 관찰자 권한을 부여하지 않았다. 디렉터리는 테스트 계정 소유, `0700`, 별도 ACL 없음으로 확인했다.
+
+최초 Desktop 요청 화면에는 Sky가 표시됐고 거부 후 시스템 설정의 Sky → 데스크탑 폴더 항목이 꺼졌다. 이후 같은 앱 식별자의 고정된 배포물 A에서 승인 전 거부를 재확인했다. 05:53:36 UTC에 시스템 설정에서 Sky를 승인하고 재시작 안내의 ‘나중에’를 선택했다. 기존 호스트 PID 2270에서 곧바로 읽기·쓰기가 성공했다. 승인 유지 검증 뒤 B의 권한을 06:10:40 UTC에 철회하고 다시 ‘나중에’를 선택해 현재 호스트와 재시작 호스트를 구분했다.
+
+### Desktop 파일 및 폴더 권한
+
+셀은 **읽기 / 새 파일 쓰기** 순서다. ‘허용’은 실제 반환한 fixture 문자열 또는 관찰자가 읽은 정확한 출력 파일 내용으로 확인했으며 모델의 설명만으로 판정하지 않았다. 모든 파일·Bash 행은 실제 도구 호출과 결과를 포함한다.
+
+| 실행 경로 | A 승인 전 | A 승인 직후 | A UI 종료 | A 호스트 재시작 | A 재로그인 | B 교체 후 | B 철회 직후 | B 철회 후 재시작 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 호스트 직접 | 거부 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 거부 / 허용 | 거부 / 허용 |
+| Pi 파일 도구 | 거부 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 거부 / 허용 | 거부 / 허용 |
+| Pi Bash | 거부 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 거부 / 허용 | 거부 / 허용 |
+| Claude 파일 도구 | 거부 / 거부 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 거부 / 거부 | 거부 / 거부 |
+| Claude Bash | 거부 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 허용 / 허용 | 거부 / 허용 | 거부 / 허용 |
+
+Desktop 미승인·철회 상태에서 일부 새 파일 쓰기는 실제로 허용됐다. 파일 도구별 선행 파일 시스템 접근도 다를 수 있으므로 이를 ‘모든 I/O 차단’으로 일반화하지 않는다. 측정한 동일 접근은 승인 전과 철회 후에 같은 결과를 보였고, 읽기는 모든 경로에서 `EPERM` 또는 실제 도구의 permission denied로 거부됐다.
+
+UI를 종료해도 PID 2270의 호스트는 유지됐다. UDS 재시작 후 PID 8726, 실제 로그아웃·재로그인 후 PID 10707로 바뀌었으며 서비스가 자동 기동했다. 로그아웃 중에는 GUI 서비스 도메인과 이전 호스트가 사라진 것을 확인했다. A에서 서비스를 해제하고 UI를 종료한 뒤 같은 위치에 B 전체 번들을 설치하고 재등록했다. B의 PID 14306에서 별도 재승인 없이 접근이 유지됐으며 철회 후 PID 20944로 재시작해도 위 표와 같았다.
+
+### FDA와 실행 실패의 구분
+
+Mail fixture는 A의 호스트·Pi 파일·Pi Bash·Claude 파일·Claude Bash에서 읽기와 쓰기 모두 거부됐다. 그 이후 FDA 승인은 수행하지 않았다. 승인 전 거부만으로 이 경로가 FDA 승인 후 성공한다고 결론 내릴 수 없다.
+
+비보호 대조군에서 실행 경로를 먼저 확인했다. Pi는 인증 갱신과 번들 보정 후 실제 도구 호출에 성공했다. 번들에 포함된 모델 목록의 `gpt-5.4-mini`는 해당 계정에서 서버가 거절해, 지원되는 `gpt-5.5`로 변경했다. 초기 Claude 대조군 Bash 읽기에는 공급자의 safety classifier 중단이 섞였으며, 완전한 고정 명령이 실행돼 문자열을 반환한 호출만 접근 증거로 사용했다. Mail의 첫 Claude Bash 쓰기는 도구 미호출로 미확인이어서 실제 호출이 발생한 재시도 결과를 기록했다. 관리자 인증 완료 전 실행한 `pending-auth` 결과도 승인 후 증거에서 제외했다.
+
+### 귀속 근거와 증거 읽기
+
+[TCC 발췌](evidence/ty-66/tcc-attribution.txt)는 Desktop 승인·철회 대상과 실제 접근 subject를 `com.jakdo.sky`, responsible code를 번들 안의 `com.jakdo.sky.skyd`로 기록한다. [프로세스 책임 기록](evidence/ty-66/fixed-a-process-responsibility.log)에서 Pi Bash와 Claude helper의 responsible PID는 호스트다. Claude Bash는 실제로 `/bin/zsh`를 사용했고 [별도 기록](evidence/ty-66/fixed-a-zsh-responsibility.log)에서도 Claude helper의 자식인 zsh의 responsible PID는 같은 호스트였다. 별도 프로세스 그룹에서도 이 관계가 유지됐다. 측정한 호출에서 별도 daemon/service로 책임 관계가 끊긴 증거는 없었다. 앱 경로는 고정된 `Contents/Helpers/claude`였고 Anthropic 서명을 유지했다.
+
+[실행 증거 90건](evidence/ty-66/runs.jsonl)은 Desktop 8단계 × 10개 접근과 Mail 승인 전 10개 접근이다. 각 행에 `phase`, 실행 `id`, 시각, 호스트 PID, 요청, 실제 도구 이벤트, 접근 판정, 쓰기 관찰 결과가 있다. [manifest](evidence/ty-66/manifest.json)에 단계별 PID·fixture 기대 문자열·배포물·designated requirement·증거 파일 checksum을 연결했다. 공개 증거에서는 VM 사용자 경로만 `/Users/skytest`로 치환했다. credential, 전체 세션, 프로세스 환경은 포함하지 않는다. TCC 로그 시각은 KST, 실행 JSON 시각은 UTC다.
+
+| 표의 단계 | 증거의 `phase` |
+| --- | --- |
+| A 승인 전 Desktop / Mail | `fixed-a-before-Desktop` / `fixed-a-before-Mail` |
+| A 승인 직후 | `fixed-a-desktop-granted-current` |
+| A UI 종료 | `fixed-a-desktop-ui-exit` |
+| A 호스트 재시작 | `fixed-a-desktop-restarted` |
+| A 재로그인 | `fixed-a-desktop-relogin` |
+| B 교체 후 | `fixed-b-desktop-preserved` |
+| B 철회 직후 | `fixed-b-desktop-revoked-current` |
+| B 철회 후 재시작 | `fixed-b-desktop-revoked-restarted` |
+
+패키징과 권한 귀속의 결정 및 남은 범위는 [ADR-0014](adr/0014-retain-app-responsibility-for-agent-file-tools.md)에 기록한다.
 
 참고: [Apple 파일 시스템 권한·responsible code](https://developer.apple.com/forums/thread/678819), [Apple FDA 진단 설명](https://developer.apple.com/forums/thread/835851).

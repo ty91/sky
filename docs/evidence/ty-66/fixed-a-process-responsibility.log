@@ -1,0 +1,563 @@
+2026-09-27T05:50:08Z
+program path = /Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop
+	pid = 2167
+	ppid = 1
+	pgid = 2167
+sandboxed = no
+container = (no container)
+responsible pid = 2167
+responsible unique pid = 2167
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop
+	pid = 2167
+2026-09-27T05:50:08Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 3650
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:50:14Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 3745
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:50:29Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 3897
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:50:45Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 4057
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:50:53Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 4145
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:52:11Z
+program path = /bin/bash
+	pid = 4839
+	ppid = 2270
+	pgid = 4839
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:52:23Z
+program path = /bin/bash
+	pid = 4941
+	ppid = 2270
+	pgid = 4941
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:52:29Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 5003
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:52:35Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 5075
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:52:40Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 5142
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:52:52Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 5271
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:54:26Z
+program path = /bin/bash
+	pid = 6360
+	ppid = 2270
+	pgid = 6360
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:54:37Z
+program path = /bin/bash
+	pid = 6501
+	ppid = 2270
+	pgid = 6501
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:54:44Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 6588
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:54:50Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 6684
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:54:55Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 6772
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:55:07Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 6952
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:03Z
+program path = /bin/bash
+	pid = 7660
+	ppid = 2270
+	pgid = 7660
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:13Z
+program path = /bin/bash
+	pid = 7808
+	ppid = 2270
+	pgid = 7808
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:20Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 7895
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:26Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 7991
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:31Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 8074
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:43Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 8245
+	ppid = 2270
+	pgid = 2270
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:57:35Z
+program path = /bin/bash
+	pid = 8913
+	ppid = 8726
+	pgid = 8913
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:57:46Z
+program path = /bin/bash
+	pid = 9043
+	ppid = 8726
+	pgid = 9043
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:57:52Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 9126
+	ppid = 8726
+	pgid = 8726
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:57:59Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 9224
+	ppid = 8726
+	pgid = 8726
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:58:05Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 9320
+	ppid = 8726
+	pgid = 8726
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:58:25Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 9591
+	ppid = 8726
+	pgid = 8726
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:00:20Z
+program path = /bin/bash
+	pid = 11272
+	ppid = 10707
+	pgid = 11272
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:00:31Z
+program path = /bin/bash
+	pid = 11406
+	ppid = 10707
+	pgid = 11406
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:00:39Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 11514
+	ppid = 10707
+	pgid = 10707
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:00:46Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 11643
+	ppid = 10707
+	pgid = 10707
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:00:54Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 11753
+	ppid = 10707
+	pgid = 10707
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:01:05Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 11924
+	ppid = 10707
+	pgid = 10707
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:02:02Z
+program path = /Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop
+	pid = 12620
+	ppid = 1
+	pgid = 12620
+sandboxed = no
+container = (no container)
+responsible pid = 12620
+responsible unique pid = 12620
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop
+	pid = 12620
+2026-09-27T06:03:53Z
+program path = /Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop
+	pid = 13955
+	ppid = 1
+	pgid = 13955
+sandboxed = no
+container = (no container)
+responsible pid = 13955
+responsible unique pid = 13955
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop
+	pid = 13955
+2026-09-27T06:04:45Z
+program path = /bin/bash
+	pid = 14615
+	ppid = 14306
+	pgid = 14615
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:04:55Z
+program path = /bin/bash
+	pid = 14748
+	ppid = 14306
+	pgid = 14748
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:05:01Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 14835
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:05:09Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 14947
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:05:15Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 15044
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:05:26Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 15218
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:11:19Z
+program path = /bin/bash
+	pid = 19482
+	ppid = 14306
+	pgid = 19482
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:11:31Z
+program path = /bin/bash
+	pid = 19633
+	ppid = 14306
+	pgid = 19633
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:11:37Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 19718
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:11:43Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 19816
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:11:49Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 19903
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:12:00Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 20078
+	ppid = 14306
+	pgid = 14306
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:13:23Z
+program path = /bin/bash
+	pid = 21109
+	ppid = 20944
+	pgid = 21109
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:13:33Z
+program path = /bin/bash
+	pid = 21242
+	ppid = 20944
+	pgid = 21242
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:13:39Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 21331
+	ppid = 20944
+	pgid = 20944
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:13:46Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 21427
+	ppid = 20944
+	pgid = 20944
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:13:51Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 21513
+	ppid = 20944
+	pgid = 20944
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:14:04Z
+program path = /Users/skytest/Applications/Sky.app/Contents/Helpers/claude
+	pid = 21700
+	ppid = 20944
+	pgid = 20944
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd

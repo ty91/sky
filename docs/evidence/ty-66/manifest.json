@@ -1,0 +1,113 @@
+{
+  "capturedOn": "2026-09-27",
+  "scope": "Desktop lifecycle complete on this OS; FDA grant and later lifecycle intentionally not run at user request",
+  "environment": {
+    "os": "macOS 26.6.2",
+    "build": "25G83",
+    "arch": "arm64",
+    "sip": "enabled",
+    "gatekeeper": "enabled",
+    "pi": "0.80.10",
+    "claudeAgentSdk": "0.3.283",
+    "node": "24.16.0",
+    "bun": "1.3.14"
+  },
+  "pathRedaction": "/Users/taeyoung replaced by /Users/skytest in published evidence; no fixture content or run IDs changed",
+  "fixtures": {
+    "/Users/skytest/sky-tcc-validation/input.txt": "4E0DADD3-17B6-4568-8E76-8E4D35CE64FA\n",
+    "/Users/skytest/Desktop/sky-tcc-validation/input.txt": "05E1429A-C228-4F81-ACD3-CDE2981767DD\n",
+    "/Users/skytest/Library/Mail/sky-tcc-validation/input.txt": "2FF8D3D1-58FD-474A-AA54-83F8C7279C14\n"
+  },
+  "distributions": {
+    "aVersion": "0.2.11",
+    "aCommit": "6e1b6ae0dd9b",
+    "aSha256": "6712757c0ebcdec16e273b49e6a2de344b5a44daee32eca00b98011bf22ccc1b",
+    "aNotaryId": "5185038f-c3b5-47b2-99a7-b07c5d3a7da6",
+    "bVersion": "0.2.12",
+    "bSha256": "0096aa39e9ce85144b3cd70671e79890dda5c23b87a5ad7d7be83e75c7247df9",
+    "bNotaryId": "687f16dc-dbc4-4236-b418-35fe5c3c11f3",
+    "bSourceDelta": "temporary root package version 0.2.12; all source code 6e1b6ae0dd9b; root version restored after build"
+  },
+  "phases": [
+    {
+      "name": "fixed-a-before-Desktop",
+      "runs": 10,
+      "hostPids": [
+        2270
+      ]
+    },
+    {
+      "name": "fixed-a-before-Mail",
+      "runs": 10,
+      "hostPids": [
+        2270
+      ]
+    },
+    {
+      "name": "fixed-a-desktop-granted-current",
+      "runs": 10,
+      "hostPids": [
+        2270
+      ]
+    },
+    {
+      "name": "fixed-a-desktop-ui-exit",
+      "runs": 10,
+      "hostPids": [
+        2270
+      ]
+    },
+    {
+      "name": "fixed-a-desktop-restarted",
+      "runs": 10,
+      "hostPids": [
+        8726
+      ]
+    },
+    {
+      "name": "fixed-a-desktop-relogin",
+      "runs": 10,
+      "hostPids": [
+        10707
+      ]
+    },
+    {
+      "name": "fixed-b-desktop-preserved",
+      "runs": 10,
+      "hostPids": [
+        14306
+      ]
+    },
+    {
+      "name": "fixed-b-desktop-revoked-current",
+      "runs": 10,
+      "hostPids": [
+        14306
+      ]
+    },
+    {
+      "name": "fixed-b-desktop-revoked-restarted",
+      "runs": 10,
+      "hostPids": [
+        20944
+      ]
+    }
+  ],
+  "designatedRequirements": {
+    "a": {
+      "app": "Executable=/Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop\ndesignated => identifier \"com.jakdo.sky\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = RY355N72WN\n",
+      "host": "Executable=/Users/skytest/Applications/Sky.app/Contents/MacOS/skyd\ndesignated => identifier \"com.jakdo.sky.skyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = RY355N72WN\n"
+    },
+    "b": {
+      "app": "Executable=/Users/skytest/Applications/Sky.app/Contents/MacOS/sky-desktop\ndesignated => identifier \"com.jakdo.sky\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = RY355N72WN\n",
+      "host": "Executable=/Users/skytest/Applications/Sky.app/Contents/MacOS/skyd\ndesignated => identifier \"com.jakdo.sky.skyd\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = RY355N72WN\n"
+    }
+  },
+  "logoutObservation": "Sun Sep 27 05:59:21 UTC 2026\nroot\nCould not print domain: 125: Domain does not support specified action\n  PID  PPID COMM\n",
+  "evidenceSha256": {
+    "fixed-a-process-responsibility.log": "8a1f33b19ec549e8760f990f513015a91b57075fc9fe96d369309ab247920447",
+    "fixed-a-zsh-responsibility.log": "abb5f25863632f35b883c5b03579a4061eb8d7ed68c022dc11631e03c62880c0",
+    "runs.jsonl": "d213feaaab00c7a523191c64f8f4142fd209da9e56c16b53b0bdb580f02722c2",
+    "tcc-attribution.txt": "18b7f9a661fdd1c4c85bed26c30e55a1f5c3073f678ccb6c5de236fa08fa58ae"
+  }
+}

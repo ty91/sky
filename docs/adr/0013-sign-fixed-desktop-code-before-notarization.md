@@ -8,6 +8,6 @@ status: accepted
 
 Claude의 유효한 Anthropic Developer ID 서명은 보존한다. Pi native addon은 Sky 팀으로 서명해 같은 팀의 호스트에서 library validation을 유지한다. Bun 호스트에만 JIT entitlement를 적용하고 네이티브 앱에는 부여하지 않는다. 앱 식별자 `com.jakdo.sky`와 SMAppService 계약은 유지한다. 필요한 entitlement의 확대는 실제 실행 실패와 별도 검증을 근거로 결정한다.
 
-번들 조립을 마친 뒤 native addon과 호스트, 바깥 앱 순서로 서명한다. 공증 승인 후 앱에 티켓을 첨부하고 최종 ZIP을 다시 생성한다. 배포물은 앱 번들 전체이며 내부 실행 파일만 교체하는 업데이트는 지원하지 않는다. 실제 도구의 TCC 귀속과 업데이트 후 권한 유지는 후속 검증 대상이다.
+번들 조립을 마친 뒤 native addon과 호스트, 바깥 앱 순서로 서명한다. 공증 승인 후 앱에 티켓을 첨부하고 최종 ZIP을 다시 생성한다. 배포물은 앱 번들 전체이며 내부 실행 파일만 교체하는 업데이트는 지원하지 않는다. 실제 도구의 Desktop 권한 귀속·버전 교체 실측과 FDA 등 남은 검증 범위는 [ADR-0014](0014-retain-app-responsibility-for-agent-file-tools.md)에 기록한다.
 
 관련 이슈: [TY-65](https://linear.app/jakdo/issue/TY-65)
