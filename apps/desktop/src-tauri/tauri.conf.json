@@ -10,17 +10,41 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Sky", "width": 560, "height": 440, "minWidth": 440, "minHeight": 420 }],
+    "windows": [
+      {
+        "title": "Sky",
+        "width": 560,
+        "height": 760,
+        "minWidth": 440,
+        "minHeight": 420
+      }
+    ],
     "security": {
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self'; img-src 'self' asset: http://asset.localhost"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
-    "icon": ["icons/icon.icns", "icons/icon.png"],
-    "externalBin": ["binaries/skyd"],
-    "resources": { "resources/build-info.json": "build-info.json" },
-    "macOS": { "minimumSystemVersion": "13.0", "signingIdentity": "-", "hardenedRuntime": false }
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "externalBin": [
+      "binaries/skyd"
+    ],
+    "resources": {
+      "resources/build-info.json": "build-info.json"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-",
+      "hardenedRuntime": false,
+      "files": {
+        "Library/LaunchAgents/com.jakdo.sky.skyd.plist": "launch-agents/com.jakdo.sky.skyd.plist"
+      }
+    }
   }
 }

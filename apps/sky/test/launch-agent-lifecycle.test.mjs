@@ -426,3 +426,27 @@ test('restart distinguishes an unmanaged foreground daemon', { timeout: 30_000 }
     await cleanup(context);
   }
 });
+
+test('CLI lifecycle commands cannot take over an app-managed host', async () => {
+  const context = await setup();
+  const state = {
+    loaded: true,
+    pid: null,
+    plistFile: '/Applications/Sky.app/Contents/Library/LaunchAgents/com.jakdo.sky.skyd.plist',
+    bootstrapCount: 0,
+    bootoutCount: 0,
+    kickstartCount: 0,
+  };
+  try {
+    await writeFile(context.stateFile, JSON.stringify(state));
+    for (const args of [['service', 'install'], ['service', 'uninstall'], ['start'], ['stop'], ['restart'], ['restart', '--force']]) {
+      const result = await runCli([...args, '--json'], context.env);
+      assert.equal(result.code, 1, result.stdout || result.stderr);
+      assert.equal(JSON.parse(result.stdout).error.code, 'app_managed_service');
+      assert.deepEqual(await readState(context.stateFile), state);
+    }
+    await assert.rejects(stat(context.plistFile), { code: 'ENOENT' });
+  } finally {
+    await cleanup(context);
+  }
+});

@@ -1,3 +1,6 @@
+mod control;
+mod service;
+
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
@@ -43,7 +46,21 @@ fn build_info(app: tauri::AppHandle) -> Result<BuildInfo, String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![build_info])
-        .run(tauri::generate_context!())
-        .expect("failed to run Sky");
+        .invoke_handler(tauri::generate_handler![build_info, service::host_service])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("failed to build Sky")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Reopen { .. })
+                && let Some(window) = app.get_webview_window("main")
+            {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        });
 }
