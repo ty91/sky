@@ -2,7 +2,7 @@
 
 [README](../README.md) · [개발](development.md) · [서명 준비](macos-signing.md)
 
-`apps/desktop`은 Tauri 2 + React 앱이다. 앱·호스트 버전, 대상 아키텍처, 소스 revision과 개발/번들 실행 모드를 표시한다. SMAppService로 내장 호스트를 등록하고 네이티브 UDS 연결로 상태·생명주기를 제어한다. 창 닫기와 UI 앱 종료는 호스트를 중지하지 않는다. Developer ID 서명·공증은 TY-65, Pi·Claude 도구의 TCC 귀속은 TY-66에서 다룬다.
+`apps/desktop`은 Tauri 2 + React 앱이다. 앱·호스트 버전, 대상 아키텍처, 소스 revision과 개발/번들 실행 모드를 표시한다. SMAppService로 내장 호스트를 등록하고 네이티브 UDS 연결로 상태·생명주기를 제어한다. 창 닫기와 UI 앱 종료는 호스트를 중지하지 않는다. Developer ID 서명·공증과 배포 ZIP 생성은 [서명 가이드](macos-signing.md#로컬-배포-빌드)를 따른다. Pi·Claude 도구의 TCC 귀속은 TY-66에서 다룬다.
 
 ## 대상과 준비
 
@@ -58,7 +58,7 @@ apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Sky.app
   Contents/Resources/icon.icns
 ```
 
-Finder에서 이 앱을 열거나 별도 폴더로 복사해 열면 번들된 frontend를 사용하며 실행 모드는 `앱 번들`이다. 기존 설치와 충돌하지 않도록 이 단계에서는 `/Applications/Sky.app`을 자동 교체하지 않는다. 설치된 앱은 pnpm, Node.js, Bun이나 checkout을 필요로 하지 않는다. 인터넷에서 내려받은 앱의 Gatekeeper 통과를 보장하는 배포 절차는 아직 아니다.
+Finder에서 이 앱을 열거나 별도 폴더로 복사해 열면 번들된 frontend를 사용하며 실행 모드는 `앱 번들`이다. 기존 설치와 충돌하지 않도록 이 단계에서는 `/Applications/Sky.app`을 자동 교체하지 않는다. 설치된 앱은 pnpm, Node.js, Bun이나 checkout을 필요로 하지 않는다. 이 개발 빌드는 배포용 공증을 수행하지 않는다. 배포용 앱은 별도의 서명·공증 절차를 따른다.
 
 Tauri의 [externalBin 규약](https://v2.tauri.app/develop/sidecar/)에 맞춰 빌드 준비 시 `binaries/skyd-aarch64-apple-darwin`을 만들고, 번들에서는 suffix가 없는 정확한 `skyd` 이름으로 배치한다. `build:standalone --desktop`으로 만든 호스트를 복사한다. CLI standalone의 단일 파일 배포는 유지하고 앱 빌드만 Claude·clipboard를 번들 코드 경로에서 로드한다. `skyd --foreground`가 호스트 역할을 선택하며, `sky`라는 이름으로 호출하면 CLI 역할을 선택한다. 앱에는 CLI 복사본이나 공개 PATH 등록을 추가하지 않는다.
 
@@ -83,7 +83,7 @@ env -i HOME="$SKY_TEST_ROOT/home" SKY_HOME="$SKY_TEST_ROOT/sky-home" \
 
 설정 없이도 관리 API는 기동하고 에이전트 상태는 `needs_configuration`이다. Ctrl-C로 종료한다. 실제 모델 turn 검증은 credential이 필요한 [standalone acceptance](standalone-acceptance.md)를 따른다. 터미널에서 직접 실행한 호스트의 파일 접근 성공은 앱의 TCC 권한 귀속 증거가 아니다.
 
-## 내장 자산과 후속 서명 입력
+## 내장 자산과 서명 입력
 
 | 구성 | 포함·실행 경로와 한계 |
 | --- | --- |
