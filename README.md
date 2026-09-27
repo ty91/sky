@@ -79,6 +79,7 @@ Admin은 기본적으로 `0.0.0.0:4815`의 평문 HTTP로 LAN에 노출됩니다
 | [운영](docs/operations.md) | 서비스, admin, 진단·로그, memory·dream과 리마인더 |
 | [마이그레이션](docs/migrations.md) | Homebrew와 외부 cron에서 전환 |
 | [개발](docs/development.md) | 개발 환경, 모노레포, 빌드와 테스트 |
+| [macOS 앱](docs/desktop.md) | Tauri 앱 빌드, 내장 호스트 배치와 격리 검증 |
 | [배포](docs/releasing.md) | Standalone 빌드, 버전과 release 발행 |
 | [Standalone acceptance](docs/standalone-acceptance.md) | 배포물과 실제 backend 검증 |
 | [macOS 서명](docs/macos-signing.md) | 인증서·공증 인증과 복구 |

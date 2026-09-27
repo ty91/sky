@@ -1,0 +1,31 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #203349;
+  background: #f3f6fa;
+  font-synthesis: none;
+}
+
+body { margin: 0; }
+main { max-width: 440px; margin: 56px auto; padding: 0 32px; }
+.mark {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: #294a70;
+  color: white;
+  font-size: 32px;
+  font-weight: 600;
+}
+h1 { font-size: 30px; margin: 18px 0 32px; }
+dl { display: grid; grid-template-columns: 104px 1fr; gap: 20px 12px; font-size: 14px; }
+dt { color: #5c6c80; }
+dd { margin: 0; overflow-wrap: anywhere; }
+p { line-height: 1.6; overflow-wrap: anywhere; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color: #e2eaf4; background: #172231; }
+  dt { color: #a4b4c8; }
+  .mark { background: #456f9d; }
+}
