@@ -2,7 +2,7 @@
 
 [README](../README.md) · [배포](releasing.md)
 
-Sky 배포물의 서명은 `mini`에서 수행한다. 설치 대상 Mac에는 서명용 개인 키를 배포하지 않는다. 이 문서는 TY-62에서 준비한 인증 수단과 복구 절차를 다룬다. Tauri 빌드 연결, 내장 실행 파일 서명 순서, 실제 Sky 배포물 공증과 CI 구성은 TY-65에서 검증한다.
+Sky 배포물의 서명은 `mini`에서 수행한다. 설치 대상 Mac에는 서명용 개인 키를 배포하지 않는다. 이 문서는 로컬 배포 빌드, 서명·공증 인증 수단과 복구 절차를 다룬다. CI 이전과 자동 업데이트는 범위 밖이다.
 
 ## 운영 식별 정보
 
@@ -63,7 +63,7 @@ xcrun notarytool history \
 security lock-keychain "$HOME/Library/Keychains/sky-signing.keychain-db"
 ```
 
-제출 이력이 없는 빈 목록도 인증 성공이다. 이 확인은 실제 앱의 공증 승인이나 Gatekeeper 통과를 의미하지 않는다. TY-65에서 Sky 배포물을 제출하고 공증 결과와 stapling을 검증한다.
+제출 이력이 없는 빈 목록도 인증 성공이다. 이 확인은 실제 앱의 공증 승인이나 Gatekeeper 통과를 의미하지 않는다. 아래 배포 절차에서 실제 앱의 제출 결과와 stapling을 검증한다.
 
 ## 보관과 복구
 
@@ -119,3 +119,64 @@ Tauri 연결 시 `APPLE_SIGNING_IDENTITY`는 위 인증서 이름을 사용한�
 - [Apple App Store Connect API](https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-api)
 - [Apple 공증 워크플로](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 - [Tauri macOS 서명과 공증](https://v2.tauri.app/distribute/sign/macos/)
+
+## 로컬 배포 빌드
+
+[개발 도구](desktop.md)의 고정 버전과 의존성을 설치하고 전용 Keychain을 잠금 해제한 동일 세션에서 저장소 루트의 명령을 실행한다. Keychain 암호는 위의 1Password 항목에서 읽어 메모리로만 전달한다. 대화형 작업에서는 `security unlock-keychain "$HOME/Library/Keychains/sky-signing.keychain-db"`의 암호 입력을 사용할 수 있다. 작업 성공·실패 모두 마지막에 Keychain을 다시 잠근다.
+
+```sh
+pnpm install --frozen-lockfile
+node scripts/release-desktop.mjs release
+security lock-keychain "$HOME/Library/Keychains/sky-signing.keychain-db"
+```
+
+`release`는 Tauri의 `tauri.release.conf.json`을 병합해 Developer ID 정체성과 Hardened Runtime을 적용한다. 기본 `pnpm build:desktop`은 계속 인증서 없는 ad-hoc 개발 빌드다. Tauri의 내장 공증 대신 전용 Keychain의 `sky-notary` 프로필을 사용하는 명시적 공증 단계를 실행하므로 `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH`, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`를 빌드 환경에 설정하지 않는다. Keychain은 사용자 검색 목록에 있어야 한다. 다른 전용 Keychain 경로는 `SKY_SIGNING_KEYCHAIN`, 다른 공증 프로필 이름은 `SKY_NOTARY_PROFILE`로 지정한다. 이 변수들은 비밀 값이 아니라 경로·프로필 이름이다.
+
+조립된 앱을 `dist/desktop-release/<UTC 시각>/Sky.app`에 복사한 뒤 다음 순서로 처리한다.
+
+1. 번들 전체를 스캔해 예상한 Mach-O 4개만 있는지 확인한다. 추가 실행 코드나 symlink는 서명 정책을 검토하기 전까지 실패시킨다.
+2. `Contents/Helpers/claude`의 Anthropic 팀 `Q6L2SF6YDW`, Developer ID 인증서, identifier, 유효한 서명·timestamp·Hardened Runtime을 확인하고 보존한다.
+3. `Contents/Frameworks/clipboard.darwin-arm64.node`를 Sky 팀으로 서명한다. 별도 entitlement를 부여하지 않는다.
+4. `Contents/MacOS/skyd`를 `com.jakdo.sky.skyd`로 서명하며 `entitlements-host.plist`의 `allow-jit`만 적용한다. 같은 팀의 clipboard를 로드하므로 library validation을 끄지 않는다.
+5. `com.jakdo.sky` 앱을 마지막에 서명한다. 네이티브 주 실행 파일에는 entitlement를 부여하지 않는다. `--deep`은 검증에만 사용하고 재귀 재서명에 사용하지 않는다.
+6. 서명된 앱의 격리 실행 스모크를 수행하고 제출용 ZIP을 만든다. Apple 공증 요청 ID를 저장한 다음 최대 30분 동안 결과를 기다린다.
+7. `Accepted`인 경우에만 앱에 티켓을 staple하고 `stapler validate`, `codesign --verify --deep --strict`, Gatekeeper `spctl --assess`를 통과한 후 최종 ZIP과 SHA-256 파일을 생성한다.
+
+최종 배포 파일은 `Sky-<제품 버전>-darwin-arm64.zip`과 `.zip.sha256`이다. `submission.zip`은 티켓 첨부 전 제출용이므로 배포하지 않는다. `submission.json`, `notary-result.json`, `notary-log.json`은 요청·진단 기록이다. 서명 후 plist, 실행 코드, 자원을 바꾸면 서명이 무효화되므로 전체 서명·공증을 다시 수행한다. 티켓 첨부 외에는 완성된 앱 내용을 수정하지 않는다. 사용자 설정과 DB는 앱 밖의 기존 Sky home에 유지한다.
+
+## 분리 실행과 실패 복구
+
+다른 Mac에서 개발용 앱을 빌드한 경우 번들 전체를 서명 Mac으로 복사한 뒤 동일 checkout의 아래 명령을 실행할 수 있다. 인증서의 개인 키는 복사하지 않는다. `APP`과 `OUTPUT`은 절대 경로로 지정한다.
+
+```sh
+node scripts/release-desktop.mjs sign "$APP"
+SKY_DESKTOP_APP="$APP" pnpm test:desktop
+node scripts/release-desktop.mjs notarize "$APP" "$OUTPUT"
+node scripts/release-desktop.mjs verify "$APP"
+```
+
+`sign`은 공급자 서명을 먼저 검사하고 native addon → 호스트 → 앱 순서로 처리한다. 중간 실패 시 배포하지 않고 원본 빌드 또는 작업 복사본에서 `sign`부터 재시도한다. 서명이나 실행 검증을 생략하고 제출하지 않는다.
+
+공증 대기 시간 초과나 연결 종료는 거부를 뜻하지 않는다. `submission.json`의 `id`를 확인하고 **제출했던 동일한 앱**으로 다음 명령을 실행한다. 이미 승인된 요청은 결과·로그 조회와 티켓 첨부부터 완료한다. 공증 요청을 중복 생성할 필요는 없다.
+
+```sh
+node scripts/release-desktop.mjs notarize "$APP" "$OUTPUT" "$SUBMISSION_ID"
+```
+
+`Invalid` 또는 `Rejected`는 `notary-log.json`의 경로·진단을 확인해 수정하고 다시 빌드·서명·제출한다. Apple 연결 또는 인증 오류는 `notarytool info`·`log`를 같은 프로필로 직접 실행해 진단할 수 있다. 요청 ID가 저장되기 전에 연결이 끊겼다면 `notarytool history`로 최근 제출을 확인한다. stapler나 Gatekeeper 실패도 최종 ZIP 생성을 중단한다. 승인 상태에서 네트워크 오류가 난 경우 동일 요청 ID로 재개한다. `codesign` 실패는 코드 목록, 공급자 서명, 팀·identifier, timestamp와 entitlement를 먼저 확인한다.
+
+## 다른 Mac에서 설치·실행 확인
+
+최종 ZIP과 checksum을 다른 Mac으로 내려받아 checksum을 검증하고 압축을 푼다. 기존 앱이나 운영 호스트를 자동 교체하지 않는다. 앱을 최종 설치 위치에 옮긴 뒤 다음 검사를 실행하고 Finder에서 연다. 격리 속성(`com.apple.quarantine`)은 제거하지 않는다.
+
+```sh
+shasum -a 256 -c Sky-<제품 버전>-darwin-arm64.zip.sha256
+ditto -x -k Sky-<제품 버전>-darwin-arm64.zip "$INSTALL_DIRECTORY"
+node scripts/release-desktop.mjs verify "$INSTALL_DIRECTORY/Sky.app"
+SKY_DESKTOP_APP="$INSTALL_DIRECTORY/Sky.app" pnpm test:desktop
+open "$INSTALL_DIRECTORY/Sky.app"
+```
+
+`verify`와 스모크는 개발 checkout의 검증 도구이며 설치된 앱 자체는 Node.js·Bun·checkout을 요구하지 않는다. 배포 ZIP은 다른 Mac에서 Gatekeeper로 검사하고, 스모크는 서명된 호스트의 Bun 런타임으로 Pi native addon을 로드하며 Claude `--version`, UDS와 admin 제공을 확인한다. 모델 인증을 쓰는 실제 turn은 [backend acceptance](standalone-acceptance.md)의 별도 검증이다.
+
+서비스 등록·기동은 [SMAppService 격리 검증](desktop.md#smappservice-격리-검증)을 따른다. 서명 전 고유 테스트 식별자·Sky home을 지정한 fixture를 위 `sign` 명령으로 서명할 수 있다. 이 fixture는 배포 앱 식별자와 달라 `notarize` 대상이 아니다. 실제 다운로드 앱의 서비스 등록은 기존 운영 설치와 충돌하지 않는 별도 로그인 사용자에서 확인한다. 재로그인, 실제 Pi·Claude 도구의 TCC 귀속, 두 버전 교체 후 권한 유지는 별도 검증이며 코드 서명이나 공증 성공만으로 통과했다고 간주하지 않는다.

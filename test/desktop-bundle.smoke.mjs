@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const bundle = path.join(root, 'apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Sky.app');
+const bundle = process.env.SKY_DESKTOP_APP ?? path.join(root, 'apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Sky.app');
 
 function status(socketPath) {
   return new Promise((resolve, reject) => {
@@ -92,6 +92,13 @@ test('relocated Sky.app runs its host and embedded admin without Node.js or Bun'
       assert.match(run('/usr/bin/otool', ['-l', path.join(bin, name)]), /\bminos 13\.0\b/);
     }
     assert.equal(run(skyd, ['--version']), manifest.version);
+    const helper = path.join(contents, 'Helpers/claude');
+    assert.match(run(helper, ['--version']), /Claude Code/);
+    const addon = path.join(contents, 'Frameworks/clipboard.darwin-arm64.node');
+    const nativeProbe = execFileSync(skyd, ['--eval', `const addon = require(${JSON.stringify(addon)}); if (typeof addon.getText !== 'function') throw new Error('Pi clipboard did not load'); console.log('PI_NATIVE_LOAD=ok');`], {
+      cwd: temporary, env: { ...env, BUN_BE_BUN: '1' }, encoding: 'utf8', timeout: 10_000,
+    });
+    assert.equal(nativeProbe.trim(), 'PI_NATIVE_LOAD=ok');
     assert.match(run(skyd, ['--help']), /^Usage: skyd /m);
     const sky = path.join(temporary, 'sky');
     await symlink(skyd, sky);

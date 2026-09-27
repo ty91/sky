@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import {
+  copyFile,
   lstat,
   mkdir,
   mkdtemp,
@@ -20,8 +21,9 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const skyDirectory = path.join(repositoryRoot, 'apps', 'sky');
 const adminDirectory = path.join(repositoryRoot, 'apps', 'admin', 'dist');
-const standaloneRoot = path.join(repositoryRoot, 'dist', 'standalone');
-const artifactDirectory = path.join(standaloneRoot, 'darwin-arm64');
+const desktop = process.argv.includes('--desktop');
+const standaloneRoot = path.join(repositoryRoot, 'dist', desktop ? 'desktop-host' : 'standalone');
+const artifactDirectory = path.join(standaloneRoot, desktop ? 'Contents/MacOS' : 'darwin-arm64');
 const skyExecutable = path.join(artifactDirectory, 'sky');
 const skydExecutable = path.join(artifactDirectory, 'skyd');
 const metafilePath = path.join(standaloneRoot, 'darwin-arm64.metafile.json');
@@ -96,7 +98,11 @@ const claudeHelperAssetPlugin = {
     build.onLoad({ filter: /standalone-claude-helper-manifest\.ts$/ }, (args) => {
       assert.equal(args.path, claudeHelperManifestModule);
       return {
-        contents: [
+        contents: desktop ? [
+          "import { realpathSync } from 'node:fs';",
+          "import path from 'node:path';",
+          "export const EMBEDDED_CLAUDE_CODE_EXECUTABLE = path.resolve(path.dirname(realpathSync(process.execPath)), '../Helpers/claude');",
+        ].join('\n') : [
           `import helperPath from ${JSON.stringify(claudeHelperPath)} with { type: 'file' };`,
           'export const EMBEDDED_CLAUDE_CODE_EXECUTABLE = helperPath;',
         ].join('\n'),
@@ -115,7 +121,12 @@ const piClipboardNativePlugin = {
         // A direct require is Bun's static N-API bundling seam. Pi's upstream
         // createRequire loader remains untouched for the regular Node.js build.
         contents: [
-          `const clipboard = require(${JSON.stringify(piClipboardAddonPath)});`,
+          ...(desktop ? [
+            "import { realpathSync } from 'node:fs';",
+            "import path from 'node:path';",
+            "import { createRequire } from 'node:module';",
+            "const clipboard = createRequire(import.meta.url)(path.resolve(path.dirname(realpathSync(process.execPath)), '../Frameworks/clipboard.darwin-arm64.node'));",
+          ] : [`const clipboard = require(${JSON.stringify(piClipboardAddonPath)});`]),
           'export function loadClipboardNative() { return clipboard; }',
           'export { clipboard };',
         ].join('\n'),
@@ -133,7 +144,7 @@ function verifyClaudeHelperBuild(metafile) {
   );
   assert.deepEqual(
     helperInputs,
-    [path.relative(repositoryRoot, claudeHelperPath)],
+    desktop ? [] : [path.relative(repositoryRoot, claudeHelperPath)],
     'standalone must embed exactly the darwin-arm64 Claude helper',
   );
 }
@@ -144,7 +155,7 @@ function verifyPiClipboardBuild(metafile) {
   );
   assert.deepEqual(
     clipboardAddonInputs,
-    [path.relative(repositoryRoot, piClipboardAddonPath)],
+    desktop ? [] : [path.relative(repositoryRoot, piClipboardAddonPath)],
     'standalone must embed exactly the darwin-arm64 Pi clipboard addon',
   );
 }
@@ -345,8 +356,10 @@ async function verifyStandaloneAdmin(adminAssets, version) {
 
 async function verifyStandalonePi() {
   const isolatedRoot = await mkdtemp(path.join(os.tmpdir(), 'sky-standalone-pi-'));
-  const smokeExecutable = path.join(isolatedRoot, 'pi-smoke');
+  const smokeExecutable = path.join(isolatedRoot, desktop ? 'Contents/MacOS/pi-smoke' : 'pi-smoke');
   try {
+    if (desktop) await copyDesktopCode(path.join(isolatedRoot, 'Contents'));
+    await mkdir(path.dirname(smokeExecutable), { recursive: true });
     const build = await Bun.build({
       entrypoints: [piSmokeEntrypoint],
       compile: {
@@ -382,6 +395,13 @@ async function verifyStandalonePi() {
   }
 }
 
+async function copyDesktopCode(contents) {
+  await mkdir(path.join(contents, 'Helpers'), { recursive: true });
+  await mkdir(path.join(contents, 'Frameworks'), { recursive: true });
+  await copyFile(claudeHelperPath, path.join(contents, 'Helpers/claude'));
+  await copyFile(piClipboardAddonPath, path.join(contents, 'Frameworks/clipboard.darwin-arm64.node'));
+}
+
 async function main() {
   await verifyToolchain();
 
@@ -395,6 +415,7 @@ async function main() {
 
   await rm(standaloneRoot, { recursive: true, force: true });
   await mkdir(artifactDirectory, { recursive: true });
+  if (desktop) await copyDesktopCode(path.join(standaloneRoot, 'Contents'));
 
   const build = await Bun.build({
     entrypoints: [path.join(skyDirectory, 'src', 'standalone.ts')],
