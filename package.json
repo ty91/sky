@@ -26,7 +26,11 @@
     "test:admin": "pnpm --filter @ty91/sky-admin test",
     "dev:admin": "pnpm --filter @ty91/sky-admin dev",
     "test:standalone:install": "node --test test/standalone-install.smoke.mjs",
-    "test:standalone:update": "node --test test/standalone-update.smoke.mjs"
+    "test:standalone:update": "node --test test/standalone-update.smoke.mjs",
+    "dev:desktop": "pnpm --filter @ty91/sky-desktop tauri dev",
+    "build:desktop": "pnpm --filter @ty91/sky-desktop tauri build --target aarch64-apple-darwin --bundles app -- --locked",
+    "test:desktop": "node --test test/desktop-bundle.smoke.mjs",
+    "check:desktop": "pnpm --filter @ty91/sky-desktop exec cargo fmt --manifest-path src-tauri/Cargo.toml --check && pnpm --filter @ty91/sky-desktop exec cargo test --locked --manifest-path src-tauri/Cargo.toml && pnpm --filter @ty91/sky-desktop exec cargo clippy --locked --manifest-path src-tauri/Cargo.toml -- -D warnings"
   },
   "engines": {
     "node": ">=24.16.0 <25"

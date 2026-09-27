@@ -21,14 +21,15 @@ Node.js와 pnpm은 개발과 공통 검증에, Bun은 standalone release build�
 | --- | --- |
 | `apps/sky` (`@ty91/sky`) | CLI, 데몬, 에이전트, Slack 연결과 해당 구현의 테스트 |
 | `apps/admin` (`@ty91/sky-admin`) | React 관리 화면과 UI 테스트 |
+| `apps/desktop` (`@ty91/sky-desktop`) | Tauri + React macOS 앱과 내장 standalone 호스트 패키징 |
 | `scripts`, `test` | 제품 빌드·패키징·릴리스 도구와 설치·업데이트 등 제품 전체 검증 |
 | 루트 `package.json` | 전체 작업 명령, 공통 개발 도구와 제품 버전 |
 
-의존성은 사용하는 앱의 manifest에 선언합니다. pnpm workspace와 하나의 lockfile을 사용하며, 앱 패키지는 private이고 별도 버전을 갖지 않습니다. CLI·데몬·admin은 루트 제품 버전으로 함께 배포합니다. 분리 근거와 앱 확장 후속 작업은 [ADR-0009](adr/0009-adopt-pnpm-workspaces.md)에 정리되어 있습니다.
+의존성은 사용하는 앱의 manifest에 선언합니다. pnpm workspace와 하나의 JavaScript lockfile을 사용하며, 앱 패키지는 private이고 별도 제품 버전을 갖지 않습니다. CLI·데몬·admin·desktop은 루트 제품 버전을 사용합니다. Desktop의 Rust 의존성은 자체 Cargo.lock으로 고정합니다. 분리 근거와 앱 확장 후속 작업은 [ADR-0009](adr/0009-adopt-pnpm-workspaces.md)에 정리되어 있습니다.
 
 Admin은 `@ty91/sky/admin-types`에서 기존 관리 인터페이스의 타입만 가져옵니다. 이 진입점은 workspace 내부의 `import type` 용도이며 데몬 구현을 브라우저에서 실행하는 경로는 제공하지 않습니다. 타입 의존성 보정은 [pnpm-workspace.yaml](../pnpm-workspace.yaml)의 `packageExtensions`에서 관리하며 타입 패키지를 루트로 끌어올리지 않습니다.
 
-루트에서 `pnpm build`, `pnpm typecheck`, `pnpm test`를 실행하면 각 workspace를 검증합니다. `pnpm build`는 기존 산출물을 지우고 Sky와 admin을 순서대로 빌드합니다. 일반 빌드 결과물은 각각 `apps/sky/dist`, `apps/admin/dist`에 두며, Node.js 데몬은 같은 checkout의 admin 결과물을 제공합니다. Standalone 빌드는 admin을 직접 빌드해 실행 파일에 포함하고, 기존처럼 루트 `dist/standalone`과 `dist/release`를 제품 산출물 경로로 사용합니다.
+루트에서 `pnpm build`, `pnpm typecheck`, `pnpm test`를 실행하면 각 workspace의 JavaScript·TypeScript를 검증합니다. `pnpm build`는 기존 JS 산출물을 지우고 workspace 의존 순서로 빌드합니다. 일반 빌드 결과물은 각 앱의 `dist`에 두며, Node.js 데몬은 같은 checkout의 admin 결과물을 제공합니다. Standalone 빌드는 admin을 직접 빌드해 실행 파일에 포함하고, 기존처럼 루트 `dist/standalone`과 `dist/release`를 제품 산출물 경로로 사용합니다. Tauri 네이티브 앱 빌드와 Rust 검증은 `pnpm build:desktop`, `pnpm check:desktop`으로 분리하며 일반 제품 검증에 Rust를 요구하지 않습니다. 도구 준비·Finder 실행·격리 호스트 검증은 [macOS 앱 가이드](desktop.md)를 참고하세요.
 
 개별 앱 작업은 다음처럼 실행할 수 있습니다. Sky의 개별 테스트는 빌드된 JavaScript를 사용하므로 먼저 루트 빌드를 실행합니다.
 
