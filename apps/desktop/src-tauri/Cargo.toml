@@ -4,9 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libc = "0.2.189"
+objc2-foundation = { version = "0.3.2", features = ["NSString", "NSError", "std", "NSBundle", "NSPathUtilities"], default-features = false }
+objc2-service-management = { version = "0.3.2", features = ["SMAppService", "objc2", "objc2-foundation", "std"], default-features = false }
+plist = "1.10.1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

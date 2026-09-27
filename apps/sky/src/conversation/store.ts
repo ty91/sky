@@ -48,8 +48,8 @@ function getSchemaVersion(db: DatabaseSync): string | undefined {
 function hasConversationsTable(db: DatabaseSync): boolean {
   const row = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conversations'")
-    .get() as { name: string } | undefined;
-  return row !== undefined;
+    .get() as { name: string } | null | undefined;
+  return row != null;
 }
 
 function hasColumn(db: DatabaseSync, table: string, column: string): boolean {

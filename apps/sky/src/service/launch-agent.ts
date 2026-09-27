@@ -312,6 +312,19 @@ async function rawLaunchdPrint(): Promise<string | null> {
   }
 }
 
+async function assertCliServiceOwnership(): Promise<void> {
+  const output = await rawLaunchdPrint();
+  if (output && (
+    /^\s*managed_by\s*=\s*com\.apple\.xpc\.ServiceManagement\s*$/m.test(output)
+    || /^\s*(?:path|program)\s*=\s*.*\.app\/Contents\/(?:Library\/LaunchAgents|MacOS)\//m.test(output)
+  )) {
+    throw new ServiceLifecycleError(
+      'app_managed_service',
+      'Sky.app owns this host service. Manage or unregister it from the app before using CLI service commands.',
+    );
+  }
+}
+
 function parseNumber(output: string, field: string): number | null {
   const match = output.match(new RegExp(`^\\s*${field}\\s*=\\s*(-?\\d+)\\s*$`, 'm'));
   if (!match) return null;
@@ -508,6 +521,7 @@ async function restorePreviousPlist(
 
 export async function installLaunchAgent(): Promise<InstallResult> {
   assertMacOS();
+  await assertCliServiceOwnership();
   const paths = launchAgentPaths();
   prepareSkyHome(paths.skyHome);
   const skydExecutable = resolveExecutable('skyd');
@@ -566,6 +580,7 @@ export async function installLaunchAgent(): Promise<InstallResult> {
 
 export async function uninstallLaunchAgent(): Promise<ServiceStatus> {
   assertMacOS();
+  await assertCliServiceOwnership();
   const paths = launchAgentPaths();
   await bootout(paths);
   rmSync(paths.plistFile, { force: true });
@@ -574,6 +589,7 @@ export async function uninstallLaunchAgent(): Promise<ServiceStatus> {
 
 export async function startLaunchAgent(): Promise<ServiceStatus> {
   assertMacOS();
+  await assertCliServiceOwnership();
   const paths = launchAgentPaths();
   if (!existsSync(paths.plistFile)) {
     throw new ServiceLifecycleError(
@@ -593,6 +609,7 @@ export async function startLaunchAgent(): Promise<ServiceStatus> {
 
 export async function stopLaunchAgent(): Promise<ServiceStatus> {
   assertMacOS();
+  await assertCliServiceOwnership();
   const paths = launchAgentPaths();
   const current = await launchdStatus(paths);
   if (!current.loaded) {
@@ -612,6 +629,7 @@ export async function stopLaunchAgent(): Promise<ServiceStatus> {
 
 export async function restartLaunchAgent(options: { force?: boolean } = {}): Promise<ServiceStatus> {
   assertMacOS();
+  await assertCliServiceOwnership();
   const paths = launchAgentPaths();
   const [launchd, control] = await Promise.all([
     launchdStatus(paths),

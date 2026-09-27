@@ -23,6 +23,11 @@ dl { display: grid; grid-template-columns: 104px 1fr; gap: 20px 12px; font-size:
 dt { color: #5c6c80; }
 dd { margin: 0; overflow-wrap: anywhere; }
 p { line-height: 1.6; overflow-wrap: anywhere; }
+section { margin-bottom: 32px; }
+h2 { font-size: 18px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font: inherit; padding: 7px 12px; cursor: pointer; }
+button:disabled { cursor: default; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #e2eaf4; background: #172231; }
