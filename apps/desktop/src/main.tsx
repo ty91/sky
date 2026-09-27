@@ -18,6 +18,7 @@ type HostSnapshot = {
   daemon: { instanceId: string; process: { pid: number }; runtime: { state: string }; activeWorkCount: number } | null;
   detail: string | null;
   skyHome: string;
+  canManage: boolean;
 };
 type HostAction = 'status' | 'register' | 'start' | 'stop' | 'restart' | 'unregister' | 'openSettings';
 const hostStates: Record<HostState, string> = {
@@ -75,7 +76,7 @@ function HostControls() {
     <section aria-label="로컬 호스트" aria-busy={busy}>
       <h2>로컬 호스트</h2>
       {host && <dl>
-        <dt>서비스 등록</dt><dd>{registrations[host.registration]}</dd>
+        <dt>서비스 등록</dt><dd>{host.hostState === 'notRegistered' ? '미등록' : registrations[host.registration]}</dd>
         <dt>호스트 상태</dt><dd role="status">{hostStates[host.hostState]}</dd>
         {host.daemon && <>
           <dt>프로세스</dt><dd>{host.daemon.process.pid}</dd>
@@ -87,12 +88,12 @@ function HostControls() {
       <div className="actions">
         <button disabled={busy} onClick={() => void act('status')}>새로고침</button>
         {host?.registration === 'requiresApproval' && <button disabled={busy} onClick={() => void act('openSettings')}>로그인 항목 설정</button>}
-        <button disabled={busy || !host || conflict || host.registration === 'requiresApproval' || host.hostState === 'running'} onClick={() => void act(host?.registration === 'enabled' ? 'start' : 'register')}>
+        <button disabled={busy || !host?.canManage || conflict || host.registration === 'requiresApproval' || ['running', 'starting', 'stopping'].includes(host.hostState)} onClick={() => void act(host?.registration === 'enabled' ? 'start' : 'register')}>
           {host?.registration === 'enabled' ? '호스트 시작' : '서비스 등록'}
         </button>
-        <button disabled={busy || !host?.daemon || conflict} onClick={() => void act('restart')}>재시작</button>
-        <button disabled={busy || !host || conflict || ['notRegistered', 'stopped', 'approvalRequired'].includes(host.hostState)} onClick={() => void act('stop')}>호스트 중지</button>
-        <button disabled={busy || !host || conflict || host.registration === 'notRegistered'} onClick={() => void act('unregister')}>등록 해제</button>
+        <button disabled={busy || !host?.canManage || !host.daemon || conflict} onClick={() => void act('restart')}>재시작</button>
+        <button disabled={busy || !host?.canManage || conflict || ['notRegistered', 'stopped', 'approvalRequired'].includes(host.hostState)} onClick={() => void act('stop')}>호스트 중지</button>
+        <button disabled={busy || !host?.canManage || conflict || !['enabled', 'requiresApproval'].includes(host.registration)} onClick={() => void act('unregister')}>등록 해제</button>
       </div>
     </section>
   );

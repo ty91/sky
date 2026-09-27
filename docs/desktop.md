@@ -116,6 +116,8 @@ env -i HOME="$SKY_TEST_ROOT/home" SKY_HOME="$SKY_TEST_ROOT/sky-home" \
 
 `서비스 등록`과 `호스트 상태`를 따로 표시한다. 승인 대기에는 `로그인 항목 설정` 버튼을 제공하고, 네이티브 등록 오류(`registration_failed`), 기동 실패(`startup_failed`), PID는 있지만 소켓에 연결하지 못한 상태(`connection_failed`)를 구분한다. launchd 자체를 조회할 수 없으면 미등록으로 추측하지 않고 조회 오류를 보고한다. 호스트 코드가 실행되기 전의 실패는 launchd의 최근 종료 코드와 macOS 통합 로그를 확인한다. 앱 서비스는 CLI의 `launchd.stderr.log` 출력 파일을 사용하지 않는다.
 
+유효한 번들의 최초 실행에서 SMAppService가 `NotFound`를 반환하고 launchd job도 없으면 미등록으로 표시한다. 이 상태의 등록 해제는 아무 작업도 하지 않는다. 기존 job은 실제 PID의 실행 파일이 현재 앱 내부의 skyd인지 확인한 뒤에만 변경한다. 같은 bundle ID라도 다른 경로의 앱은 제어할 수 없다. PID가 없거나 아직 xpcproxy 단계인 job은 상태 조회만 허용한다. 기동 실패로 실행 경로를 확인할 수 없으면 자동 복구·중지·등록 해제를 수행하지 않으며, 등록한 앱의 경로와 launchd 상태를 먼저 진단해야 한다.
+
 ## 기존 CLI 설치와 충돌
 
 앱과 CLI는 사용자 서비스 이름 `com.ty91.skyd`를 공유한다. 동일 사용자에게 두 감독자가 별도 이름으로 호스트를 실행하지 않도록 하기 위한 선택이다. 앱은 다음 경우 등록·시작·재시작·중지·등록 해제를 차단한다.
@@ -139,3 +141,5 @@ node --test test/desktop-service.smoke.mjs
 등록을 수행한 앱 프로세스가 종료된 후 다른 앱 프로세스가 같은 호스트 instance에 접속하는지, graceful restart가 instance를 교체하는지, 중지 상태가 유지되는지, 시작·등록 해제와 설정·DB 보존을 검사한다. 이것은 실제 로그아웃·재로그인이나 Finder 창 닫기 검증을 대신하지 않는다. 별도 테스트 사용자에서 등록 후 로그아웃·재로그인하고 UDS 응답과 새로운 PID를 확인해야 한다. 사용자 승인 차단·철회는 시스템 설정에서 별도로 확인한다. 등록 성공을 실제 Pi·Claude 도구의 TCC 성공으로 기록하지 않는다.
 
 개발 중 같은 bundle ID·service label로 실행 파일의 서명 정체성을 바꾸거나 임시 앱을 계속 교체하면 macOS가 이전 launch constraint를 적용해 `OS_REASON_CODESIGNING / Launch Constraint Violation`으로 기동을 차단할 수 있다. 등록 성공만으로 정상 기동을 판단하지 않는다. 검증용 복사본은 고유한 식별자를 사용하고, 설치 앱을 교체하기 전에는 기존 앱에서 등록을 해제한다. 시스템 전체 background-item 기록이나 TCC 설정을 초기화하지 않는다. 배포 업데이트에서의 서명 정체성 유지·재등록은 TY-65 이후 검증 범위다.
+
+수동 UI 검증용 앱은 처음부터 최종 테스트 설치 위치에 복사하고 고유한 식별자로 서명한 뒤 실행한다. 임시 위치에서 등록했던 복사본을 이동해 재사용한 검증에서는 macOS가 BTM container를 찾지 못해 `EX_CONFIG`로 실행을 거부했다. 새 식별자로 처음부터 `~/Applications`에 준비한 격리 번들에서는 등록, 창 닫기, 앱 종료 후 같은 호스트 재연결, 재시작, 중지, 시작, 등록 해제를 확인했다.

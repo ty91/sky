@@ -47,6 +47,7 @@ pub struct Snapshot {
     daemon: Option<DaemonStatus>,
     detail: Option<String>,
     sky_home: PathBuf,
+    can_manage: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,6 +131,7 @@ fn classify(
     match registration {
         Registration::RequiresApproval => HostState::ApprovalRequired,
         Registration::NotRegistered => HostState::NotRegistered,
+        Registration::NotFound if job.is_none() => HostState::NotRegistered,
         Registration::NotFound => HostState::StartupFailed,
         Registration::Enabled => match job {
             None => HostState::Stopped,
@@ -151,6 +153,20 @@ struct HostService {
 }
 
 impl HostService {
+    fn owns_running_job(&self, job: &Job) -> bool {
+        job.pid.is_some()
+            && !job.launching()
+            && job.app_managed
+            && job.parent_bundle.as_deref() == Some(self.bundle_identifier.as_str())
+            && job.program.as_ref().is_some_and(|program| {
+                program
+                    .canonicalize()
+                    .ok()
+                    .zip(self.executable.canonicalize().ok())
+                    .is_some_and(|(actual, expected)| actual == expected)
+            })
+    }
+
     fn new() -> Result<Self, ServiceError> {
         let bundle = NSBundle::mainBundle();
         let contents = PathBuf::from(bundle.bundlePath().to_string()).join("Contents");
@@ -338,6 +354,7 @@ impl HostService {
                 daemon: None,
                 detail: Some(detail),
                 sky_home: self.sky_home.clone(),
+                can_manage: false,
             });
         }
         let response = validate_socket(&self.sky_home).and_then(|()| self.control.status());
@@ -352,6 +369,7 @@ impl HostService {
                     daemon: None,
                     detail: Some("소켓 응답의 프로세스가 앱 서비스와 일치하지 않습니다.".into()),
                     sky_home: self.sky_home.clone(),
+                    can_manage: false,
                 });
             }
             Err(error) => (
@@ -366,6 +384,7 @@ impl HostService {
             daemon,
             detail,
             sky_home: self.sky_home.clone(),
+            can_manage: job.as_ref().is_none_or(|job| self.owns_running_job(job)),
         })
     }
 
@@ -377,6 +396,12 @@ impl HostService {
                 snapshot.detail.unwrap_or_default(),
             ));
         }
+        if !snapshot.can_manage {
+            return Err(ServiceError::new(
+                "ownership_unverified",
+                "호스트 실행 경로를 아직 확인할 수 없습니다. 기동 중이면 기다려 주세요. 기동 실패가 계속되면 launchd와 등록한 앱의 경로를 확인해 주세요.",
+            ));
+        }
         Ok(snapshot)
     }
 
@@ -384,7 +409,13 @@ impl HostService {
         let timeout = if previous.is_some() { 150 } else { 30 };
         let deadline = Instant::now() + Duration::from_secs(timeout);
         loop {
-            let snapshot = self.assert_owned()?;
+            let snapshot = self.inspect()?;
+            if snapshot.host_state == HostState::Conflict {
+                return Err(ServiceError::new(
+                    "installation_conflict",
+                    snapshot.detail.unwrap_or_default(),
+                ));
+            }
             if snapshot.registration == Registration::RequiresApproval {
                 return Ok(snapshot);
             }
@@ -482,7 +513,10 @@ impl HostService {
             }
             Action::Unregister => {
                 self.stop()?;
-                if self.registration() != Registration::NotRegistered {
+                if matches!(
+                    self.registration(),
+                    Registration::Enabled | Registration::RequiresApproval
+                ) {
                     self.unregister()?;
                 }
                 self.inspect()
@@ -528,9 +562,9 @@ fn validate_socket(home: &Path) -> Result<(), String> {
 #[tauri::command]
 pub async fn host_service(action: Action) -> Result<Snapshot, ServiceError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = SERVICE_LOCK
-            .try_lock()
-            .map_err(|_| ServiceError::new("busy", "다른 호스트 작업이 진행 중입니다."))?;
+        let _guard = SERVICE_LOCK.lock().map_err(|_| {
+            ServiceError::new("native_error", "호스트 작업 잠금을 복구할 수 없습니다.")
+        })?;
         HostService::new()?.apply(action)
     })
     .await
@@ -592,6 +626,10 @@ mod tests {
         );
         assert_eq!(
             classify(Registration::NotFound, None, None),
+            HostState::NotRegistered
+        );
+        assert_eq!(
+            classify(Registration::NotFound, Some(&failed), None),
             HostState::StartupFailed
         );
         let mut daemon = DaemonStatus {
@@ -666,6 +704,26 @@ mod tests {
             control: Control::new(&sky_home.join("run/skyd.sock")).unwrap(),
         };
         assert!(service.conflict(None).is_none());
+        fs::create_dir_all(service.executable.parent().unwrap()).unwrap();
+        fs::write(&service.executable, "host").unwrap();
+        let mut current = Job {
+            program: Some(service.executable.clone()),
+            pid: Some(42),
+            app_managed: true,
+            parent_bundle: Some("com.jakdo.sky".into()),
+            ..Default::default()
+        };
+        assert!(service.owns_running_job(&current));
+        current.pid = None;
+        assert!(!service.owns_running_job(&current));
+        current.pid = Some(42);
+        current.program = Some(PathBuf::from("/usr/libexec/xpcproxy"));
+        assert!(!service.owns_running_job(&current));
+        let other = home.join("other/skyd");
+        fs::create_dir_all(other.parent().unwrap()).unwrap();
+        fs::write(&other, "other host").unwrap();
+        current.program = Some(other);
+        assert!(!service.owns_running_job(&current));
         assert!(
             service
                 .conflict(Some(&Job {

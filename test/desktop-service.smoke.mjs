@@ -78,7 +78,9 @@ test('SMAppService retains a host across app exits and preserves data through st
     };
     const initial = act('status');
     assert.ok(['notRegistered', 'notFound'].includes(initial.registration), JSON.stringify(initial));
-    assert.notEqual(initial.hostState, 'conflict', JSON.stringify(initial));
+    assert.equal(initial.hostState, 'notRegistered', JSON.stringify(initial));
+    assert.equal(initial.canManage, true);
+    assert.equal(act('unregister').hostState, 'notRegistered');
     registered = true;
     const started = act('register');
     assert.equal(started.registration, 'enabled', JSON.stringify(started));
