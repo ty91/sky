@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,10 @@ const bundle = path.join(native, 'target/aarch64-apple-darwin/release/bundle/mac
 test('SMAppService retains a host across app exits and preserves data through stop and unregister', { timeout: 240_000 }, async () => {
   assert.equal(process.platform, 'darwin');
   const temporary = await mkdtemp('/private/tmp/sky-service-');
-  const installed = path.join(temporary, 'Applications With Spaces/Sky.app');
+  const applications = path.join(os.homedir(), 'Applications');
+  await mkdir(applications, { recursive: true });
+  const installation = await mkdtemp(path.join(applications, 'sky-service-test-'));
+  const installed = path.join(installation, 'Applications With Spaces/Sky.app');
   const skyHome = path.join(temporary, 'sky-home');
   let registered = false;
   let safeToRemove = true;
@@ -22,11 +26,15 @@ test('SMAppService retains a host across app exits and preserves data through st
     encoding: 'utf8', timeout: 180_000, ...options,
   });
   const executable = path.join(installed, 'Contents/MacOS/sky-desktop');
-  const act = (action) => {
+  const act = (action, expectedError) => {
     const output = run(executable, ['--ignored', '--exact', 'service::tests::isolated_service_action', '--nocapture'], {
-      env: { ...process.env, SKY_DESKTOP_SMOKE_HOME: skyHome, SKY_DESKTOP_SMOKE_ACTION: action },
+      env: { ...process.env, SKY_DESKTOP_SMOKE_HOME: skyHome, SKY_DESKTOP_SMOKE_ACTION: action, ...(expectedError ? { SKY_DESKTOP_SMOKE_EXPECT_ERROR: expectedError } : {}) },
     });
     const result = JSON.parse(output.match(/^SKY_SERVICE_RESULT=(.+)$/m)?.[1] ?? 'null');
+    if (expectedError) {
+      assert.equal(result?.Err?.code, expectedError, output);
+      return result.Err;
+    }
     assert.ok(result?.Ok, output);
     return result.Ok;
   };
@@ -60,6 +68,7 @@ test('SMAppService retains a host across app exits and preserves data through st
     } else {
       run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', installed]);
     }
+    run('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-f', installed]);
     await mkdir(skyHome);
     await mkdir(path.join(temporary, 'home'));
     const settings = `${JSON.stringify({ schemaVersion: 1, revision: 1, agentBackend: 'pi', model: 'anthropic/claude-sonnet-4-6', workspace: path.join(skyHome, 'workspace') })}\n`;
@@ -102,13 +111,53 @@ test('SMAppService retains a host across app exits and preserves data through st
     assert.equal(removed.daemon, null);
     registered = false;
     await assertPreserved();
+
+    const validPlist = await readFile(plistFile, 'utf8');
+    plist.ProgramArguments = ['skyd', '--eval', 'process.exit(78)'];
+    plist.EnvironmentVariables.BUN_BE_BUN = '1';
+    plist.KeepAlive = false;
+    await writeFile(plistFile, JSON.stringify(plist));
+    run('/usr/bin/plutil', ['-convert', 'xml1', plistFile]);
+    const sign = () => process.env.SKY_DESKTOP_SIGNER
+      ? run(process.env.SKY_DESKTOP_SIGNER, [installed])
+      : run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', installed]);
+    sign();
+    registered = true;
+    act('register', 'startup_failed');
+    await writeFile(plistFile, validPlist);
+    sign();
+    const failed = act('status');
+    assert.equal(failed.hostState, 'startupFailed');
+    assert.equal(failed.canManage, false);
+    assert.equal(failed.canRecover, true, JSON.stringify(failed));
+    assert.match(failed.detail, /종료 코드/);
+    const recovered = act('recover');
+    assert.equal(recovered.hostState, 'running', JSON.stringify(recovered));
+    assert.equal(recovered.canRecover, false);
+    const reports = (await readdir(path.join(skyHome, 'logs'))).filter((name) => name.startsWith('service-recovery-'));
+    assert.equal(reports.length, 1);
+    const reportFile = path.join(skyHome, 'logs', reports[0]);
+    const report = JSON.parse(await readFile(reportFile, 'utf8'));
+    assert.equal(report.before.hostState, 'startupFailed');
+    assert.equal(report.result.Ok.hostState, 'running');
+    assert.equal((await stat(reportFile)).mode & 0o777, 0o600);
+    await assertPreserved();
+    act('recover', 'recovery_unavailable');
+    assert.equal(act('status').daemon.instanceId, recovered.daemon.instanceId);
+    assert.equal(act('unregister').registration, 'notRegistered');
+    registered = false;
+    await assertPreserved();
   } finally {
     if (registered) {
       try { act('unregister'); } catch (error) {
         safeToRemove = false;
-        console.error(`Service cleanup failed. Preserved app and data at ${temporary}: ${error}`);
+        console.error(`Service cleanup failed. Preserved app at ${installed} and data at ${temporary}: ${error}`);
       }
     }
-    if (safeToRemove) await rm(temporary, { recursive: true, force: true });
+    if (safeToRemove) {
+      run('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', installed]);
+      await rm(temporary, { recursive: true, force: true });
+      await rm(installation, { recursive: true, force: true });
+    }
   }
 });

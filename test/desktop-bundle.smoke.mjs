@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
@@ -52,9 +53,9 @@ test('relocated Sky.app runs its host and embedded admin without Node.js or Bun'
   assert.equal(process.platform, 'darwin');
   assert.equal(process.arch, 'arm64');
   const temporary = await mkdtemp('/tmp/sky-app-');
+  const installed = path.join(temporary, 'Applications With Spaces/Sky.app');
   let child;
   try {
-    const installed = path.join(temporary, 'Applications With Spaces/Sky.app');
     await cp(bundle, installed, { recursive: true });
     const contents = path.join(installed, 'Contents');
     const bin = path.join(contents, 'MacOS');
@@ -87,6 +88,12 @@ test('relocated Sky.app runs its host and embedded admin without Node.js or Bun'
     assert.equal(info.version, manifest.version);
     assert.equal(info.target, 'aarch64-apple-darwin');
     assert.match(info.revision, /^[a-f0-9]{12}(?:-dirty)?$/);
+    const bundleId = `com.jakdo.sky.test-${randomUUID().toLowerCase()}`;
+    run('/usr/bin/plutil', ['-replace', 'CFBundleIdentifier', '-string', bundleId, path.join(contents, 'Info.plist')]);
+    const agent = path.join(contents, 'Library/LaunchAgents/com.jakdo.sky.skyd.plist');
+    run('/usr/bin/plutil', ['-replace', 'Label', '-string', `${bundleId}.skyd`, agent]);
+    run('/usr/bin/plutil', ['-replace', 'AssociatedBundleIdentifiers', '-json', JSON.stringify([bundleId]), agent]);
+    run('/usr/bin/codesign', ['--force', '--sign', '-', installed]);
     for (const name of ['sky-desktop', 'skyd']) {
       assert.equal(run('/usr/bin/lipo', ['-archs', path.join(bin, name)]), 'arm64');
       assert.match(run('/usr/bin/otool', ['-l', path.join(bin, name)]), /\bminos 13\.0\b/);
@@ -132,6 +139,7 @@ test('relocated Sky.app runs its host and embedded admin without Node.js or Bun'
     assert.deepEqual(await readdir(home), []);
     assert.equal(child.exitCode, null, stderr);
   } finally {
+    execFileSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', installed], { stdio: 'ignore' });
     if (child && child.exitCode === null && child.signalCode === null) {
       const exit = once(child, 'exit');
       const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 libc = "0.2.189"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSWorkspace", "std"] }
 objc2-foundation = { version = "0.3.2", features = ["NSString", "NSError", "std", "NSBundle", "NSPathUtilities"], default-features = false }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService", "objc2", "objc2-foundation", "std"], default-features = false }
 plist = "1.10.1"

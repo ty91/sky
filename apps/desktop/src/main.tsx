@@ -19,8 +19,10 @@ type HostSnapshot = {
   detail: string | null;
   skyHome: string;
   canManage: boolean;
+  canRecover: boolean;
+  recoveryDetail: string | null;
 };
-type HostAction = 'status' | 'register' | 'start' | 'stop' | 'restart' | 'unregister' | 'openSettings';
+type HostAction = 'status' | 'register' | 'start' | 'stop' | 'restart' | 'unregister' | 'openSettings' | 'recover';
 const hostStates: Record<HostState, string> = {
   notRegistered: '미등록', approvalRequired: '사용자 승인 대기', running: '실행 중',
   starting: '기동 중', stopping: '작업 정리 중', stopped: '중지됨',
@@ -84,9 +86,11 @@ function HostControls() {
         </>}
       </dl>}
       {host?.detail && <p role="alert">{host.detail}</p>}
+      {host?.recoveryDetail && <p role="alert">{host.recoveryDetail}</p>}
       {error && <p role="alert">{error}</p>}
       <div className="actions">
         <button disabled={busy} onClick={() => void act('status')}>새로고침</button>
+        {host?.hostState === 'startupFailed' && <button disabled={busy || !host.canRecover} onClick={() => void act('recover')}>서비스 복구</button>}
         {host?.registration === 'requiresApproval' && <button disabled={busy} onClick={() => void act('openSettings')}>로그인 항목 설정</button>}
         <button disabled={busy || !host?.canManage || conflict || host.registration === 'requiresApproval' || ['running', 'starting', 'stopping'].includes(host.hostState)} onClick={() => void act(host?.registration === 'enabled' ? 'start' : 'register')}>
           {host?.registration === 'enabled' ? '호스트 시작' : '서비스 등록'}
