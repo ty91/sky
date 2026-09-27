@@ -63,6 +63,7 @@ import { inspectLaunchAgent, type LaunchdStatus } from '../service/launch-agent.
 import { createSkydClaudeDiagnostics } from './claude-diagnostics.js';
 import { PRODUCT_VERSION } from '../product-version.js';
 import { RUNTIME_KIND } from '../runtime-identity.js';
+import { createTccValidation, type TccValidation } from './tcc-validation.js';
 
 export type RuntimeStarter = (
   settings: Settings,
@@ -399,8 +400,14 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   });
 
   let controlServer: ControlServer;
+  let tccValidation: TccValidation | undefined;
   try {
-    controlServer = await startControlServer(paths.socketFile, control);
+    tccValidation = createTccValidation({ paths, configuration, runtimeController });
+  } catch {
+    logger.log('error', 'validation', 'TCC validation disabled: invalid private tcc-validation.json configuration.');
+  }
+  try {
+    controlServer = await startControlServer(paths.socketFile, control, tccValidation);
   } catch (error) {
     logger.log('error', 'control', error instanceof Error ? error.message : String(error));
     throw error;
