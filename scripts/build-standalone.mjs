@@ -47,6 +47,24 @@ const piEntryPath = fileURLToPath(
 );
 const piClipboardNativeModule = path.join(path.dirname(piEntryPath), 'utils', 'clipboard-native.js');
 const piClipboardAddonPath = require.resolve('@mariozechner/clipboard-darwin-arm64');
+const piBunOAuthPath = fileURLToPath(import.meta.resolve('@earendil-works/pi-ai/bun-oauth', piEntryPath));
+
+const piOAuthPlugin = {
+  name: 'bundled-pi-oauth',
+  setup(build) {
+    build.onLoad({ filter: /\/pi-coding-agent\/dist\/index\.js$/ }, async (args) => {
+      if (args.path !== piEntryPath) return undefined;
+      return {
+        contents: [
+          `import { registerBunOAuthFlows } from ${JSON.stringify(piBunOAuthPath)};`,
+          'registerBunOAuthFlows();',
+          await readFile(args.path, 'utf8'),
+        ].join('\n'),
+        loader: 'js',
+      };
+    });
+  },
+};
 
 const nodeSqliteCompatibilityPlugin = {
   name: 'node-sqlite-compatibility',
@@ -369,7 +387,7 @@ async function verifyStandalonePi() {
         autoloadBunfig: false,
       },
       metafile: true,
-      plugins: [nodeSqliteCompatibilityPlugin, piClipboardNativePlugin],
+      plugins: [nodeSqliteCompatibilityPlugin, piClipboardNativePlugin, piOAuthPlugin],
     });
     assert.equal(build.success, true, 'standalone Pi smoke build failed');
     assert.equal(build.outputs.length, 1, 'standalone Pi smoke must emit one executable');
@@ -435,6 +453,7 @@ async function main() {
       createAdminAssetPlugin(adminAssets),
       claudeHelperAssetPlugin,
       piClipboardNativePlugin,
+      piOAuthPlugin,
     ],
   });
 

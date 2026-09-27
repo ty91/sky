@@ -1,6 +1,6 @@
 # macOS 앱 빌드와 내장 호스트
 
-[README](../README.md) · [개발](development.md) · [서명 준비](macos-signing.md)
+[README](../README.md) · [개발](development.md) · [서명 준비](macos-signing.md) · [TCC 검증](macos-tcc-validation.md)
 
 `apps/desktop`은 Tauri 2 + React 앱이다. 앱·호스트 버전, 대상 아키텍처, 소스 revision과 개발/번들 실행 모드를 표시한다. SMAppService로 내장 호스트를 등록하고 네이티브 UDS 연결로 상태·생명주기를 제어한다. 창 닫기와 UI 앱 종료는 호스트를 중지하지 않는다. Developer ID 서명·공증과 배포 ZIP 생성은 [서명 가이드](macos-signing.md#로컬-배포-빌드)를 따른다. Pi·Claude 도구의 TCC 귀속은 TY-66에서 다룬다.
 

@@ -1,0 +1,140 @@
+2026-09-27T05:54:58Z
+program path = /bin/zsh
+	pid = 6837
+	ppid = 6772
+	pgid = 6837
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:55:11Z
+program path = /bin/zsh
+	pid = 7034
+	ppid = 6952
+	pgid = 7034
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:34Z
+program path = /bin/zsh
+	pid = 8139
+	ppid = 8074
+	pgid = 8139
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:56:46Z
+program path = /bin/zsh
+	pid = 8310
+	ppid = 8245
+	pgid = 8310
+sandboxed = no
+container = (no container)
+responsible pid = 2270
+responsible unique pid = 2270
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:58:10Z
+program path = /bin/zsh
+	pid = 9408
+	ppid = 9320
+	pgid = 9408
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T05:58:28Z
+program path = /bin/zsh
+	pid = 9655
+	ppid = 9591
+	pgid = 9655
+sandboxed = no
+container = (no container)
+responsible pid = 8726
+responsible unique pid = 8726
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:00:57Z
+program path = /bin/zsh
+	pid = 11818
+	ppid = 11753
+	pgid = 11818
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:01:10Z
+program path = /bin/zsh
+	pid = 12001
+	ppid = 11924
+	pgid = 12001
+sandboxed = no
+container = (no container)
+responsible pid = 10707
+responsible unique pid = 10707
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:05:18Z
+program path = /bin/zsh
+	pid = 15110
+	ppid = 15044
+	pgid = 15110
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:05:31Z
+program path = /bin/zsh
+	pid = 15297
+	ppid = 15218
+	pgid = 15297
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:11:52Z
+program path = /bin/zsh
+	pid = 19968
+	ppid = 19903
+	pgid = 19968
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:12:04Z
+program path = /bin/zsh
+	pid = 20155
+	ppid = 20078
+	pgid = 20155
+sandboxed = no
+container = (no container)
+responsible pid = 14306
+responsible unique pid = 14306
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:13:54Z
+program path = /bin/zsh
+	pid = 21578
+	ppid = 21513
+	pgid = 21578
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd
+2026-09-27T06:14:09Z
+program path = /bin/zsh
+	pid = 21791
+	ppid = 21700
+	pgid = 21791
+sandboxed = no
+container = (no container)
+responsible pid = 20944
+responsible unique pid = 20944
+responsible path = /Users/skytest/Applications/Sky.app/Contents/MacOS/skyd

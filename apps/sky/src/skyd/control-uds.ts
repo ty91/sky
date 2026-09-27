@@ -13,6 +13,7 @@ import {
 import type { LogHistory, LogRecord } from './logger.js';
 import type { OperationEvent, OperationRecord, OperationRequest } from './operations.js';
 import type { DaemonStatus } from './types.js';
+import type { TccValidation } from './tcc-validation.js';
 
 const CONTROL_REQUEST_TIMEOUT_MS = 2_000;
 const DIAGNOSTICS_REQUEST_TIMEOUT_MS = 10_000;
@@ -129,8 +130,24 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   control: DaemonControl,
+  tccValidation?: TccValidation,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'http://localhost');
+
+  if (url.pathname === '/validation/tcc' && tccValidation) {
+    if (request.method !== 'POST') return methodNotAllowed(response, 'POST');
+    const body = await readJsonBody(request, 'invalid_request');
+    const abortController = new AbortController();
+    const abort = () => abortController.abort();
+    response.once('close', abort);
+    try {
+      const result = await tccValidation.run(body, abortController.signal);
+      if (!response.destroyed) writeJson(response, 200, result);
+    } finally {
+      response.removeListener('close', abort);
+    }
+    return;
+  }
 
   if (url.pathname === '/status') {
     if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
@@ -257,10 +274,11 @@ async function prepareSocket(socketFile: string): Promise<void> {
 export async function startControlServer(
   socketFile: string,
   control: DaemonControl,
+  tccValidation?: TccValidation,
 ): Promise<ControlServer> {
   await prepareSocket(socketFile);
   const server = http.createServer((request, response) => {
-    void handleRequest(request, response, control).catch((error) => {
+    void handleRequest(request, response, control, tccValidation).catch((error) => {
       if (!response.headersSent) writeControlError(response, error);
       else response.destroy();
     });
