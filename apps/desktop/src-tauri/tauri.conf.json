@@ -43,6 +43,8 @@
       "signingIdentity": "-",
       "hardenedRuntime": false,
       "files": {
+        "Helpers/claude": "binaries/claude",
+        "Frameworks/clipboard.darwin-arm64.node": "binaries/clipboard.darwin-arm64.node",
         "Library/LaunchAgents/com.jakdo.sky.skyd.plist": "launch-agents/com.jakdo.sky.skyd.plist"
       }
     }

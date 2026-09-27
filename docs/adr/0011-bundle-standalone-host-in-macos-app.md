@@ -15,3 +15,5 @@ Pi native addon과 Claude helper의 현재 Bun 포함·추출 방식을 보존�
 후속 [ADR-0012](0012-manage-app-host-with-smappservice.md)는 내장 호스트를 SMAppService에 연결하는 생명주기 계약을 추가한다.
 
 관련 이슈: [TY-63](https://linear.app/jakdo/issue/TY-63)
+
+후속 [ADR-0013](0013-sign-fixed-desktop-code-before-notarization.md)은 앱 배포에서 Claude helper와 Pi native addon을 고정된 코드 경로에 배치하고 서명하는 방식으로 변경한다. CLI standalone의 포함·추출 방식은 유지한다.

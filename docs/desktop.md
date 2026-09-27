@@ -51,6 +51,8 @@ apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Sky.app
   Contents/Info.plist
   Contents/MacOS/sky-desktop
   Contents/MacOS/skyd
+  Contents/Helpers/claude
+  Contents/Frameworks/clipboard.darwin-arm64.node
   Contents/Library/LaunchAgents/com.jakdo.sky.skyd.plist
   Contents/Resources/build-info.json
   Contents/Resources/icon.icns
@@ -58,7 +60,7 @@ apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Sky.app
 
 Finder에서 이 앱을 열거나 별도 폴더로 복사해 열면 번들된 frontend를 사용하며 실행 모드는 `앱 번들`이다. 기존 설치와 충돌하지 않도록 이 단계에서는 `/Applications/Sky.app`을 자동 교체하지 않는다. 설치된 앱은 pnpm, Node.js, Bun이나 checkout을 필요로 하지 않는다. 인터넷에서 내려받은 앱의 Gatekeeper 통과를 보장하는 배포 절차는 아직 아니다.
 
-Tauri의 [externalBin 규약](https://v2.tauri.app/develop/sidecar/)에 맞춰 빌드 준비 시 `binaries/skyd-aarch64-apple-darwin`을 만들고, 번들에서는 suffix가 없는 정확한 `skyd` 이름으로 배치한다. 기존 standalone `sky` 파일을 복사하므로 내장 자산과 실행 이름 계약은 동일하다. `skyd --foreground`가 호스트 역할을 선택하며, `sky`라는 이름으로 호출하면 CLI 역할을 선택한다. 앱에는 CLI 복사본이나 공개 PATH 등록을 추가하지 않는다.
+Tauri의 [externalBin 규약](https://v2.tauri.app/develop/sidecar/)에 맞춰 빌드 준비 시 `binaries/skyd-aarch64-apple-darwin`을 만들고, 번들에서는 suffix가 없는 정확한 `skyd` 이름으로 배치한다. `build:standalone --desktop`으로 만든 호스트를 복사한다. CLI standalone의 단일 파일 배포는 유지하고 앱 빌드만 Claude·clipboard를 번들 코드 경로에서 로드한다. `skyd --foreground`가 호스트 역할을 선택하며, `sky`라는 이름으로 호출하면 CLI 역할을 선택한다. 앱에는 CLI 복사본이나 공개 PATH 등록을 추가하지 않는다.
 
 `build-info.json`은 실제 standalone의 `--version` 결과와 루트 버전의 일치를 확인한 뒤 생성하며, Git revision과 작업 트리 변경 여부(`-dirty`)를 함께 담는다. 앱은 Tauri resource directory에서 이 파일을 읽는다. 버전 정보 조회는 호스트나 helper를 실행하지 않는다.
 
@@ -88,13 +90,13 @@ env -i HOME="$SKY_TEST_ROOT/home" SKY_HOME="$SKY_TEST_ROOT/sky-home" \
 | Bun 1.3.14와 Sky 코드 | `Contents/MacOS/skyd` 안에 포함. `SKY_RUNTIME=standalone`과 제품 버전이 build-time literal로 고정됨 |
 | React admin | standalone 내부 `/$bunfs/` 자산. 호스트가 embedded asset reader로 HTTP 제공 |
 | Pi 0.80.10 | JS와 필요한 import 자산을 standalone에 포함. 호스트 프로세스 안에서 실행 |
-| Pi clipboard 0.3.9 | `clipboard.darwin-arm64.node`를 Bun N-API asset으로 포함. Bun이 디스크로 추출해 로드하며 앱 번들의 고정 helper 경로가 아님 |
-| Claude Agent SDK 0.3.283 | SDK JS와 darwin-arm64 플랫폼 패키지의 `claude` Mach-O를 포함 |
-| Claude 실행 파일 | 첫 backend 사용 시 `extractFromBunfs`로 `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-<uid>/claude-agent-sdk-<sha256 앞 16자>/<embedded basename>`에 추출, mode 0755로 직접 실행. `--version`·`--help`는 추출하지 않음 |
+| Pi clipboard 0.3.9 | `Contents/Frameworks/clipboard.darwin-arm64.node`를 호스트가 직접 로드 |
+| Claude Agent SDK 0.3.283 | SDK JS는 호스트에 포함하고 darwin-arm64 플랫폼 패키지의 `claude` Mach-O는 `Contents/Helpers/claude`로 복사 |
+| Claude 실행 파일 | 호스트의 실제 실행 파일 위치를 기준으로 `../Helpers/claude`를 직접 실행. 임시 경로 추출 없음. CLI symlink로 호출해도 앱 내부 경로를 유지 |
 | Bash·외부 도구 | macOS shell과 호스트 PATH를 사용. 임의의 에이전트 도구까지 앱에 모두 포함하지 않음 |
 | Pi의 rg·fd | Pi가 PATH 또는 Pi agent directory의 `bin`을 조회하고 필요하면 다운로드. 기본 `~/.pi/agent/bin`, `PI_CODING_AGENT_DIR`로 변경 가능. Sky home과 별도이며 앱 번들의 고정 실행 파일이 아님 |
 
-정확한 포함 파일 목록은 `dist/standalone/darwin-arm64.metafile.json`에 남고 기존 standalone audit가 플랫폼 helper와 clipboard addon을 검사한다. 앱 빌드는 이 검증을 그대로 사용한다. Claude 실행 파일을 앱 내부 고정 위치로 옮기는 변경과 Bun이 추출한 native addon의 서명·entitlement, 외부 도구의 responsible code는 TY-65/TY-66의 검증 입력이다. 현재 경로를 공유한다고 TCC 권한도 공유한다고 가정하지 않는다.
+앱 호스트 메타파일은 `dist/desktop-host/darwin-arm64.metafile.json`에 남는다. 빌드는 Claude helper와 clipboard addon이 호스트 내부에 중복 포함되지 않았는지 검사하고, 실제 Pi import·세션 어댑터와 native addon 로드를 확인한다. `pnpm test:desktop`은 옮긴 번들의 Claude `--version`과 호스트 Bun 런타임에서의 clipboard 로드를 검증한다. `SKY_DESKTOP_APP`에 다른 앱의 절대 경로를 지정해 같은 검사를 실행할 수 있다. 외부 도구의 responsible code는 TY-66의 검증 입력이다. 현재 경로를 공유한다고 TCC 권한도 공유한다고 가정하지 않는다.
 
 ## 로컬 서비스 제어
 
