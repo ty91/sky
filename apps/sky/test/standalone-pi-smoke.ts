@@ -1,5 +1,23 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { createPiSessionFactoryWithDeps } from '../src/agents/backend/pi.js';
+
+const authPath = path.join(process.cwd(), 'auth.json');
+await writeFile(authPath, JSON.stringify({
+  'openai-codex': {
+    type: 'oauth',
+    access: 'standalone-synthetic-access',
+    refresh: 'standalone-synthetic-refresh',
+    expires: Date.now() + 60_000,
+  },
+}), { mode: 0o600 });
+const modelRuntime = await ModelRuntime.create({
+  authPath,
+  modelsPath: path.join(process.cwd(), 'models.json'),
+});
+assert.equal((await modelRuntime.getAuth('openai-codex'))?.auth.apiKey, 'standalone-synthetic-access');
 
 const listeners = new Set<(event: unknown) => void>();
 
