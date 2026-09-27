@@ -2,7 +2,25 @@
 
 [README](../README.md) · [배포](releasing.md)
 
-Sky 배포물의 서명은 `mini`에서 수행한다. 설치 대상 Mac에는 서명용 개인 키를 배포하지 않는다. 이 문서는 로컬 배포 빌드, 서명·공증 인증 수단과 복구 절차를 다룬다. CI 이전과 자동 업데이트는 범위 밖이다.
+Sky 배포물은 GitHub Actions의 macOS arm64 실행기에서 빌드·서명·공증한다. `mini`의 기존 서명 환경은 수동 배포와 복구용으로 유지한다. 설치 대상 Mac에는 서명용 개인 키를 배포하지 않는다. 자동 업데이트는 범위 밖이다.
+
+## GitHub Actions 배포 인증
+
+`Release Sky` workflow의 desktop job은 `desktop-release` environment를 사용한다. 이 environment는 `main` branch와 `v*` tag만 허용하며 일반 PR 작업에 서명 자료를 제공하지 않는다. 태그 push는 앱과 CLI 검증이 모두 성공한 뒤 GitHub Release를 발행한다. `main`에서 수동 실행하면 같은 빌드·공증을 수행하지만 Release를 발행하지 않는다.
+
+| GitHub 설정 | 값의 출처와 용도 |
+| --- | --- |
+| Secret `SKY_CERTIFICATE_BASE64` | 아래 인증서 백업의 `certificate p12 base64` |
+| Secret `SKY_CERTIFICATE_PASSWORD` | 같은 백업의 `p12 password` |
+| Secret `SKY_NOTARY_PRIVATE_KEY` | 아래 공증 백업의 `private key` |
+| Variable `SKY_NOTARY_KEY_ID` | 공증 API Key ID |
+| Variable `SKY_NOTARY_ISSUER_ID` | 공증 API Issuer ID |
+
+설정할 때 백업 항목 JSON의 정확한 필드 label을 선택하고 비밀 값을 로그나 명령행 인자로 출력하지 않는다. GitHub CLI의 표준 입력으로 environment secret을 등록한다. CI에는 1Password service account나 `mini` Keychain 암호를 제공하지 않는다.
+
+실행기는 작업마다 난수 암호의 임시 Keychain을 생성한다. 인증서를 가져오고 Apple 서명 도구 접근을 설정한 뒤 공증 프로필을 검증·저장한다. `SKY_SIGNING_KEYCHAIN`과 `SKY_NOTARY_PROFILE`로 기존 배포 스크립트를 사용하며, 인증서·공증 키 임시 파일과 Keychain은 실패 시에도 정리한다. 동일 Developer ID와 bundle ID를 유지하며 Claude helper의 공급자 서명도 보존한다.
+
+배포 ZIP과 checksum, 공증 요청·결과·진단 JSON은 Actions artifact로 7일 보관한다. 개인 키나 Keychain, 공증 제출용 ZIP은 artifact에 포함하지 않는다. 발행 후 별도 macOS job에서 공개 ZIP을 내려받아 checksum·서명·공증 티켓·Gatekeeper와 내장 호스트 실행을 다시 검사한다. GUI 승인과 실제 TCC 권한은 CI 검사 범위가 아니며 설치 대상 Mac에서 확인한다.
 
 ## 운영 식별 정보
 
@@ -10,7 +28,7 @@ Sky 배포물의 서명은 `mini`에서 수행한다. 설치 대상 Mac에는 �
 | --- | --- |
 | 개발자 팀 | Studio Jakdo |
 | Team ID | `RY355N72WN` |
-| 서명 Mac | `mini` |
+| 서명 환경 | GitHub-hosted macOS arm64 / 수동 복구용 `mini` |
 | 인증서 | `Developer ID Application: Studio Jakdo (RY355N72WN)` |
 | 인증서 종류 | Developer ID Application, G2 중간 인증 기관 |
 | 인증서 SHA-1 식별자 | `DA0731BD463A75EEA2D0B4876C053E917F3434F1` |
@@ -109,7 +127,7 @@ xcrun notarytool store-credentials sky-notary \
 
 Tauri 연결 시 `APPLE_SIGNING_IDENTITY`는 위 인증서 이름을 사용한다. API 인증의 설정 이름은 `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`다. `.p8` 경로가 필요한 도구에는 1Password에서 작업 시간에만 임시 파일을 복원하고 종료 시 제거한다. 직접 `notarytool`을 호출하는 파이프라인은 기존 Keychain 프로필을 사용할 수 있다.
 
-향후 다른 빌드 환경에서 PKCS#12 가져오기가 필요하면 `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`를 사용한다. 현재 CI에 이 값들을 등록하거나 빌드 동작을 변경하지 않았다. 비밀 값은 이슈·저장소·로그에 기록하지 않는다.
+GitHub Actions는 위 environment 설정으로 임시 Keychain을 준비하므로 Tauri의 인증서 가져오기 환경변수는 사용하지 않는다. 비밀 값은 이슈·저장소·로그에 기록하지 않는다.
 
 ## 참고
 

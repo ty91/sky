@@ -1,20 +1,22 @@
-name: Release standalone
+name: Release Sky
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-standalone-${{ github.ref }}
+  group: release-sky-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  standalone:
     runs-on: macos-15
+    timeout-minutes: 40
     outputs:
       version: ${{ steps.release_assets.outputs.version }}
     steps:
@@ -28,6 +30,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify release tag
+        if: github.event_name == 'push'
         run: pnpm release:check-tag
 
       - name: Lint
@@ -64,36 +67,27 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           archive="$PWD/dist/release/sky-$version-darwin-arm64.tar.gz"
-          checksum="$archive.sha256"
           test -f "$archive"
-          test -f "$checksum"
-          {
-            echo "version=$version"
-            echo "archive=$archive"
-            echo "checksum=$checksum"
-          } >> "$GITHUB_OUTPUT"
+          test -f "$archive.sha256"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Publish the GitHub Release
-        run: |
-          release_flags=()
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            release_flags+=(--prerelease)
-          fi
-          gh release create "$GITHUB_REF_NAME" \
-            "$ARCHIVE" \
-            "$CHECKSUM" \
-            --verify-tag \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            "${release_flags[@]}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ARCHIVE: ${{ steps.release_assets.outputs.archive }}
-          CHECKSUM: ${{ steps.release_assets.outputs.checksum }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: standalone-release
+          path: |
+            dist/release/*.tar.gz
+            dist/release/*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
-  release-smoke:
-    needs: release
+  desktop:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: macos-15
+    timeout-minutes: 75
+    environment: desktop-release
+    env:
+      SKY_NOTARY_PROFILE: sky-notary
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v4
@@ -103,6 +97,148 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify release tag
+        if: github.event_name == 'push'
+        run: pnpm release:check-tag
+
+      - name: Install pinned Rust toolchain
+        working-directory: apps/desktop
+        run: rustup show active-toolchain
+
+      - name: Prepare temporary signing keychain
+        env:
+          SKY_SIGNING_KEYCHAIN: ${{ runner.temp }}/sky-signing.keychain-db
+          SKY_CERTIFICATE_BASE64: ${{ secrets.SKY_CERTIFICATE_BASE64 }}
+          SKY_CERTIFICATE_PASSWORD: ${{ secrets.SKY_CERTIFICATE_PASSWORD }}
+          SKY_NOTARY_PRIVATE_KEY: ${{ secrets.SKY_NOTARY_PRIVATE_KEY }}
+          SKY_NOTARY_KEY_ID: ${{ vars.SKY_NOTARY_KEY_ID }}
+          SKY_NOTARY_ISSUER_ID: ${{ vars.SKY_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "SKY_SIGNING_KEYCHAIN=$SKY_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
+          test -n "$SKY_CERTIFICATE_BASE64"
+          test -n "$SKY_CERTIFICATE_PASSWORD"
+          test -n "$SKY_NOTARY_PRIVATE_KEY"
+          test -n "$SKY_NOTARY_KEY_ID"
+          test -n "$SKY_NOTARY_ISSUER_ID"
+          printf '%s' "$SKY_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/sky-signing.p12"
+          printf '%s' "$SKY_NOTARY_PRIVATE_KEY" > "$RUNNER_TEMP/sky-notary.p8"
+          keychain_password=$(openssl rand -hex 32)
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$SKY_SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$SKY_SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$SKY_SIGNING_KEYCHAIN"
+          security import "$RUNNER_TEMP/sky-signing.p12" -k "$SKY_SIGNING_KEYCHAIN" -P "$SKY_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$SKY_SIGNING_KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$SKY_SIGNING_KEYCHAIN" "$HOME/Library/Keychains/login.keychain-db"
+          xcrun notarytool store-credentials "$SKY_NOTARY_PROFILE" --key "$RUNNER_TEMP/sky-notary.p8" --key-id "$SKY_NOTARY_KEY_ID" --issuer "$SKY_NOTARY_ISSUER_ID" --keychain "$SKY_SIGNING_KEYCHAIN" --validate
+          rm -f "$RUNNER_TEMP/sky-signing.p12" "$RUNNER_TEMP/sky-notary.p8"
+
+      - name: Build, sign and notarize desktop app
+        run: node scripts/release-desktop.mjs release
+
+      - name: Check desktop Rust
+        run: pnpm check:desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release
+          path: |
+            dist/desktop-release/**/Sky-*.zip
+            dist/desktop-release/**/Sky-*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Preserve notarization diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-notarization
+          path: |
+            dist/desktop-release/**/submission.json
+            dist/desktop-release/**/notary-result.json
+            dist/desktop-release/**/notary-log.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove temporary signing material
+        if: always()
+        env:
+          SKY_SIGNING_KEYCHAIN: ${{ runner.temp }}/sky-signing.keychain-db
+        run: |
+          rm -f "$RUNNER_TEMP/sky-signing.p12" "$RUNNER_TEMP/sky-notary.p8"
+          if test -f "$SKY_SIGNING_KEYCHAIN"; then
+            security delete-keychain "$SKY_SIGNING_KEYCHAIN"
+          fi
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [standalone, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          path: artifacts
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.standalone.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir release
+          find artifacts -type f -exec cp '{}' release/ \;
+          cd release
+          archive="sky-$RELEASE_VERSION-darwin-arm64.tar.gz"
+          app="Sky-$RELEASE_VERSION-darwin-arm64.zip"
+          test "$(find . -type f | wc -l)" -eq 4
+          sha256sum --check "$archive.sha256" "$app.sha256"
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$archive" "$archive.sha256" "$app" "$app.sha256" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            "${release_flags[@]}"
+
+  release-smoke:
+    needs: [standalone, publish]
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+
+      - name: Verify macOS arm64 runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify published desktop app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.standalone.outputs.version }}
+        run: |
+          set -euo pipefail
+          artifact_directory="$RUNNER_TEMP/sky-published-desktop"
+          mkdir "$artifact_directory"
+          archive="Sky-$RELEASE_VERSION-darwin-arm64.zip"
+          gh release download "$GITHUB_REF_NAME" --pattern "$archive" --pattern "$archive.sha256" --dir "$artifact_directory"
+          (cd "$artifact_directory" && shasum -a 256 --check "$archive.sha256")
+          ditto -x -k "$artifact_directory/$archive" "$artifact_directory"
+          node scripts/release-desktop.mjs verify "$artifact_directory/Sky.app"
+          SKY_DESKTOP_APP="$artifact_directory/Sky.app" pnpm test:desktop
 
       - name: Build lower-version standalone
         run: |
@@ -116,6 +252,6 @@ jobs:
         run: node --test test/release-install-update.smoke.mjs
         env:
           SKY_RELEASE_SMOKE: '1'
-          SKY_RELEASE_VERSION: ${{ needs.release.outputs.version }}
+          SKY_RELEASE_VERSION: ${{ needs.standalone.outputs.version }}
           SKY_RELEASE_SMOKE_VERSION: 0.0.0-smoke
           SKY_RELEASE_SMOKE_ARTIFACT_DIR: ${{ github.workspace }}/dist/release
