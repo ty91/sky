@@ -314,7 +314,10 @@ async function rawLaunchdPrint(): Promise<string | null> {
 
 async function assertCliServiceOwnership(): Promise<void> {
   const output = await rawLaunchdPrint();
-  if (output && /^\s*(?:path|program)\s*=\s*.*\.app\/Contents\/(?:Library\/LaunchAgents|MacOS)\//m.test(output)) {
+  if (output && (
+    /^\s*managed_by\s*=\s*com\.apple\.xpc\.ServiceManagement\s*$/m.test(output)
+    || /^\s*(?:path|program)\s*=\s*.*\.app\/Contents\/(?:Library\/LaunchAgents|MacOS)\//m.test(output)
+  )) {
     throw new ServiceLifecycleError(
       'app_managed_service',
       'Sky.app owns this host service. Manage or unregister it from the app before using CLI service commands.',

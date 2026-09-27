@@ -81,6 +81,14 @@ struct Job {
     program: Option<PathBuf>,
     pid: Option<u32>,
     last_exit: Option<i32>,
+    app_managed: bool,
+    parent_bundle: Option<String>,
+}
+
+impl Job {
+    fn launching(&self) -> bool {
+        self.app_managed && self.program.as_deref() == Some(Path::new("/usr/libexec/xpcproxy"))
+    }
 }
 
 fn parse_job(output: &str) -> Job {
@@ -94,7 +102,12 @@ fn parse_job(output: &str) -> Job {
     Job {
         program: field("program").map(PathBuf::from),
         pid: field("pid").and_then(|value| value.parse().ok()),
-        last_exit: field("last exit code").and_then(|value| value.parse().ok()),
+        last_exit: field("last exit code")
+            .and_then(|value| value.split(':').next()?.trim().parse().ok()),
+        app_managed: field("managed_by") == Some("com.apple.xpc.ServiceManagement")
+            && field("program identifier")
+                .is_some_and(|value| value.starts_with("Contents/MacOS/skyd (mode: ")),
+        parent_bundle: field("parent bundle identifier").map(str::to_owned),
     }
 }
 
@@ -120,6 +133,7 @@ fn classify(
         Registration::NotFound => HostState::StartupFailed,
         Registration::Enabled => match job {
             None => HostState::Stopped,
+            Some(job) if job.launching() => HostState::Starting,
             Some(job) if job.pid.is_some() => HostState::ConnectionFailed,
             Some(job) if job.last_exit.is_some_and(|code| code != 0) => HostState::StartupFailed,
             Some(_) => HostState::Starting,
@@ -132,6 +146,7 @@ struct HostService {
     sky_home: PathBuf,
     executable: PathBuf,
     target: String,
+    bundle_identifier: String,
     control: Control,
 }
 
@@ -147,6 +162,15 @@ impl HostService {
             )
         })?;
         let home = PathBuf::from(NSHomeDirectory().to_string());
+        let label = config
+            .as_dictionary()
+            .and_then(|dict| dict.get("Label"))
+            .and_then(plist::Value::as_string)
+            .ok_or_else(|| ServiceError::new("invalid_bundle", "LaunchAgent Label이 없습니다."))?;
+        let bundle_identifier = bundle
+            .bundleIdentifier()
+            .ok_or_else(|| ServiceError::new("invalid_bundle", "앱 bundle ID가 없습니다."))?
+            .to_string();
         let sky_home = config
             .as_dictionary()
             .and_then(|dict| dict.get("EnvironmentVariables"))
@@ -167,7 +191,8 @@ impl HostService {
             home,
             sky_home,
             executable: contents.join("MacOS/skyd"),
-            target: format!("gui/{}/{LABEL}", unsafe { libc::getuid() }),
+            target: format!("gui/{}/{label}", unsafe { libc::getuid() }),
+            bundle_identifier,
             control,
         })
     }
@@ -204,7 +229,22 @@ impl HostService {
             .output()
             .map_err(|error| ServiceError::new("service_inspection_failed", error))?;
         if output.status.success() {
-            Ok(Some(parse_job(&String::from_utf8_lossy(&output.stdout))))
+            let mut job = parse_job(&String::from_utf8_lossy(&output.stdout));
+            if let Some(pid) = job.pid {
+                let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+                let length = unsafe {
+                    libc::proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32)
+                };
+                if length > 0 {
+                    use std::os::unix::ffi::OsStrExt;
+                    let end = buffer
+                        .iter()
+                        .position(|byte| *byte == 0)
+                        .unwrap_or(buffer.len());
+                    job.program = Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buffer[..end])));
+                }
+            }
+            Ok(Some(job))
         } else if output.status.code() == Some(113) {
             Ok(None)
         } else {
@@ -229,8 +269,22 @@ impl HostService {
             }
         }
         if let Some(job) = job {
-            if job.program.as_deref() != Some(self.executable.as_path()) {
-                return Some("다른 Sky 설치가 사용자 호스트 서비스를 소유하고 있습니다. 해당 설치에서 서비스를 해제해 주세요.".into());
+            let expected = self
+                .executable
+                .canonicalize()
+                .unwrap_or_else(|_| self.executable.clone());
+            let actual = job
+                .program
+                .as_ref()
+                .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()));
+            let own_idle_service = job.app_managed
+                && job.parent_bundle.as_deref() == Some(self.bundle_identifier.as_str())
+                && (job.pid.is_none() || job.launching());
+            if actual.as_deref() != Some(expected.as_path()) && !own_idle_service {
+                return Some(format!(
+                    "다른 Sky 설치가 사용자 호스트 서비스를 소유하고 있습니다 ({:?}). 해당 설치에서 서비스를 해제해 주세요.",
+                    actual
+                ));
             }
         } else if self
             .sky_home
@@ -256,6 +310,25 @@ impl HostService {
     }
 
     fn inspect(&self) -> Result<Snapshot, ServiceError> {
+        let default_target = format!("gui/{}/{LABEL}", unsafe { libc::getuid() });
+        if self.target != default_target {
+            let output = Command::new("/bin/launchctl")
+                .args(["print", &default_target])
+                .output()
+                .map_err(|error| ServiceError::new("service_inspection_failed", error))?;
+            if output.status.success() {
+                return Err(ServiceError::new(
+                    "installation_conflict",
+                    "기본 Sky 서비스가 등록되어 있습니다. 별도 호스트를 동시에 시작할 수 없습니다.",
+                ));
+            }
+            if output.status.code() != Some(113) {
+                return Err(ServiceError::new(
+                    "service_inspection_failed",
+                    String::from_utf8_lossy(&output.stderr),
+                ));
+            }
+        }
         let registration = self.registration();
         let job = self.job()?;
         if let Some(detail) = self.conflict(job.as_ref()) {
@@ -470,6 +543,24 @@ mod tests {
     use crate::control::{ProcessStatus, RuntimeStatus};
 
     #[test]
+    #[ignore = "requires an isolated signed app bundle; run test/desktop-service.smoke.mjs"]
+    fn isolated_service_action() {
+        let service = HostService::new().unwrap();
+        let expected = PathBuf::from(std::env::var("SKY_DESKTOP_SMOKE_HOME").unwrap());
+        assert!(expected.starts_with("/private/tmp") || expected.starts_with("/tmp"));
+        assert_eq!(service.sky_home, expected);
+        assert_ne!(service.sky_home, service.home.join(".sky"));
+        let action = std::env::var("SKY_DESKTOP_SMOKE_ACTION").unwrap();
+        let action: Action = serde_json::from_value(serde_json::Value::String(action)).unwrap();
+        let result = service.apply(action);
+        println!(
+            "SKY_SERVICE_RESULT={}",
+            serde_json::to_string(&result).unwrap()
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
     fn registration_is_not_proof_of_a_running_host() {
         let failed = Job {
             last_exit: Some(1),
@@ -539,6 +630,29 @@ mod tests {
     }
 
     #[test]
+    fn service_management_spawn_is_starting_until_xpcproxy_executes_the_host() {
+        let mut job = parse_job(
+            "gui/501/com.ty91.skyd = {\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tprogram identifier = Contents/MacOS/skyd (mode: 2)\n\tparent bundle identifier = com.jakdo.sky\n\tpid = 42\n}",
+        );
+        assert!(job.app_managed);
+        job.program = Some(PathBuf::from("/usr/libexec/xpcproxy"));
+        assert_eq!(
+            classify(Registration::Enabled, Some(&job), None),
+            HostState::Starting
+        );
+        job.program = Some(PathBuf::from("/Applications/Sky.app/Contents/MacOS/skyd"));
+        assert_eq!(
+            classify(Registration::Enabled, Some(&job), None),
+            HostState::ConnectionFailed
+        );
+        let failed = parse_job("gui/501/com.ty91.skyd = {\n\tlast exit code = 78: EX_CONFIG\n}");
+        assert_eq!(
+            classify(Registration::Enabled, Some(&failed), None),
+            HostState::StartupFailed
+        );
+    }
+
+    #[test]
     fn blocks_legacy_registration_other_bundles_and_unmanaged_sockets() {
         let directory = tempfile::tempdir_in("/tmp").unwrap();
         let home = directory.path().to_path_buf();
@@ -548,6 +662,7 @@ mod tests {
             sky_home: sky_home.clone(),
             executable: home.join("Sky.app/Contents/MacOS/skyd"),
             target: String::new(),
+            bundle_identifier: "com.jakdo.sky".into(),
             control: Control::new(&sky_home.join("run/skyd.sock")).unwrap(),
         };
         assert!(service.conflict(None).is_none());

@@ -4,6 +4,8 @@
 
 ## 상태 확인과 서비스 관리
 
+아래 CLI 명령은 CLI 설치의 LaunchAgent를 관리합니다. `Sky.app`에 등록한 호스트는 [앱의 로컬 서비스 제어](desktop.md#로컬-서비스-제어)를 사용합니다. 실행 중인 앱 서비스를 CLI로 변경하려 하면 `app_managed_service` 오류를 반환하며 자동 인계하지 않습니다.
+
 ```bash
 sky status
 sky service status

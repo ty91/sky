@@ -432,7 +432,8 @@ test('CLI lifecycle commands cannot take over an app-managed host', async () => 
   const state = {
     loaded: true,
     pid: null,
-    plistFile: '/Applications/Sky.app/Contents/Library/LaunchAgents/com.jakdo.sky.skyd.plist',
+    plistFile: '(submitted by smd.339)',
+    managedBy: 'com.apple.xpc.ServiceManagement',
     bootstrapCount: 0,
     bootoutCount: 0,
     kickstartCount: 0,

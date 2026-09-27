@@ -68,7 +68,7 @@ if (command === 'print') {
     process.stderr.write('Could not find service\n');
     process.exitCode = 113;
   } else {
-    process.stdout.write(`gui/test/com.ty91.skyd = {\n\tpath = ${state.plistFile}\n\tstate = running\n\tpid = ${state.pid}\n}\n`);
+    process.stdout.write(`gui/test/com.ty91.skyd = {\n\tpath = ${state.plistFile}\n\tmanaged_by = ${state.managedBy ?? ''}\n\tstate = running\n\tpid = ${state.pid}\n}\n`);
   }
 } else if (command === 'bootstrap') {
   await startDaemon(state, args[1]);
