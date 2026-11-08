@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import http from 'node:http';
@@ -139,7 +139,7 @@ test('relocated Sky.app runs its host and embedded admin without Node.js or Bun'
     assert.deepEqual(await readdir(home), []);
     assert.equal(child.exitCode, null, stderr);
   } finally {
-    execFileSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', installed], { stdio: 'ignore' });
+    spawnSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', installed], { stdio: 'ignore' });
     if (child && child.exitCode === null && child.signalCode === null) {
       const exit = once(child, 'exit');
       const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);
