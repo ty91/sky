@@ -159,7 +159,7 @@ async function main() {
   const stagedApp = path.join(output, 'Sky.app');
   run('/usr/bin/ditto', [defaultApp, stagedApp]);
   await signApp(stagedApp);
-  run('node', ['--test', path.join(root, 'test/desktop-bundle.smoke.mjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, SKY_DESKTOP_APP: stagedApp } });
+  run('node', ['--test', '--test-force-exit', path.join(root, 'test/desktop-bundle.smoke.mjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, SKY_DESKTOP_APP: stagedApp } });
   await notarize(stagedApp, output);
 }
 
