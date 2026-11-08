@@ -333,7 +333,7 @@ function createClaudeAdapterHarness() {
 function defineAgentSessionContract(name, createHarness) {
   test(`${name}: prompt resolves only after the turn completes`, async () => {
     const { factory, state } = createHarness();
-    const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+    const session = await factory({ conversation: { id: 'thread-1', links: [] }, agent: AGENT, cwd: '/tmp/workspace' });
 
     let settled = false;
     const prompt = session.prompt('hello').then(() => {
@@ -351,7 +351,7 @@ function defineAgentSessionContract(name, createHarness) {
 
   test(`${name}: subscribe receives text deltas in turn order while prompt is active`, async () => {
     const { factory, state } = createHarness();
-    const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+    const session = await factory({ conversation: { id: 'thread-1', links: [] }, agent: AGENT, cwd: '/tmp/workspace' });
     const deltas = [];
     session.subscribe((event) => {
       if (event.type === 'text_delta') {
@@ -375,7 +375,7 @@ function defineAgentSessionContract(name, createHarness) {
 
   test(`${name}: abort makes the active prompt return`, async () => {
     const { factory, state } = createHarness();
-    const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+    const session = await factory({ conversation: { id: 'thread-1', links: [] }, agent: AGENT, cwd: '/tmp/workspace' });
 
     const prompt = session.prompt('slow turn');
     await waitFor(() => state.activeTurn?.text === 'slow turn', `${name} abortable turn`);
@@ -390,7 +390,7 @@ function defineAgentSessionContract(name, createHarness) {
 
   test(`${name}: dispose makes the session unusable`, async () => {
     const { factory } = createHarness();
-    const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+    const session = await factory({ conversation: { id: 'thread-1', links: [] }, agent: AGENT, cwd: '/tmp/workspace' });
 
     session.dispose();
 
@@ -400,7 +400,7 @@ function defineAgentSessionContract(name, createHarness) {
   test(`${name}: resume preserves the provided session id`, async () => {
     const { factory, state } = createHarness();
     const session = await factory({
-      key: 'thread-1',
+      conversation: { id: 'thread-1', links: [] },
       agent: AGENT,
       cwd: '/tmp/workspace',
       resume: { sessionId: `${factory.backend}-existing`, resumeRef: '/tmp/existing.jsonl' },
@@ -423,7 +423,7 @@ defineAgentSessionContract('claude agent sdk adapter with fake backend', createC
 
 test('pi adapter maps assistant messages and run end to the common session contract', async () => {
   const { factory, state } = createPiAdapterHarness();
-  const session = await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+  const session = await factory({ conversation: { id: 'thread-1', links: [] }, agent: AGENT, cwd: '/tmp/workspace' });
   const events = [];
   session.subscribe((event) => events.push(event));
 
@@ -446,7 +446,7 @@ test('pi adapter maps assistant messages and run end to the common session contr
 test('pi adapter passes configured effort as thinking level', async () => {
   const { factory, state } = createPiAdapterHarness();
   await factory({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     agent: { ...AGENT, effort: 'high' },
     cwd: '/tmp/workspace',
   });
@@ -456,7 +456,7 @@ test('pi adapter passes configured effort as thinking level', async () => {
 
 test('pi adapter omits thinking level when effort is not configured', async () => {
   const { factory, state } = createPiAdapterHarness();
-  await factory({ key: 'thread-1', agent: AGENT, cwd: '/tmp/workspace' });
+  await factory({ conversation: { id: 'thread-1', links: [] }, agent: AGENT, cwd: '/tmp/workspace' });
 
   assert.equal(Object.hasOwn(state.createAgentSessionOptions, 'thinkingLevel'), false);
 });
@@ -496,7 +496,7 @@ async function runRealBackendSmoke(t, factory) {
 
   await withTempWorkspace(async (workspace) => {
     const session = await factory({
-      key: `manual-smoke-${factory.backend}-${Date.now()}`,
+      conversation: { id: `manual-smoke-${factory.backend}-${Date.now()}`, links: [] },
       cwd: process.env.SKY_AGENT_BACKEND_SMOKE_WORKSPACE ?? settings.workspace ?? workspace,
       agent: {
         name: 'manual-smoke',

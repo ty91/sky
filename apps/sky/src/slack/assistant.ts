@@ -1,7 +1,6 @@
 import { Assistant, type AssistantConfig } from '@slack/bolt';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import type { RuntimeController } from '../runtime/controller.js';
 import type { SkyHome } from '../sky-home.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
@@ -16,7 +15,6 @@ import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 export type SlackAssistantOptions = {
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
-  threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
   runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
   skyHome?: SkyHome;
@@ -28,7 +26,6 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
   const {
     conversationManager,
     mainAgent,
-    threadModelStore,
     userNameResolver,
     runtimeController,
     skyHome,
@@ -75,10 +72,9 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       // Chat commands are matched against the raw text, before attachment
       // lines and the `<@user>:` prefix are added.
       const handledCommand = await maybeHandleChatCommand({
-        threadId,
+        thread: { channelId, threadTs },
         rawText,
         conversationManager,
-        threadModelStore,
         reply: sender,
       });
       if (handledCommand) {
@@ -117,7 +113,7 @@ export function createSlackAssistantConfig(options: SlackAssistantOptions): Assi
       });
 
       await executeSlackTurn({
-        threadId,
+        thread: { channelId, threadTs },
         text: userText,
         conversationManager,
         mainAgent,

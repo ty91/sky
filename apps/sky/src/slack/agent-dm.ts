@@ -1,6 +1,5 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import type { RuntimeController } from '../runtime/controller.js';
 import type { SkyHome } from '../sky-home.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
@@ -39,7 +38,6 @@ export type SlackAgentDmHandlerOptions = {
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
   slack: SlackAgentDmClient;
-  threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
   runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
   skyHome?: SkyHome;
@@ -54,7 +52,6 @@ export function createSlackAgentDmHandler({
   conversationManager,
   mainAgent,
   slack,
-  threadModelStore,
   userNameResolver,
   runtimeController,
   skyHome,
@@ -93,10 +90,9 @@ export function createSlackAgentDmHandler({
       // Chat commands are matched against the raw text, before attachment
       // lines and the `<@user>:` prefix are added.
       const handledCommand = await maybeHandleChatCommand({
-        threadId,
+        thread: { channelId, threadTs },
         rawText,
         conversationManager,
-        threadModelStore,
         reply: sender,
       });
       if (handledCommand) {
@@ -134,7 +130,7 @@ export function createSlackAgentDmHandler({
       });
 
       await executeSlackTurn({
-        threadId,
+        thread: { channelId, threadTs },
         text: userText,
         conversationManager,
         mainAgent,

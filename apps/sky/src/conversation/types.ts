@@ -1,12 +1,31 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { AgentSessionFactory } from '../agents/backend/types.js';
 
+export type ConversationLink = {
+  provider: string;
+  externalId: string;
+};
+
+export type ConversationRecord = {
+  id: string;
+  model?: string;
+  links: ConversationLink[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type CreateConversationOptions = {
+  id?: string;
+  model?: string;
+  link?: ConversationLink;
+};
+
 export type ConversationHandle = {
   sessionId: string;
   sessionFile?: string;
 };
 
-export type PersistedConversation = {
+export type PersistedSession = {
   sessionId: string;
   backend: string;
   model: string;
@@ -15,28 +34,23 @@ export type PersistedConversation = {
   systemPrompt?: string;
 };
 
-export type ConversationSummary = PersistedConversation & {
-  key: string;
+export type ConversationSummary = PersistedSession & {
+  conversationId: string;
+  links: ConversationLink[];
   createdAt: number;
   updatedAt: number;
 };
 
-/**
- * Read side of the per-thread model override. Consulted on every turn so that
- * *all* entry points (Slack turns, scheduled reminders, post-restart triggers)
- * resolve to the same model for a given thread. Without this, a proactive turn
- * would run the default model, fail the `isConversationOwnedBy` check, and
- * silently fork a fresh session.
- */
-export interface ThreadModelReader {
-  get(key: string): string | undefined;
-}
-
 export interface ConversationStore {
-  get(key: string, backend: string): PersistedConversation | undefined;
-  list(backend: string): ConversationSummary[];
-  put(key: string, conversation: PersistedConversation): void;
-  remove(key: string, backend: string): void;
+  create(options?: CreateConversationOptions): ConversationRecord;
+  get(id: string): ConversationRecord | undefined;
+  findByLink(link: ConversationLink): ConversationRecord | undefined;
+  link(id: string, link: ConversationLink): void;
+  setModel(id: string, model: string): void;
+  getSession(id: string, backend: string): PersistedSession | undefined;
+  putSession(id: string, session: PersistedSession): void;
+  removeSession(id: string, backend: string): void;
+  listSessions(backend: string): ConversationSummary[];
   close(): void;
 }
 
@@ -57,32 +71,26 @@ export type ConversationManagerOptions = {
   defaultCwd: string;
   createSession?: AgentSessionFactory;
   store?: ConversationStore;
-  /** Optional per-thread model override, applied to every agent config. */
-  threadModelStore?: ThreadModelReader;
 };
 
 export type ConversationManager = {
+  create(options?: CreateConversationOptions): string;
+  get(id: string): ConversationRecord | undefined;
+  find(link: ConversationLink): string | undefined;
+  ensure(link: ConversationLink): string;
+  link(id: string, link: ConversationLink): void;
+  setModel(id: string, model: string): void;
   runTurn(
-    key: string,
+    id: string,
     agent: AgentConfig,
     text: string,
     options?: ConversationTurnOptions,
   ): Promise<ConversationTurnResult>;
-  has(key: string, agent?: AgentConfig): boolean;
-  getHandle(key: string, agent?: AgentConfig): ConversationHandle | undefined;
-  /**
-   * Move an existing conversation from `oldKey` to `newKey` without touching the
-   * underlying backend session (history lives in the backend, keyed by
-   * `sessionId`/`resumeRef`). Only the in-memory index and the persisted store
-   * pointer are relocated. Intended to be called while the conversation is idle
-   * (no active or pending turn), e.g. right after a proactive scheduler turn so
-   * the user's reply thread resumes the same session. No-op when `oldKey` has no
-   * session or when the keys are equal.
-   */
-  rekey(oldKey: string, newKey: string): void;
+  has(id: string, agent?: AgentConfig): boolean;
+  getHandle(id: string, agent?: AgentConfig): ConversationHandle | undefined;
   activeWorkCount(): number;
   list(): Promise<ConversationSummary[]>;
-  close(key: string): Promise<void>;
-  purge(key: string): Promise<boolean>;
+  close(id: string): Promise<void>;
+  purge(id: string): Promise<boolean>;
   closeAll(): Promise<void>;
 };

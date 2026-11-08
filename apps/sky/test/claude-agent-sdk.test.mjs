@@ -138,7 +138,7 @@ test('claude agent sdk resolves and passes a standalone executable only when a q
 
   assert.equal(resolverCalls, 0);
   const session = await createSession({
-    key: 'thread-standalone',
+    conversation: { id: 'thread-standalone', links: [] },
     cwd: '/tmp/workspace',
     agent: { name: 'main', systemPrompt: 'system' },
   });
@@ -165,7 +165,7 @@ test('claude agent sdk factory fails fast without an OAuth token', async () => {
   await assert.rejects(
     () =>
       createSession({
-        key: 'thread-1',
+        conversation: { id: 'thread-1', links: [] },
         agent: { name: 'main', systemPrompt: 'system' },
         cwd: '/tmp/workspace',
       }),
@@ -212,7 +212,7 @@ test('claude agent sdk reports bounded startup stalls without exposing prompt or
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-stall',
+    conversation: { id: 'thread-stall', links: [] },
     cwd: '/tmp/workspace',
     agent: {
       name: 'main',
@@ -291,7 +291,7 @@ test('claude agent sdk session streams text and passes isolated per-turn query o
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: workspace,
     agent: {
       name: 'main',
@@ -399,7 +399,7 @@ test('claude agent sdk session passes configured effort', async () => {
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     agent: {
       name: 'main',
@@ -433,7 +433,7 @@ test('claude agent sdk session freezes the loaded system prompt for the session'
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     agent: {
       name: 'main',
@@ -477,7 +477,7 @@ test('claude agent sdk session resumes with the stored system prompt snapshot', 
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     resume: { sessionId: 'claude-session-existing', systemPrompt: 'stored prompt' },
     agent: {
@@ -522,7 +522,7 @@ test('claude agent sdk resumed legacy session falls back without reloading promp
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     resume: { sessionId: 'claude-session-existing' },
     agent: {
@@ -568,7 +568,7 @@ test('claude agent sdk abort interrupts the active query and swallows the sdk di
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     agent: {
       name: 'main',
@@ -617,7 +617,7 @@ test('claude agent sdk dispose closes an active query without starting an async 
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     agent: {
       name: 'main',
@@ -644,7 +644,7 @@ test('claude agent sdk rejects non-anthropic model prefixes clearly', async () =
   });
   const createSession = createClaudeAgentSdkSessionFactory(deps);
   const session = await createSession({
-    key: 'thread-1',
+    conversation: { id: 'thread-1', links: [] },
     cwd: '/tmp/workspace',
     agent: {
       name: 'main',

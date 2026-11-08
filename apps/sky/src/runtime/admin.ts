@@ -1,8 +1,10 @@
 import type { ConversationManager, ConversationSummary } from '../conversation/manager.js';
 import type { ScheduledJob, ScheduledJobStore } from '../scheduler/types.js';
+import { SLACK_THREAD_LINK_PROVIDER } from '../slack/thread-id.js';
 
 export type RuntimeSessionSummary = {
-  threadKey: string;
+  conversationId: string;
+  threadKey: string | null;
   backendSessionId: string;
   backend: string;
   model: string;
@@ -29,6 +31,8 @@ export type RuntimeScheduledJobCancelResult =
   | { ok: false; reason: 'not_found' }
   | { ok: false; reason: 'status_conflict'; status: ScheduledJob['status'] };
 
+export type RuntimeSessionTarget = { threadKey: string } | { conversationId: string };
+
 export type RuntimeSessionsSnapshot = {
   sessions: RuntimeSessionSummary[];
 };
@@ -39,14 +43,16 @@ export type RuntimeScheduledJobsSnapshot = {
 
 export type RuntimeAdmin = {
   listSessions(): Promise<RuntimeSessionSummary[]>;
-  resetSession(threadKey: string): Promise<{ reset: boolean }>;
+  resetSession(target: RuntimeSessionTarget): Promise<{ reset: boolean }>;
   listScheduledJobs(): RuntimeScheduledJobSummary[];
   cancelScheduledJob(jobId: string): RuntimeScheduledJobCancelResult;
 };
 
 function toSessionSummary(conversation: ConversationSummary): RuntimeSessionSummary {
   return {
-    threadKey: conversation.key,
+    conversationId: conversation.conversationId,
+    threadKey:
+      conversation.links.find((link) => link.provider === SLACK_THREAD_LINK_PROVIDER)?.externalId ?? null,
     backendSessionId: conversation.sessionId,
     backend: conversation.backend,
     model: conversation.model,
@@ -84,8 +90,12 @@ export function createRuntimeAdmin(
       return (await conversationManager.list()).map(toSessionSummary);
     },
 
-    async resetSession(threadKey) {
-      return { reset: await conversationManager.purge(threadKey) };
+    async resetSession(target) {
+      const conversationId = 'threadKey' in target
+        ? conversationManager.find({ provider: SLACK_THREAD_LINK_PROVIDER, externalId: target.threadKey })
+        : conversationManager.get(target.conversationId)?.id;
+      if (conversationId === undefined) return { reset: false };
+      return { reset: await conversationManager.purge(conversationId) };
     },
 
     listScheduledJobs() {

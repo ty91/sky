@@ -33,14 +33,19 @@ test(`a daemon with ${partial ? 'partial' : 'no'} Slack configuration accepts in
     assert.equal(status.runtime.state, 'ready');
     assert.equal(status.slack.state, 'not_configured');
     assert.equal((await getConfiguration(skyHome.socketFile)).complete, true);
-    const first = await daemon.runTurn('local-conversation', 'hello');
+    const conversationId = daemon.createConversation();
+    assert.deepEqual(daemon.getConversation(conversationId)?.links, []);
+    assert.equal((await daemon.runTurn('never-created', 'hello')).kind, 'error');
+    const first = await daemon.runTurn(conversationId, 'hello');
     assert.equal(first.kind, 'ok');
     assert.equal(first.text, '1:');
-    const second = await daemon.runTurn('local-conversation', 'continue');
+    const second = await daemon.runTurn(conversationId, 'continue');
     assert.equal(second.text, '2:');
     assert.equal(second.handle.sessionId, first.handle.sessionId);
     const sessions = await daemon.control.execute({ type: 'sessions.list' });
     assert.equal(sessions.sessions[0].backendSessionId, first.handle.sessionId);
+    assert.equal(sessions.sessions[0].conversationId, conversationId);
+    assert.equal(sessions.sessions[0].threadKey, null);
   } finally {
     await daemon.close();
     await rm(rootDir, { recursive: true, force: true });
@@ -72,18 +77,19 @@ test('Slack authentication retries and socket reconnection preserve an active co
     const retrying = await waitFor(skyHome.socketFile, ({ slack: connection }) => connection.state === 'retrying');
     assert.equal(retrying.runtime.state, 'ready');
     assert.ok(retrying.slack.nextRetryAt);
-    assert.equal((await daemon.runTurn('local', 'first')).text, '1:');
+    const local = daemon.createConversation();
+    assert.equal((await daemon.runTurn(local, 'first')).text, '1:');
     available = true;
     await waitFor(skyHome.socketFile, ({ slack: connection }) => connection.state === 'connected');
-    assert.equal((await daemon.runTurn('local', 'second')).text, '2:');
+    assert.equal((await daemon.runTurn(local, 'second')).text, '2:');
     available = false;
     slack.disconnect();
     assert.equal((await getDaemonStatus(skyHome.socketFile)).runtime.state, 'ready');
     assert.equal((await getDaemonStatus(skyHome.socketFile)).slack.state, 'retrying');
-    assert.equal((await daemon.runTurn('local', 'third')).text, '3:');
+    assert.equal((await daemon.runTurn(local, 'third')).text, '3:');
     available = true;
     await waitFor(skyHome.socketFile, ({ slack: connection }) => connection.state === 'connected');
-    assert.equal((await daemon.runTurn('local', 'fourth')).text, '4:');
+    assert.equal((await daemon.runTurn(local, 'fourth')).text, '4:');
     const { readFile } = await import('node:fs/promises');
     const logs = await readFile(skyHome.logFile, 'utf8');
     assert.doesNotMatch(logs, /xoxb-private-test/);
@@ -116,7 +122,7 @@ test('draining cancels a stalled Slack startup while allowing the active interna
   });
   try {
     await waitFor(skyHome.socketFile, ({ runtime }) => runtime.state === 'ready');
-    const turn = daemon.runTurn('local', 'finish before stop');
+    const turn = daemon.runTurn(daemon.createConversation(), 'finish before stop');
     await promptStarted;
     const closing = daemon.close();
     const draining = await getDaemonStatus(skyHome.socketFile);

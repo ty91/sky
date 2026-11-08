@@ -1,7 +1,7 @@
 import type { AgentConfig } from '../agents/types.js';
-import type { ConversationManager } from '../conversation/manager.js';
+import type { ConversationLink, ConversationManager } from '../conversation/manager.js';
 import { runProactiveAgentTurn } from '../conversation/proactive-turn.js';
-import type { ScheduledJob } from './types.js';
+import type { ClaimedScheduledJob, ScheduledJob } from './types.js';
 
 export class ScheduledDeliveryError extends Error {
   constructor(cause: unknown) {
@@ -13,13 +13,13 @@ export class ScheduledDeliveryError extends Error {
 export type ScheduledJobDelivery = {
   isAvailable(job: ScheduledJob): boolean;
   agent(job: ScheduledJob): AgentConfig;
-  send(job: ScheduledJob, text: string): Promise<string | undefined>;
+  send(job: ScheduledJob, text: string): Promise<ConversationLink | undefined>;
   notifyFailure(job: ScheduledJob, error: Error, attempts: number): Promise<void>;
 };
 
 export type ScheduledJobDispatcher = {
   isAvailable(job: ScheduledJob): boolean;
-  dispatch(job: ScheduledJob): Promise<void>;
+  dispatch(job: ClaimedScheduledJob): Promise<void>;
   notifyFailure(job: ScheduledJob, error: Error, attempts: number): Promise<void>;
 };
 
@@ -37,23 +37,23 @@ function buildScheduledJobNotice(job: ScheduledJob): string {
 }
 
 export function createScheduledJobDispatcher(options: {
-  conversationManager: Pick<ConversationManager, 'runTurn' | 'rekey'>;
+  conversationManager: Pick<ConversationManager, 'create' | 'link' | 'runTurn'>;
   delivery: ScheduledJobDelivery;
 }): ScheduledJobDispatcher {
   const { delivery, conversationManager } = options;
   return {
     isAvailable: (job) => delivery.isAvailable(job),
     async dispatch(job) {
-      const sessionKey = `scheduled:${job.id}`;
-      let deliveredKey: string | undefined;
+      const conversationId = conversationManager.create({ id: job.run.conversationId });
+      let deliveredLink: ConversationLink | undefined;
       const result = await runProactiveAgentTurn({
         conversationManager,
         mainAgent: delivery.agent(job),
-        sessionKey,
+        conversationId,
         prompt: buildScheduledJobNotice(job),
         deliverFinal: async (text) => {
           try {
-            deliveredKey = await delivery.send(job, text);
+            deliveredLink = await delivery.send(job, text);
           } catch (error) {
             throw new ScheduledDeliveryError(error);
           }
@@ -63,7 +63,7 @@ export function createScheduledJobDispatcher(options: {
         throw new Error(`Scheduled reminder ${job.id} agent turn was interrupted.`);
       }
       if (result.kind === 'error') throw result.error;
-      if (deliveredKey) conversationManager.rekey(sessionKey, deliveredKey);
+      if (deliveredLink) conversationManager.link(conversationId, deliveredLink);
     },
     async notifyFailure(job, error, attempts) {
       if (delivery.isAvailable(job)) await delivery.notifyFailure(job, error, attempts);

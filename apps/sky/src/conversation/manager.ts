@@ -1,6 +1,7 @@
 import { createDefaultAgentSessionFactory } from '../agents/backend/index.js';
 import type { AgentBackend, AgentSession } from '../agents/backend/types.js';
 import type { AgentConfig } from '../agents/types.js';
+import { createInMemoryConversationStore, UnknownConversationError } from './store.js';
 import type {
   ConversationHandle,
   ConversationManager,
@@ -8,20 +9,21 @@ import type {
   ConversationSummary,
   ConversationTurnOptions,
   ConversationTurnResult,
-  PersistedConversation,
-  ThreadModelReader,
+  PersistedSession,
 } from './types.js';
 
 export type {
   ConversationHandle,
+  ConversationLink,
   ConversationManager,
   ConversationManagerOptions,
+  ConversationRecord,
   ConversationStore,
   ConversationTurnOptions,
   ConversationTurnResult,
-  PersistedConversation,
+  CreateConversationOptions,
+  PersistedSession,
   ConversationSummary,
-  ThreadModelReader,
 } from './types.js';
 
 type Deferred<T> = {
@@ -36,7 +38,7 @@ type PendingTurn = {
 };
 
 type ConversationEntry = {
-  key: string;
+  id: string;
   backend: string;
   agentName: string;
   model: string;
@@ -77,15 +79,10 @@ function resolveAgentModel(agent: AgentConfig): string {
 }
 
 /**
- * Applies a per-thread model override. Returns the same object when there is
+ * Applies a per-conversation model override. Returns the same object when there is
  * nothing to change so identity-based comparisons in tests stay stable.
  */
-function withThreadModel(
-  agent: AgentConfig,
-  threadModelStore: ThreadModelReader | undefined,
-  key: string,
-): AgentConfig {
-  const model = threadModelStore?.get(key);
+function withConversationModel(agent: AgentConfig, model: string | undefined): AgentConfig {
   if (!model || model === agent.model) {
     return agent;
   }
@@ -93,7 +90,7 @@ function withThreadModel(
 }
 
 function isConversationOwnedBy(
-  conversation: PersistedConversation,
+  conversation: PersistedSession,
   agent: AgentConfig | undefined,
   agentBackend: AgentBackend,
 ): boolean {
@@ -114,14 +111,14 @@ function toHandle(session: AgentSession): ConversationHandle {
   };
 }
 
-function toPersistedHandle(conversation: PersistedConversation): ConversationHandle {
+function toPersistedHandle(conversation: PersistedSession): ConversationHandle {
   return {
     sessionId: conversation.sessionId,
     ...(conversation.resumeRef !== undefined ? { sessionFile: conversation.resumeRef } : {}),
   };
 }
 
-function toResume(conversation: PersistedConversation): {
+function toResume(conversation: PersistedSession): {
   sessionId: string;
   resumeRef?: string;
   systemPrompt?: string;
@@ -249,24 +246,25 @@ async function runWorker(
   entry.workerRunning = false;
 
   if (entry.closed) {
-    sessions.delete(entry.key);
+    sessions.delete(entry.id);
   }
 }
 
 export function createConversationManager(options: ConversationManagerOptions): ConversationManager {
   const createSession = options.createSession ?? createDefaultAgentSessionFactory;
   const agentBackend = createSession.backend;
+  const store = options.store ?? createInMemoryConversationStore();
   const sessions = new Map<string, ConversationEntry>();
 
-  function resolveAgent<T extends AgentConfig | undefined>(key: string, agent: T): T {
-    return (agent ? (withThreadModel(agent, options.threadModelStore, key) as T) : agent);
+  function resolveAgent<T extends AgentConfig | undefined>(id: string, agent: T): T {
+    return (agent ? (withConversationModel(agent, store.get(id)?.model) as T) : agent);
   }
 
-  function getPersistedConversation(
-    key: string,
+  function getPersistedSession(
+    id: string,
     agent?: AgentConfig,
-  ): PersistedConversation | undefined {
-    const persisted = options.store?.get(key, agentBackend);
+  ): PersistedSession | undefined {
+    const persisted = store.getSession(id, agentBackend);
     if (!persisted || !isConversationOwnedBy(persisted, agent, agentBackend)) {
       return undefined;
     }
@@ -275,10 +273,10 @@ export function createConversationManager(options: ConversationManagerOptions): 
 
   function persistConversation(entry: ConversationEntry, session: AgentSession): void {
     const handle = toHandle(session);
-    if (!handle.sessionId || sessions.get(entry.key) !== entry) {
+    if (!handle.sessionId || sessions.get(entry.id) !== entry) {
       return;
     }
-    options.store?.put(entry.key, {
+    store.putSession(entry.id, {
       sessionId: handle.sessionId,
       backend: entry.backend,
       model: entry.model,
@@ -296,24 +294,52 @@ export function createConversationManager(options: ConversationManagerOptions): 
   }
 
   const manager: ConversationManager = {
-    async runTurn(key, rawAgent, text, turnOptions) {
-      // Resolved once per turn so Slack turns, scheduled reminders, and
-      // post-restart triggers all land on the thread's chosen model.
-      const agent = resolveAgent(key, rawAgent);
-      let entry = sessions.get(key);
+    create(createOptions) {
+      return store.create(createOptions).id;
+    },
+
+    get(id) {
+      return store.get(id);
+    },
+
+    find(link) {
+      return store.findByLink(link)?.id;
+    },
+
+    ensure(link) {
+      return store.findByLink(link)?.id ?? store.create({ link }).id;
+    },
+
+    link(id, link) {
+      store.link(id, link);
+    },
+
+    setModel(id, model) {
+      store.setModel(id, model);
+    },
+
+    async runTurn(id, rawAgent, text, turnOptions) {
+      let entry = sessions.get(id);
       if (!entry) {
+        const conversation = store.get(id);
+        if (!conversation) {
+          return { kind: 'error', error: new UnknownConversationError(id) };
+        }
+        // Resolved when the session opens so Slack turns, scheduled reminders,
+        // and post-restart triggers all land on the conversation's chosen model.
+        const agent = withConversationModel(rawAgent, conversation.model);
         const cwd = agent.cwd ?? options.defaultCwd;
-        const persisted = getPersistedConversation(key, agent);
+        const persisted = getPersistedSession(id, agent);
         const now = Date.now();
         entry = {
-          key,
+          id,
           backend: agentBackend,
           agentName: agent.name,
           model: resolveAgentModel(agent),
           createdAt: now,
           updatedAt: now,
           sessionPromise: createSession({
-            key,
+            conversation: { id, links: conversation.links },
             agent,
             cwd,
             ...(persisted ? { resume: toResume(persisted) } : {}),
@@ -329,7 +355,7 @@ export function createConversationManager(options: ConversationManagerOptions): 
           workerRunning: false,
           closed: false,
         };
-        sessions.set(key, entry);
+        sessions.set(id, entry);
       }
 
       const deferred = createDeferred<ConversationTurnResult>();
@@ -358,9 +384,9 @@ export function createConversationManager(options: ConversationManagerOptions): 
       return deferred.promise;
     },
 
-    has(key, rawAgent) {
-      const agent = resolveAgent(key, rawAgent);
-      const entry = sessions.get(key);
+    has(id, rawAgent) {
+      const agent = resolveAgent(id, rawAgent);
+      const entry = sessions.get(id);
       if (entry) {
         return (
           !agent ||
@@ -369,12 +395,12 @@ export function createConversationManager(options: ConversationManagerOptions): 
             entry.backend === agentBackend)
         );
       }
-      return getPersistedConversation(key, agent) !== undefined;
+      return getPersistedSession(id, agent) !== undefined;
     },
 
-    getHandle(key, rawAgent) {
-      const agent = resolveAgent(key, rawAgent);
-      const entry = sessions.get(key);
+    getHandle(id, rawAgent) {
+      const agent = resolveAgent(id, rawAgent);
+      const entry = sessions.get(id);
       if (entry) {
         if (
           agent &&
@@ -387,34 +413,8 @@ export function createConversationManager(options: ConversationManagerOptions): 
         return entry.handle;
       }
 
-      const persisted = getPersistedConversation(key, agent);
+      const persisted = getPersistedSession(id, agent);
       return persisted ? toPersistedHandle(persisted) : undefined;
-    },
-
-    rekey(oldKey, newKey) {
-      if (oldKey === newKey) {
-        return;
-      }
-
-      // Relocate the in-memory entry. The session state itself (backend handle,
-      // streaming subscription) rides along untouched — only its lookup key
-      // changes. Assumes the conversation is idle; an active/pending turn would
-      // still be resolved against the moved entry, but the scheduler only
-      // re-keys after its turn settles.
-      const entry = sessions.get(oldKey);
-      if (entry) {
-        entry.key = newKey;
-        sessions.delete(oldKey);
-        sessions.set(newKey, entry);
-      }
-
-      // Relocate the persisted pointer so a cold reply (after restart, with no
-      // in-memory entry) still resumes the same backend session.
-      const persisted = options.store?.get(oldKey, agentBackend);
-      if (persisted) {
-        options.store?.put(newKey, persisted);
-        options.store?.remove(oldKey, agentBackend);
-      }
     },
 
     activeWorkCount() {
@@ -429,8 +429,8 @@ export function createConversationManager(options: ConversationManagerOptions): 
 
     async list() {
       const persisted = new Map(
-        (options.store?.list(agentBackend) ?? []).map((conversation) => [
-          conversation.key,
+        store.listSessions(agentBackend).map((conversation) => [
+          conversation.conversationId,
           conversation,
         ]),
       );
@@ -440,10 +440,11 @@ export function createConversationManager(options: ConversationManagerOptions): 
         [...sessions.values()].map(async (entry) => {
           try {
             const session = await entry.sessionPromise;
-            const stored = persisted.get(entry.key);
-            if (entry.closed || sessions.get(entry.key) !== entry) return;
-            summaries.set(entry.key, {
-              key: entry.key,
+            const stored = persisted.get(entry.id);
+            if (entry.closed || sessions.get(entry.id) !== entry) return;
+            summaries.set(entry.id, {
+              conversationId: entry.id,
+              links: stored?.links ?? store.get(entry.id)?.links ?? [],
               sessionId: session.sessionId,
               backend: entry.backend,
               model: entry.model,
@@ -459,18 +460,19 @@ export function createConversationManager(options: ConversationManagerOptions): 
 
       // oxlint-disable-next-line unicorn/no-array-sort -- this sorts a fresh array copy.
       return [...summaries.values()].sort(
-        (left, right) => right.updatedAt - left.updatedAt || left.key.localeCompare(right.key),
+        (left, right) =>
+          right.updatedAt - left.updatedAt || left.conversationId.localeCompare(right.conversationId),
       );
     },
 
-    async close(key) {
-      const entry = sessions.get(key);
+    async close(id) {
+      const entry = sessions.get(id);
       if (!entry) {
         return;
       }
 
       entry.closed = true;
-      sessions.delete(key);
+      sessions.delete(id);
       if (entry.pending) {
         entry.pending.deferred.resolve({ kind: 'interrupted' });
         entry.pending = undefined;
@@ -491,17 +493,17 @@ export function createConversationManager(options: ConversationManagerOptions): 
       }
     },
 
-    async purge(key) {
-      const existed = sessions.has(key) || getPersistedConversation(key) !== undefined;
-      const closing = manager.close(key);
-      options.store?.remove(key, agentBackend);
+    async purge(id) {
+      const existed = sessions.has(id) || getPersistedSession(id) !== undefined;
+      const closing = manager.close(id);
+      store.removeSession(id, agentBackend);
       await closing;
       return existed;
     },
 
     async closeAll() {
-      const keys = [...sessions.keys()];
-      await Promise.all(keys.map((key) => manager.close(key)));
+      const ids = [...sessions.keys()];
+      await Promise.all(ids.map((id) => manager.close(id)));
     },
   };
 

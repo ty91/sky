@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSlackAgentDmHandler, isAgentRootDmMessage } from '../dist/slack/agent-dm.js';
+import { createRecordingConversations } from './helpers/conversations.mjs';
 
 const MAIN_AGENT = {
   name: 'main',
@@ -48,50 +49,10 @@ function createSlackClient() {
   };
 }
 
-function createConversationManagerMock({ reply = '응답' } = {}) {
-  const calls = {
-    runTurn: [],
-  };
-
-  return {
-    calls,
-    manager: {
-      runTurn: async (key, agent, text, options) => {
-        calls.runTurn.push({ agent, key, text });
-        if (reply && options?.onTextDelta) {
-          await options.onTextDelta(reply);
-        }
-        return {
-          kind: 'ok',
-          text: reply,
-          messages: reply ? [reply] : [],
-          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
-        };
-      },
-      has: () => false,
-    },
-  };
-}
-
-function createThreadModelStoreMock(initial = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    data,
-    store: {
-      get: (key) => data.get(key),
-      set: (key, model) => data.set(key, model),
-      remove: (key) => data.delete(key),
-      close: () => {},
-    },
-  };
-}
-
 function createHandler() {
   const slack = createSlackClient();
-  const conversations = createConversationManagerMock();
-  const models = createThreadModelStoreMock();
+  const conversations = createRecordingConversations();
   const handler = createSlackAgentDmHandler({
-    threadModelStore: models.store,
     botUserId: 'U999',
     mainAgent: MAIN_AGENT,
     conversationManager: conversations.manager,
@@ -101,7 +62,7 @@ function createHandler() {
     },
   });
 
-  return { conversations, handler, models, slack };
+  return { conversations, handler, slack };
 }
 
 test('agent DM handler starts a thread from a root DM and replies in that thread', async () => {
@@ -211,7 +172,7 @@ test('isAgentRootDmMessage accepts root file_share DMs', () => {
 });
 
 test('agent DM handler answers chat commands without running a turn', async () => {
-  const { conversations, handler, models, slack } = createHandler();
+  const { conversations, handler, slack } = createHandler();
 
   const handled = await handler.handleMessage({
     message: {
@@ -232,7 +193,7 @@ test('agent DM handler answers chat commands without running a turn', async () =
       thread_ts: '1777901000.000000',
     },
   ]);
-  assert.equal(models.data.get('D123:1777901000.000000'), 'anthropic/claude-opus-5');
+  assert.equal(conversations.modelOf('D123:1777901000.000000'), 'anthropic/claude-opus-5');
 
   const unknown = await handler.handleMessage({
     message: {

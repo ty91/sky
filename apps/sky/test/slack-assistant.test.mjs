@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_SUGGESTED_PROMPTS, createSlackAssistantConfig } from '../dist/slack/assistant.js';
 import { SLACK_TURN_ERROR_REPLY } from '../dist/slack/turn.js';
+import { createRecordingConversations } from './helpers/conversations.mjs';
 
 const MAIN_AGENT = {
   name: 'main',
@@ -28,34 +29,16 @@ function createMessage({
   };
 }
 
-function createConversationManagerMock(overrides = {}) {
-  return {
-    runTurn: async () => ({
+function createConversationManagerMock({ runTurn, ...overrides } = {}) {
+  const conversations = createRecordingConversations({
+    runTurn: runTurn ?? (async () => ({
       kind: 'ok',
       text: 'unused',
       messages: ['unused'],
       handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
-    }),
-    has: () => false,
-    getHandle: () => undefined,
-    close: async () => {},
-    purge: async () => {},
-    closeAll: async () => {},
-    ...overrides,
-  };
-}
-
-function createThreadModelStoreMock(initial = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    data,
-    store: {
-      get: (key) => data.get(key),
-      set: (key, model) => data.set(key, model),
-      remove: (key) => data.delete(key),
-      close: () => {},
-    },
-  };
+    })),
+  });
+  return { ...conversations.manager, ...overrides };
 }
 
 function createReactionsClient() {
@@ -84,7 +67,6 @@ test('threadStarted sends greeting, prompts, and saves thread context', async ()
     saves: 0,
   };
   const config = createSlackAssistantConfig({
-    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock(),
   });
@@ -114,7 +96,6 @@ test('threadStarted sends greeting, prompts, and saves thread context', async ()
 
 test('threadContextChanged saves thread context', async () => {
   const config = createSlackAssistantConfig({
-    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock(),
   });
@@ -134,7 +115,6 @@ test('userMessage rejects empty text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
-    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock({
       runTurn: async () => {
@@ -166,7 +146,6 @@ test('userMessage runs one Pi conversation turn with the Slack thread key', asyn
   const runTurnCalls = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
-    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     userNameResolver: {
       getDisplayName: async () => '태영',
@@ -206,7 +185,6 @@ test('userMessage includes downloaded file attachments in the final prompt', asy
   const runTurnCalls = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
-    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     userNameResolver: {
       getDisplayName: async () => '태영',
@@ -259,7 +237,6 @@ test('userMessage sends common turn error reply text', async () => {
   const replies = [];
   const reactions = createReactionsClient();
   const config = createSlackAssistantConfig({
-    threadModelStore: createThreadModelStoreMock().store,
     mainAgent: MAIN_AGENT,
     conversationManager: createConversationManagerMock({
       runTurn: async () => ({ kind: 'error', error: new Error('boom') }),

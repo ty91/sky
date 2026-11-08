@@ -4,7 +4,6 @@ import { resolveAgentSessionFactory } from './agents/backend/index.js';
 import { createMainAgentConfig } from './agents/main.js';
 import { createConversationManager, type ConversationManager } from './conversation/manager.js';
 import { openConversationStore } from './conversation/store.js';
-import { openThreadModelStore } from './conversation/thread-model-store.js';
 import type { RuntimeController } from './runtime/controller.js';
 import { createRuntimeAdmin, type RuntimeAdmin } from './runtime/admin.js';
 import { createSlackScheduledDispatcher } from './slack/scheduled.js';
@@ -18,7 +17,12 @@ import type { ScheduledJobStore } from './scheduler/types.js';
 import { startSlackApp, stopSlackApp, type SlackSdk } from './slack/app.js';
 import { createSlackAgentConfig } from './slack/agent.js';
 import type { AgentSessionFactory } from './agents/backend/types.js';
-import type { ConversationTurnOptions, ConversationTurnResult } from './conversation/types.js';
+import type {
+  ConversationRecord,
+  ConversationTurnOptions,
+  ConversationTurnResult,
+  CreateConversationOptions,
+} from './conversation/types.js';
 import type { DaemonStatus } from './skyd/types.js';
 import { computeBackoffMs, sleep, type BackoffOptions } from './runtime/retry.js';
 import { createSlackFileUploaderProvider } from './slack/files.js';
@@ -28,7 +32,9 @@ import type { ClaudeQueryDiagnostics } from './agents/backend/claude-observabili
 
 export type BotRuntime = {
   admin: RuntimeAdmin;
-  runTurn(key: string, text: string, options?: ConversationTurnOptions): Promise<ConversationTurnResult>;
+  createConversation(options?: CreateConversationOptions): string;
+  getConversation(id: string): ConversationRecord | undefined;
+  runTurn(conversationId: string, text: string, options?: ConversationTurnOptions): Promise<ConversationTurnResult>;
   close(): Promise<void>;
 };
 
@@ -112,12 +118,10 @@ export async function startBotRuntime(
   });
 
   const conversationStore = openConversationStore(skyHome);
-  const threadModelStore = openThreadModelStore(skyHome);
 
   const conversationManager: ConversationManager = createConversationManager({
     defaultCwd: settings.workspace,
     store: conversationStore,
-    threadModelStore,
     createSession,
   });
 
@@ -159,7 +163,6 @@ export async function startBotRuntime(
           appToken: settings.slack.appToken,
           conversationManager,
           mainAgent: slackAgent,
-          threadModelStore,
           runtimeController,
           skyHome,
           sdk: runtimeOptions.slackSdk,
@@ -193,11 +196,17 @@ export async function startBotRuntime(
   let closePromise: Promise<void> | undefined;
   return {
     admin: createRuntimeAdmin(conversationManager, scheduledJobStore),
-    async runTurn(key, text, options) {
+    createConversation(options) {
+      return conversationManager.create(options);
+    },
+    getConversation(id) {
+      return conversationManager.get(id);
+    },
+    async runTurn(conversationId, text, options) {
       const lease = runtimeController.lease('agent_turn');
       if (!lease) return { kind: 'interrupted' };
       try {
-        return await conversationManager.runTurn(key, mainAgent, text, options);
+        return await conversationManager.runTurn(conversationId, mainAgent, text, options);
       } finally {
         lease.release();
       }
@@ -211,7 +220,6 @@ export async function startBotRuntime(
         await schedulerStopped;
         if (slackApp) await stopSlackApp(slackApp);
         conversationStore.close();
-        threadModelStore.close();
         if (!sharedScheduledJobStore) scheduledJobStore.close();
       })();
       return closePromise;

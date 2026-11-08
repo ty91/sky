@@ -10,9 +10,9 @@ import {
 } from '../../sky-home.js';
 
 /** Byte offset per transcript file (relative path from transcripts dir). */
-type CursorMap = Record<string, number>;
+export type CursorMap = Record<string, number>;
 
-function loadCursors(skyHome: SkyHome): CursorMap {
+export function loadCursors(skyHome: SkyHome): CursorMap {
   try {
     ensurePrivateFile(skyHome.memoryCursorFile);
     return JSON.parse(readFileSync(skyHome.memoryCursorFile, 'utf8'));
@@ -21,7 +21,7 @@ function loadCursors(skyHome: SkyHome): CursorMap {
   }
 }
 
-function saveCursors(cursors: CursorMap, skyHome: SkyHome): void {
+export function saveCursors(cursors: CursorMap, skyHome: SkyHome): void {
   ensurePrivateDirectory(skyHome.rootDir);
   ensurePrivateFile(skyHome.memoryCursorFile);
   writeFileSync(skyHome.memoryCursorFile, JSON.stringify(cursors, null, 2), {

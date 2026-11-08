@@ -1,6 +1,5 @@
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import type { RuntimeController } from '../runtime/controller.js';
 import type { SkyHome } from '../sky-home.js';
 import { createStatusIndicator, type AssistantStatusClient } from './activity-indicator.js';
@@ -8,7 +7,7 @@ import { maybeHandleChatCommand, stripLeadingMentionLabel } from './commands.js'
 import { normalizeSlackMessage, type SlackChannelMessageEvent } from './messages.js';
 import { SlackSender } from './sender.js';
 import { prependSlackThreadHistoryToPrompt, type SlackThreadMessage } from './thread-history.js';
-import { toThreadId } from './thread-id.js';
+import { slackThreadLink } from './thread-id.js';
 import { executeSlackTurn, SLACK_DRAINING_REPLY } from './turn.js';
 import { prefixSlackUserMessage, type SlackUserNameResolver } from './users.js';
 
@@ -39,7 +38,6 @@ export type SlackChannelHandlerOptions = {
   mainAgent: AgentConfig;
   mentionLabel?: string;
   slack: SlackChannelClient;
-  threadModelStore: ThreadModelStore;
   userNameResolver?: SlackUserNameResolver;
   runtimeController?: Pick<RuntimeController, 'isAccepting' | 'lease'>;
   skyHome?: SkyHome;
@@ -55,7 +53,6 @@ export function createSlackChannelHandler({
   mainAgent,
   mentionLabel = '@sky',
   slack,
-  threadModelStore,
   userNameResolver,
   runtimeController,
   skyHome,
@@ -70,8 +67,9 @@ export function createSlackChannelHandler({
         return;
       }
 
-      const threadId = toThreadId(channelId, threadTs);
-      const existingThread = conversationManager.has(threadId, mainAgent);
+      const conversationId = conversationManager.find(slackThreadLink(channelId, threadTs));
+      const existingThread =
+        conversationId !== undefined && conversationManager.has(conversationId, mainAgent);
       const normalized = normalizeSlackMessage({
         allowUnmentionedChannelMessage: existingThread,
         botUserId,
@@ -101,10 +99,9 @@ export function createSlackChannelHandler({
       // Chat commands are matched against the mention-stripped text, before the
       // `<@user>:` prefix and any thread history are added.
       const handledCommand = await maybeHandleChatCommand({
-        threadId,
+        thread: { channelId, threadTs },
         rawText: stripLeadingMentionLabel(normalized.text, mentionLabel),
         conversationManager,
-        threadModelStore,
         reply: sender,
       });
       if (handledCommand) {
@@ -132,7 +129,7 @@ export function createSlackChannelHandler({
       });
 
       await executeSlackTurn({
-        threadId,
+        thread: { channelId, threadTs },
         text,
         conversationManager,
         mainAgent,

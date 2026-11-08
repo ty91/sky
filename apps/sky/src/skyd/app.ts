@@ -12,7 +12,13 @@ import {
   type SupervisionMode,
 } from '../runtime/controller.js';
 import type { BackoffOptions } from '../runtime/retry.js';
-import type { ConversationTurnOptions, ConversationTurnResult } from '../conversation/types.js';
+import { prepareConversationStorage } from '../conversation/storage-migration.js';
+import type {
+  ConversationRecord,
+  ConversationTurnOptions,
+  ConversationTurnResult,
+  CreateConversationOptions,
+} from '../conversation/types.js';
 import type { Settings } from '../settings.js';
 import {
   createSkyHome,
@@ -151,7 +157,9 @@ export type Skyd = {
   control: DaemonControl;
   status(): DaemonStatus;
   finished: Promise<void>;
-  runTurn(key: string, text: string, options?: ConversationTurnOptions): Promise<ConversationTurnResult>;
+  createConversation(options?: CreateConversationOptions): string;
+  getConversation(id: string): ConversationRecord | undefined;
+  runTurn(conversationId: string, text: string, options?: ConversationTurnOptions): Promise<ConversationTurnResult>;
   close(): Promise<void>;
 };
 
@@ -176,6 +184,7 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
   const paths =
     options.skyHome ?? createSkyHome({ rootDir: options.rootDir, homeDir: options.homeDir });
   prepareSkyHome(paths);
+  prepareConversationStorage(paths);
   const instanceId = randomUUID();
   const logger = createJsonlLogger(paths.logFile, {
     ...options.logger,
@@ -548,9 +557,17 @@ export async function startSkyd(options: StartSkydOptions = {}): Promise<Skyd> {
     control,
     status,
     finished: lifecycleTask,
-    async runTurn(key, text, turnOptions) {
+    createConversation(conversationOptions) {
+      if (!runtime || status().runtime.state !== 'ready') throw new Error('Sky runtime is not ready.');
+      return runtime.createConversation(conversationOptions);
+    },
+    getConversation(id) {
+      if (!runtime || status().runtime.state !== 'ready') throw new Error('Sky runtime is not ready.');
+      return runtime.getConversation(id);
+    },
+    async runTurn(conversationId, text, turnOptions) {
       if (!runtime || status().runtime.state !== 'ready') return { kind: 'interrupted' };
-      return runtime.runTurn(key, text, turnOptions);
+      return runtime.runTurn(conversationId, text, turnOptions);
     },
     close() {
       runtimeController.requestStop();

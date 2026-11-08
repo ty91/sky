@@ -7,7 +7,7 @@ import type {
 export type ProactiveAgentTurnOptions = {
   conversationManager: Pick<ConversationManager, 'runTurn'>;
   mainAgent: AgentConfig;
-  sessionKey: string;
+  conversationId: string;
   prompt: string;
   deliverFinal(text: string): Promise<void>;
 };
@@ -17,7 +17,7 @@ export async function runProactiveAgentTurn(
 ): Promise<ConversationTurnResult> {
   let finalDelivered = false;
   const result = await options.conversationManager.runTurn(
-    options.sessionKey,
+    options.conversationId,
     options.mainAgent,
     options.prompt,
     {

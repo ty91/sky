@@ -79,7 +79,7 @@ export type ControlExecuteRequest =
   | { type: 'overview' }
   | { type: 'system.get' }
   | { type: 'sessions.list' }
-  | { type: 'session.reset'; threadKey: string }
+  | { type: 'session.reset'; threadKey?: string; conversationId?: string }
   | { type: 'scheduler.jobs.list' }
   | { type: 'scheduler.job.cancel'; jobId: string }
   | { type: 'admin.login.issue' }
@@ -373,8 +373,12 @@ export function createDaemonControl(dependencies: ControlDependencies): DaemonCo
           case 'sessions.list':
             return asResult<Request>({ sessions: await runtimeAdmin().listSessions() });
           case 'session.reset':
-            if (!request.threadKey) throw new ControlError('invalid_request');
-            return asResult<Request>(await runtimeAdmin().resetSession(request.threadKey));
+            if (Boolean(request.threadKey) === Boolean(request.conversationId)) {
+              throw new ControlError('invalid_request');
+            }
+            return asResult<Request>(await runtimeAdmin().resetSession(
+              request.threadKey ? { threadKey: request.threadKey } : { conversationId: request.conversationId! },
+            ));
           case 'scheduler.jobs.list':
             return asResult<Request>({ jobs: runtimeAdmin().listScheduledJobs() });
           case 'scheduler.job.cancel': {

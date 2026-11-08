@@ -36,7 +36,7 @@ Slack 연결 검사는 bot token의 granted scope를 `auth.test` 응답으로 �
 - Slack agent Messages 탭에서는 루트 DM을 보내면 해당 메시지의 Slack thread로 새 backend session이 시작됩니다.
 - 같은 Slack thread에 이어서 메시지를 보내면 같은 backend session으로 이어집니다.
 - public/private 채널에서는 루트 메시지 또는 thread reply에서 Sky를 멘션하면 해당 Slack thread에 답변합니다.
-- Conversation이 Sky home의 `sky.db`에 저장된 채널 thread는 멘션 없는 후속 reply도 같은 session으로 처리합니다.
+- 현재 backend session이 있는 채널 thread는 멘션 없는 후속 reply도 같은 session으로 처리합니다. `!model`만 설정한 thread는 해당하지 않습니다.
 - 채널 thread에서 처음 Sky를 멘션한 요청에는 해당 멘션 이전의 Slack thread history가 함께 전달됩니다.
 
 ### 채팅 명령어
@@ -53,4 +53,4 @@ Slack 연결 검사는 bot token의 granted scope를 `auth.test` 응답으로 �
 - 채널에서는 멘션이 필요하므로 `@sky !model fable` 형태로 보냅니다.
 - 알 수 없는 명령어(`!foo`)는 에이전트로 전달되지 않고 usage 안내로 응답합니다.
 
-Thread별 모델 설정은 저장되므로 재시작 이후의 예약 리마인더와 후속 턴에도 적용됩니다. 대화 중 리마인더의 예약·조회·취소를 요청할 수 있으며, 장애 시 동작은 [예약 리마인더 운영](operations.md#예약-리마인더)을 참고하세요.
+Thread별 모델 설정은 해당 thread의 대화에 저장되므로 재시작 이후의 예약 리마인더와 후속 턴에도 적용됩니다. 대화 중 리마인더의 예약·조회·취소를 요청할 수 있으며, 장애 시 동작은 [예약 리마인더 운영](operations.md#예약-리마인더)을 참고하세요.

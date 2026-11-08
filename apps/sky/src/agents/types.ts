@@ -1,12 +1,14 @@
+import type { ConversationLink } from '../conversation/types.js';
 import type { AgentToolSpec } from './backend/types.js';
 import type { AgentEffort } from './effort.js';
 
 /**
  * Context handed to per-session tool factories when a session opens. Lets
- * bound tools know which Slack thread they're acting on.
+ * bound tools know which conversation and external links they're acting on.
  */
 export type McpFactoryContext = {
-  sessionKey: string;
+  conversationId: string;
+  links: readonly ConversationLink[];
 };
 
 export type AgentToolSpecFactory = (ctx: McpFactoryContext) => AgentToolSpec[];

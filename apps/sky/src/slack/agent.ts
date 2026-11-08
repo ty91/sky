@@ -4,6 +4,7 @@ import { createScheduledToolSpecs, SCHEDULE_REMINDER_TOOL_NAME, LIST_SCHEDULED_T
 import type { AgentToolSpec } from '../agents/backend/types.js';
 import type { ScheduledJobStore } from '../scheduler/types.js';
 import type { SlackFileUploader } from './files.js';
+import { readSlackThreadLink } from './thread-id.js';
 
 export type SlackAgentOptions = MainAgentConfigOptions & {
   slackFileUploaderProvider?: () => SlackFileUploader | undefined;
@@ -20,13 +21,10 @@ export function createSlackAgentConfig(options: SlackAgentOptions) {
       ...(options.slackFileUploaderProvider ? [SLACK_ATTACH_FILES_TOOL_NAME] : []),
       ...(options.scheduledJobStore ? [SCHEDULE_REMINDER_TOOL_NAME, LIST_SCHEDULED_TOOL_NAME, CANCEL_SCHEDULED_TOOL_NAME] : []),
     ],
-    customToolsFactory: ({ sessionKey }) => {
-      const separator = sessionKey.indexOf(':');
-      const target = options.target ?? {
-        channelId: separator < 0 ? '' : sessionKey.slice(0, separator),
-        threadTs: separator < 0 ? '' : sessionKey.slice(separator + 1),
-      };
+    customToolsFactory: ({ links }) => {
+      const target = options.target ?? readSlackThreadLink(links);
       const tools: AgentToolSpec[] = [];
+      if (!target) return tools;
       if (target.channelId && target.threadTs && options.slackFileUploaderProvider) {
         tools.push(createSlackAttachFilesToolSpec(
           { channelId: target.channelId, threadTs: target.threadTs },

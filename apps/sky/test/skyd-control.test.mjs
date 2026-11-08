@@ -1567,3 +1567,27 @@ test('log history and streams use cursors across rotation and process instances'
     }
   });
 });
+
+test('session reset accepts exactly one of a Slack thread key or a conversation id', async () => {
+  const { createDaemonControl } = await import('../dist/skyd/control.js');
+  const targets = [];
+  const control = createDaemonControl({
+    getStatus: () => ({}),
+    getRuntimeAdmin: () => ({
+      resetSession: async (target) => {
+        targets.push(target);
+        return { reset: true };
+      },
+    }),
+  });
+
+  assert.deepEqual(await control.execute({ type: 'session.reset', threadKey: 'D123:1.2' }), { reset: true });
+  assert.deepEqual(await control.execute({ type: 'session.reset', conversationId: 'conversation-1' }), { reset: true });
+  for (const request of [
+    { type: 'session.reset' },
+    { type: 'session.reset', threadKey: 'D123:1.2', conversationId: 'conversation-1' },
+  ]) {
+    await assert.rejects(control.execute(request), (error) => error.code === 'invalid_request');
+  }
+  assert.deepEqual(targets, [{ threadKey: 'D123:1.2' }, { conversationId: 'conversation-1' }]);
+});

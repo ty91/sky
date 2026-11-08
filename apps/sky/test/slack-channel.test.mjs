@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isPublicOrPrivateChannelMessage } from '../dist/slack/app.js';
 import { createSlackChannelHandler } from '../dist/slack/channel.js';
+import { createRecordingConversations } from './helpers/conversations.mjs';
 import { createSlackChannelIngress } from '../dist/slack/channel-ingress.js';
 import { normalizeSlackMessage } from '../dist/slack/messages.js';
 import {
@@ -63,54 +64,11 @@ function createSlackClient({ history = [], historyError } = {}) {
   };
 }
 
-function createConversationManagerMock({ has = false, runTurnResult, reply = '응답' } = {}) {
-  const calls = {
-    has: [],
-    runTurn: [],
-  };
-
-  return {
-    calls,
-    manager: {
-      runTurn: async (key, agent, text, options) => {
-        calls.runTurn.push({ agent, key, text });
-        if (reply && options?.onTextDelta) {
-          await options.onTextDelta(reply);
-        }
-        return runTurnResult ?? {
-          kind: 'ok',
-          text: reply,
-          messages: reply ? [reply] : [],
-          handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
-        };
-      },
-      has: (key, agent) => {
-        calls.has.push({ agent, key });
-        return has;
-      },
-    },
-  };
-}
-
-function createThreadModelStoreMock(initial = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    data,
-    store: {
-      get: (key) => data.get(key),
-      set: (key, model) => data.set(key, model),
-      remove: (key) => data.delete(key),
-      close: () => {},
-    },
-  };
-}
-
 function createHandler({ has, history, historyError, sendResult, reply, userNames = { U123: '태영', U456: '하늘' } } = {}) {
   const slack = createSlackClient({ history, historyError });
-  const conversations = createConversationManagerMock({ has, reply, runTurnResult: sendResult });
-  const models = createThreadModelStoreMock();
+  const conversations = createRecordingConversations({ reply, runTurnResult: sendResult });
+  if (has) conversations.startThread('C123:1777900000.000000', MAIN_AGENT);
   const handler = createSlackChannelHandler({
-    threadModelStore: models.store,
     botUserId: 'U999',
     mainAgent: MAIN_AGENT,
     conversationManager: conversations.manager,
@@ -120,7 +78,7 @@ function createHandler({ has, history, historyError, sendResult, reply, userName
     },
   });
 
-  return { conversations, handler, models, slack };
+  return { conversations, handler, slack };
 }
 
 test('normalizeSlackMessage replaces bot mentions with a readable label', () => {
@@ -313,7 +271,7 @@ test('channel handler starts root mention conversations and replies in the root 
     },
   });
 
-  assert.deepEqual(conversations.calls.has.map((call) => call.key), ['C123:1777901000.000000']);
+  assert.ok(conversations.store.findByLink({ provider: 'slack', externalId: 'C123:1777901000.000000' }));
   assert.deepEqual(conversations.calls.runTurn.map((call) => call.text), ['태영(<@U123>): @sky 작업 상태 알려줘']);
   assert.deepEqual(slack.calls.posts, [
     { channel: 'C123', text: '응답', thread_ts: '1777901000.000000' },
@@ -325,19 +283,9 @@ test('channel handler starts root mention conversations and replies in the root 
 
 test('channel ingress processes duplicate app_mention and message mention events once without hand reaction', async () => {
   const slack = createSlackClient();
-  const calls = {
-    has: [],
-    runTurn: [],
-  };
-  const conversationManager = {
-    has: (key, agent) => {
-      calls.has.push({ agent, key });
-      return false;
-    },
-    runTurn: async (key, agent, text, options) => {
-      calls.runTurn.push({ agent, key, text });
-
-      if (calls.runTurn.length > 1) {
+  const conversations = createRecordingConversations({
+    runTurn: async (_key, _agent, _text, options) => {
+      if (conversations.calls.runTurn.length > 1) {
         return { kind: 'interrupted' };
       }
 
@@ -349,11 +297,11 @@ test('channel ingress processes duplicate app_mention and message mention events
         handle: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session-1.jsonl' },
       };
     },
-  };
+  });
+  const { calls } = conversations;
   const channelHandler = createSlackChannelHandler({
-    threadModelStore: createThreadModelStoreMock().store,
     botUserId: 'U999',
-    conversationManager,
+    conversationManager: conversations.manager,
     mainAgent: MAIN_AGENT,
     slack: slack.client,
   });
@@ -434,6 +382,32 @@ test('channel handler accepts unmentioned follow-ups only for existing conversat
   assert.deepEqual(missing.slack.calls.reactions, []);
 });
 
+test('channel handler ignores unmentioned follow-ups in a thread that only has a !model setting', async () => {
+  const { conversations, handler, slack } = createHandler();
+
+  await handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '<@U999> !model fable',
+      ts: '1777900000.000000',
+      user: 'U123',
+    },
+  });
+  await handler.handleMessage({
+    event: {
+      channel: 'C123',
+      text: '멘션 없이 이어서',
+      thread_ts: '1777900000.000000',
+      ts: '1777901100.000000',
+      user: 'U123',
+    },
+  });
+
+  assert.equal(conversations.modelOf('C123:1777900000.000000'), 'anthropic/claude-fable-5');
+  assert.deepEqual(conversations.calls.runTurn, []);
+  assert.deepEqual(slack.calls.posts.map((post) => post.text), ['모델이 claude-fable-5로 설정되었습니다.']);
+});
+
 test('channel handler prepends history only for new conversations and falls back on history errors', async () => {
   const history = [
     { text: '이전에 논의한 내용', ts: '1777900000.000000', user: 'U123' },
@@ -479,7 +453,7 @@ test('channel handler prepends history only for new conversations and falls back
 });
 
 test('channel handler answers a !model command without running a turn', async () => {
-  const { conversations, handler, models, slack } = createHandler();
+  const { conversations, handler, slack } = createHandler();
 
   await handler.handleMessage({
     event: {
@@ -498,7 +472,7 @@ test('channel handler answers a !model command without running a turn', async ()
       thread_ts: '1777901000.000000',
     },
   ]);
-  assert.equal(models.data.get('C123:1777901000.000000'), 'anthropic/claude-fable-5');
+  assert.equal(conversations.modelOf('C123:1777901000.000000'), 'anthropic/claude-fable-5');
   // No thread history fetch either — commands never reach the agent path.
   assert.deepEqual(slack.calls.fetches, []);
 });

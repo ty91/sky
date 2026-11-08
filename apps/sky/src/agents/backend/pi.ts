@@ -210,7 +210,7 @@ export function createPiSessionFactoryWithDeps(
   deps: PiBackendDeps = DEFAULT_PI_BACKEND_DEPS,
 ): AgentSessionFactory {
   return Object.assign(
-    async ({ key, agent, cwd, resume }: CreateAgentSessionOptions): Promise<AgentSession> => {
+    async ({ conversation, agent, cwd, resume }: CreateAgentSessionOptions): Promise<AgentSession> => {
       const agentDir = deps.getAgentDir();
       const modelRuntime = await deps.ModelRuntime.create({
         authPath: path.join(agentDir, 'auth.json'),
@@ -224,7 +224,7 @@ export function createPiSessionFactoryWithDeps(
         noContextFiles: true,
       });
       await resourceLoader.reload();
-      const customTools = agent.customToolsFactory?.({ sessionKey: key }).map(toPiToolDefinition);
+      const customTools = agent.customToolsFactory?.({ conversationId: conversation.id, links: conversation.links }).map(toPiToolDefinition);
       const { session } = await deps.createAgentSession({
         cwd,
         agentDir,

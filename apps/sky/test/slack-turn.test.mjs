@@ -46,6 +46,20 @@ function createReplyAdapter() {
   };
 }
 
+function conversationIdFor(link) {
+  return `conversation-${link.externalId.replace(/[^0-9]/g, '')}`;
+}
+
+function withConversations(manager, ensured = []) {
+  return {
+    ensure: (link) => {
+      ensured.push(link);
+      return conversationIdFor(link);
+    },
+    ...manager,
+  };
+}
+
 test.after(() => {
   fs.rmSync(homeDir, { recursive: true, force: true });
 });
@@ -56,15 +70,16 @@ test('executeSlackTurn rejects new ingress during drain without creating a turn 
   const replies = createReplyAdapter();
   const indicator = createIndicator();
   let runTurnCalled = false;
+  const ensured = [];
 
   await executeSlackTurn({
-    threadId: 'C123:draining',
+    thread: { channelId: 'C123', threadTs: 'draining' },
     text: '새 요청',
-    conversationManager: {
+    conversationManager: withConversations({
       runTurn: async () => {
         runTurnCalled = true;
       },
-    },
+    }, ensured),
     mainAgent: MAIN_AGENT,
     indicator: indicator.indicator,
     reply: replies.adapter,
@@ -72,6 +87,7 @@ test('executeSlackTurn rejects new ingress during drain without creating a turn 
   });
 
   assert.equal(runTurnCalled, false);
+  assert.deepEqual(ensured, []);
   assert.deepEqual(indicator.events, []);
   assert.deepEqual(replies.replies, [SLACK_DRAINING_REPLY]);
 });
@@ -88,9 +104,9 @@ test('restart drain keeps the calling Slack turn active through final delivery',
   });
 
   const turn = executeSlackTurn({
-    threadId: 'C123:restart',
+    thread: { channelId: 'C123', threadTs: 'restart' },
     text: '재시작해줘',
-    conversationManager: {
+    conversationManager: withConversations({
       runTurn: async (_key, _agent, _text, options) => {
         assert.equal(runtimeController.requestRestart().ok, true);
         await options.onFinal('재시작할게요.');
@@ -101,7 +117,7 @@ test('restart drain keeps the calling Slack turn active through final delivery',
           handle: { sessionId: 'restart-session' },
         };
       },
-    },
+    }),
     mainAgent: MAIN_AGENT,
     indicator: createIndicator().indicator,
     reply: {
@@ -133,7 +149,8 @@ test('executeSlackTurn delivers only the final message and records every assista
   const indicator = createIndicator();
   const replies = createReplyAdapter();
   const runTurnCalls = [];
-  const conversationManager = {
+  const ensured = [];
+  const conversationManager = withConversations({
     runTurn: async (key, agent, text, options) => {
       runTurnCalls.push({
         key,
@@ -154,7 +171,7 @@ test('executeSlackTurn delivers only the final message and records every assista
         handle: { sessionId: 'pi-session-turn', sessionFile: '/tmp/pi-session-turn.jsonl' },
       };
     },
-  };
+  }, ensured);
 
   await executeSlackTurn({
     conversationManager,
@@ -162,12 +179,13 @@ test('executeSlackTurn delivers only the final message and records every assista
     indicator: indicator.indicator,
     reply: replies.adapter,
     text: '작업 상태 알려줘',
-    threadId: 'C123:1777901000.000000',
+    thread: { channelId: 'C123', threadTs: '1777901000.000000' },
   });
 
+  assert.deepEqual(ensured, [{ provider: 'slack', externalId: 'C123:1777901000.000000' }]);
   assert.deepEqual(runTurnCalls, [
     {
-      key: 'C123:1777901000.000000',
+      key: 'conversation-1231777901000000000',
       agent: MAIN_AGENT,
       text: '작업 상태 알려줘',
       hasMessageCallback: true,
@@ -185,7 +203,7 @@ test('executeSlackTurn delivers only the final message and records every assista
   ]);
 
   const transcript = fs.readFileSync(
-    path.join(homeDir, '.sky', 'transcripts', 'C123:1777901000.000000', 'pi-session-turn.md'),
+    path.join(homeDir, '.sky', 'transcripts', 'conversation-1231777901000000000', 'pi-session-turn.md'),
     'utf8',
   );
   assert.match(transcript, /### user/);
@@ -207,7 +225,7 @@ test('executeSlackTurn logs interim messages as a truncated preview but not the 
   };
 
   try {
-    const conversationManager = {
+    const conversationManager = withConversations({
       runTurn: async (_key, _agent, _text, options) => {
         await options.onMessage(longInterim);
         await options.onMessage('short interim');
@@ -220,7 +238,7 @@ test('executeSlackTurn logs interim messages as a truncated preview but not the 
           handle: { sessionId: 'pi-session-log', sessionFile: '/tmp/pi-session-log.jsonl' },
         };
       },
-    };
+    });
 
     await executeSlackTurn({
       conversationManager,
@@ -228,7 +246,7 @@ test('executeSlackTurn logs interim messages as a truncated preview but not the 
       indicator: indicator.indicator,
       reply: replies.adapter,
       text: '중간 메시지 로깅',
-      threadId: 'C123:1777901000.000003',
+      thread: { channelId: 'C123', threadTs: '1777901000.000003' },
     });
   } finally {
     console.log = originalLog;
@@ -249,14 +267,14 @@ test('executeSlackTurn logs interim messages as a truncated preview but not the 
 test('executeSlackTurn falls back to result.text when no final callback fires', async () => {
   const indicator = createIndicator();
   const replies = createReplyAdapter();
-  const conversationManager = {
+  const conversationManager = withConversations({
     runTurn: async () => ({
       kind: 'ok',
       text: 'fallback final',
       messages: ['fallback final'],
       handle: { sessionId: 'pi-session-fallback', sessionFile: '/tmp/pi-session-fallback.jsonl' },
     }),
-  };
+  });
 
   await executeSlackTurn({
     conversationManager,
@@ -264,7 +282,7 @@ test('executeSlackTurn falls back to result.text when no final callback fires', 
     indicator: indicator.indicator,
     reply: replies.adapter,
     text: '최종만 알려줘',
-    threadId: 'C123:1777901000.000002',
+    thread: { channelId: 'C123', threadTs: '1777901000.000002' },
   });
 
   assert.deepEqual(replies.replies, ['fallback final']);
@@ -274,9 +292,9 @@ test('executeSlackTurn falls back to result.text when no final callback fires', 
 test('executeSlackTurn marks interrupted turns without sending a reply', async () => {
   const indicator = createIndicator();
   const replies = createReplyAdapter();
-  const conversationManager = {
+  const conversationManager = withConversations({
     runTurn: async () => ({ kind: 'interrupted' }),
-  };
+  });
 
   await executeSlackTurn({
     conversationManager,
@@ -284,7 +302,7 @@ test('executeSlackTurn marks interrupted turns without sending a reply', async (
     indicator: indicator.indicator,
     reply: replies.adapter,
     text: '중단될 작업',
-    threadId: 'C123:1777901001.000000',
+    thread: { channelId: 'C123', threadTs: '1777901001.000000' },
   });
 
   assert.deepEqual(replies.replies, []);
@@ -302,12 +320,12 @@ test('executeSlackTurn sends the common error reply for error results and thrown
     const replies = createReplyAdapter();
 
     await executeSlackTurn({
-      conversationManager: { runTurn },
+      conversationManager: withConversations({ runTurn }),
       mainAgent: MAIN_AGENT,
       indicator: indicator.indicator,
       reply: replies.adapter,
       text: '실패할 작업',
-      threadId: 'C123:1777901002.000000',
+      thread: { channelId: 'C123', threadTs: '1777901002.000000' },
     });
 
     assert.deepEqual(replies.replies, [SLACK_TURN_ERROR_REPLY]);

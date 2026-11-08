@@ -3,12 +3,12 @@ import type { ConversationManager } from '../conversation/manager.js';
 import { withTimeout } from '../runtime/retry.js';
 import { createScheduledJobDispatcher } from '../scheduler/dispatcher.js';
 import type { ScheduledJob } from '../scheduler/types.js';
-import { toThreadId } from './thread-id.js';
+import { slackThreadLink } from './thread-id.js';
 
 export type ScheduledSlackMessage = { channel: string; text: string };
 
 export function createSlackScheduledDispatcher(options: {
-  conversationManager: Pick<ConversationManager, 'runTurn' | 'rekey'>;
+  conversationManager: Pick<ConversationManager, 'create' | 'link' | 'runTurn'>;
   mainAgent: AgentConfig | ((job: ScheduledJob) => AgentConfig);
   postMessage(message: ScheduledSlackMessage): Promise<unknown>;
   isAvailable?: () => boolean;
@@ -27,7 +27,7 @@ export function createSlackScheduledDispatcher(options: {
           'Slack scheduled reminder send',
         );
         const ts = response && typeof response === 'object' && 'ts' in response ? response.ts : undefined;
-        return typeof ts === 'string' && ts.length > 0 ? toThreadId(job.targetChannel, ts) : undefined;
+        return typeof ts === 'string' && ts.length > 0 ? slackThreadLink(job.targetChannel, ts) : undefined;
       },
       async notifyFailure(job, error, attempts) {
         await withTimeout(

@@ -2,7 +2,6 @@ import { App, SocketModeReceiver } from '@slack/bolt';
 import { withTimeout } from '../runtime/retry.js';
 import type { AgentConfig } from '../agents/types.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import type { ThreadModelStore } from '../conversation/thread-model-store.js';
 import type { RuntimeController } from '../runtime/controller.js';
 import type { SkyHome } from '../sky-home.js';
 import {
@@ -39,7 +38,6 @@ export type SlackAppOptions = {
   appToken: string;
   conversationManager: ConversationManager;
   mainAgent: AgentConfig;
-  threadModelStore: ThreadModelStore;
   runtimeController: Pick<RuntimeController, 'isAccepting' | 'lease'>;
   skyHome: SkyHome;
 };
@@ -77,7 +75,6 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
     const assistant = createSlackAssistant({
       conversationManager: options.conversationManager,
       mainAgent: options.mainAgent,
-      threadModelStore: options.threadModelStore,
       userNameResolver,
       runtimeController: options.runtimeController,
       skyHome: options.skyHome,
@@ -91,7 +88,6 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
       botUserId,
       conversationManager: options.conversationManager,
       mainAgent: options.mainAgent,
-      threadModelStore: options.threadModelStore,
       slack: {
         assistant: {
           threads: {
@@ -120,7 +116,6 @@ export async function startSlackApp(options: SlackAppOptions): Promise<App> {
       botUserId,
       conversationManager: options.conversationManager,
       mainAgent: options.mainAgent,
-      threadModelStore: options.threadModelStore,
       slack: {
         assistant: {
           threads: {

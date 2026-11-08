@@ -1,6 +1,6 @@
 import { MODEL_ALIAS_NAMES, resolveModelAlias, toModelDisplayName } from '../agents/models.js';
 import type { ConversationManager } from '../conversation/manager.js';
-import type { ThreadModelStore } from '../conversation/thread-model-store.js';
+import { slackThreadLink, toThreadId, type SlackThread } from './thread-id.js';
 import type { SlackTurnReplyAdapter } from './turn.js';
 
 export const CHAT_COMMAND_PREFIX = '!';
@@ -62,10 +62,9 @@ export function formatModelSetReply(model: string): string {
 }
 
 export type ChatCommandContext = {
-  threadId: string;
+  thread: SlackThread;
   rawText: string;
-  conversationManager: Pick<ConversationManager, 'has'>;
-  threadModelStore: ThreadModelStore;
+  conversationManager: Pick<ConversationManager, 'ensure' | 'find' | 'get' | 'has' | 'setModel'>;
   reply: SlackTurnReplyAdapter;
 };
 
@@ -81,7 +80,7 @@ export async function maybeHandleChatCommand(ctx: ChatCommandContext): Promise<b
     return false;
   }
 
-  console.log(`[slack] chat command in ${ctx.threadId}: ${JSON.stringify(command)}`);
+  console.log(`[slack] chat command in ${toThreadId(ctx.thread.channelId, ctx.thread.threadTs)}: ${JSON.stringify(command)}`);
 
   if (command.name === 'help') {
     await ctx.reply.sendReply(CHAT_COMMAND_USAGE);
@@ -111,14 +110,20 @@ async function handleModelCommand(ctx: ChatCommandContext, command: ChatCommand)
     return;
   }
 
-  // A thread's model is fixed once its conversation exists — the backend
-  // session cannot switch models mid-thread. `has` is called without an agent
-  // so any existing session locks the thread, whatever model it runs.
-  if (ctx.conversationManager.has(ctx.threadId) || ctx.threadModelStore.get(ctx.threadId)) {
+  // A thread's model is fixed once its conversation has a session or a model —
+  // the backend session cannot switch models mid-thread. `has` is called
+  // without an agent so any existing session locks the thread, whatever model
+  // it runs.
+  const link = slackThreadLink(ctx.thread.channelId, ctx.thread.threadTs);
+  const existing = ctx.conversationManager.find(link);
+  if (
+    existing !== undefined &&
+    (ctx.conversationManager.has(existing) || ctx.conversationManager.get(existing)?.model)
+  ) {
     await ctx.reply.sendReply(CHAT_COMMAND_MODEL_LOCKED_REPLY);
     return;
   }
 
-  ctx.threadModelStore.set(ctx.threadId, model);
+  ctx.conversationManager.setModel(existing ?? ctx.conversationManager.ensure(link), model);
   await ctx.reply.sendReply(formatModelSetReply(model));
 }

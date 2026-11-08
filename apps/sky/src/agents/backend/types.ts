@@ -1,3 +1,4 @@
+import type { ConversationLink } from '../../conversation/types.js';
 import type { AgentConfig } from '../types.js';
 import type { ZodRawShape } from 'zod';
 
@@ -23,7 +24,7 @@ export type AgentSession = {
 };
 
 export type CreateAgentSessionOptions = {
-  key: string;
+  conversation: { id: string; links: readonly ConversationLink[] };
   agent: AgentConfig;
   cwd: string;
   resume?: { sessionId: string; resumeRef?: string; systemPrompt?: string };

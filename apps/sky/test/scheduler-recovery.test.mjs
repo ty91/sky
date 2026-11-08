@@ -49,7 +49,7 @@ test('a daemon preserves overdue one-shot reminders across offline restarts and 
   const prompts = [];
   const slack = createSlackSdk({
     authenticate: async () => { if (!available) throw new Error('offline'); return { user_id: 'U_SKY' }; },
-    postMessage: async (message) => { posts.push(message); return { ts: '100.001' }; },
+    postMessage: async (message) => { posts.push(message); return { ts: `100.00${posts.length}` }; },
   });
   const options = {
     skyHome, configurationEnv: {}, backoff: { baseMs: 10, maxMs: 10, jitterRatio: 0 },

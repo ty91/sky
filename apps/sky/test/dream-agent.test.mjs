@@ -147,6 +147,7 @@ test('runDreamAgent uses yesterday by default and calls both steps', async () =>
 
     const calls = { runTurn: [], close: [] };
     const conversationManager = {
+      create: ({ id }) => id,
       runTurn: async (key, agent, text) => {
         calls.runTurn.push({ key, agent, text });
         return { kind: 'ok', text: `ok:${key}`, handle: { sessionId: `pi-${key}` } };
@@ -194,6 +195,7 @@ test('runDreamAgent preflight-deletes existing daily file before Step 1', async 
     assert.ok(fs.existsSync(targetFile));
 
     const conversationManager = {
+      create: ({ id }) => id,
       runTurn: async () => ({ kind: 'ok', text: 'ok', handle: { sessionId: 'pi-dream' } }),
       close: async () => {},
       closeAll: async () => {},
@@ -219,6 +221,7 @@ test('runDreamAgent marks quiet day when there are no entries', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dream-quiet-'));
   try {
     const conversationManager = {
+      create: ({ id }) => id,
       runTurn: async () => ({ kind: 'ok', text: 'ok', handle: { sessionId: 'pi-dream' } }),
       close: async () => {},
       closeAll: async () => {},
@@ -247,6 +250,7 @@ test('runDreamAgent respects onlyStep', async () => {
   try {
     const calls = { runTurn: [], close: [] };
     const conversationManager = {
+      create: ({ id }) => id,
       runTurn: async (key) => {
         calls.runTurn.push(key);
         return { kind: 'ok', text: `ok:${key}`, handle: { sessionId: `pi-${key}` } };

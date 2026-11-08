@@ -297,7 +297,7 @@ test('doctor inspects real SQLite database, WAL, and SHM artifacts', async () =>
   }
   const store = openConversationStore(home);
   try {
-    store.put('doctor-thread', {
+    store.putSession(store.create().id, {
       sessionId: 'doctor-session',
       backend: 'pi',
       model: 'anthropic/test-model',

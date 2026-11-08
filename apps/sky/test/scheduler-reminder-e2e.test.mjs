@@ -24,7 +24,7 @@ test('next Monday 09:00 KST reminder survives restart and initiates a Slack DM',
       schedulerIdFactory: () => 'international-license',
     });
     const scheduleReminder = registrationAgent
-      .customToolsFactory({ sessionKey: 'D123:1784330000.000000' })
+      .customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'D123:1784330000.000000' }] })
       .find((tool) => tool.name === 'schedule_reminder');
 
     const registration = await scheduleReminder.execute({

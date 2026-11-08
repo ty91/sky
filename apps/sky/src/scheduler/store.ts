@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { newConversationId } from '../conversation/store.js';
 import {
   createSkyHome,
   prepareSqliteDatabase,
@@ -6,9 +8,12 @@ import {
   type SkyHome,
 } from '../sky-home.js';
 import type {
+  ClaimedScheduledJob,
   NewScheduledJob,
   ScheduledJob,
   ScheduledJobFailureOutcome,
+  ScheduledJobRun,
+  ScheduledJobRunStatus,
   ScheduledJobStore,
 } from './types.js';
 
@@ -30,6 +35,19 @@ type ScheduledJobRow = {
   last_error: string | null;
 };
 
+type ScheduledJobRunRow = {
+  id: string;
+  job_id: string;
+  conversation_id: string;
+  scheduled_for: number;
+  status: ScheduledJobRunStatus;
+  attempts: number;
+  started_at: number;
+  updated_at: number;
+  finished_at: number | null;
+  last_error: string | null;
+};
+
 type StoreHandles = {
   db: DatabaseSync;
   createStmt: StatementSync;
@@ -42,6 +60,18 @@ type StoreHandles = {
   claimStmt: StatementSync;
   advancePendingCronStmt: StatementSync;
   failRunningBeforeStmt: StatementSync;
+  openRunStmt: StatementSync;
+  getRunStmt: StatementSync;
+  listRunsStmt: StatementSync;
+  insertRunStmt: StatementSync;
+  resumeRunStmt: StatementSync;
+  retryOpenRunStmt: StatementSync;
+  finishOpenRunStmt: StatementSync;
+};
+
+export type OpenScheduledJobStoreOptions = {
+  createRunId?: () => string;
+  createConversationId?: () => string;
 };
 
 function ensureSchema(db: DatabaseSync): void {
@@ -67,7 +97,36 @@ function ensureSchema(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx
       ON scheduled_jobs (status, next_run_at);
+    CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+      id              TEXT PRIMARY KEY,
+      job_id          TEXT NOT NULL REFERENCES scheduled_jobs (id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL UNIQUE,
+      scheduled_for   INTEGER NOT NULL,
+      status          TEXT NOT NULL CHECK (status IN ('running', 'retrying', 'succeeded', 'failed', 'cancelled')),
+      attempts        INTEGER NOT NULL,
+      started_at      INTEGER NOT NULL,
+      updated_at      INTEGER NOT NULL,
+      finished_at     INTEGER,
+      last_error      TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS scheduled_job_runs_open_idx
+      ON scheduled_job_runs (job_id) WHERE finished_at IS NULL;
   `);
+}
+
+function toScheduledJobRun(row: ScheduledJobRunRow): ScheduledJobRun {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    conversationId: row.conversation_id,
+    scheduledFor: row.scheduled_for,
+    status: row.status,
+    attempts: row.attempts,
+    startedAt: row.started_at,
+    updatedAt: row.updated_at,
+    finishedAt: row.finished_at,
+    lastError: row.last_error,
+  };
 }
 
 function toScheduledJob(row: ScheduledJobRow): ScheduledJob {
@@ -92,7 +151,10 @@ function toScheduledJob(row: ScheduledJobRow): ScheduledJob {
 
 export function openScheduledJobStore(
   location: string | SkyHome = createSkyHome(),
+  options: OpenScheduledJobStoreOptions = {},
 ): ScheduledJobStore {
+  const createRunId = options.createRunId ?? randomUUID;
+  const createConversationId = options.createConversationId ?? newConversationId;
   const dbPath = prepareSqliteDatabase(location);
 
   const db = new DatabaseSync(dbPath);
@@ -146,7 +208,56 @@ export function openScheduledJobStore(
       WHERE status = 'running' AND last_run_at < ?
       RETURNING *
     `),
+    openRunStmt: db.prepare(
+      'SELECT * FROM scheduled_job_runs WHERE job_id = ? AND finished_at IS NULL',
+    ),
+    getRunStmt: db.prepare('SELECT * FROM scheduled_job_runs WHERE id = ?'),
+    listRunsStmt: db.prepare(
+      'SELECT * FROM scheduled_job_runs WHERE job_id = ? ORDER BY started_at, id',
+    ),
+    insertRunStmt: db.prepare(`
+      INSERT INTO scheduled_job_runs (
+        id, job_id, conversation_id, scheduled_for, status, attempts,
+        started_at, updated_at, finished_at, last_error
+      ) VALUES (?, ?, ?, ?, 'running', 1, ?, ?, NULL, NULL)
+    `),
+    resumeRunStmt: db.prepare(`
+      UPDATE scheduled_job_runs
+      SET status = 'running', attempts = attempts + 1, updated_at = ?
+      WHERE id = ?
+    `),
+    retryOpenRunStmt: db.prepare(`
+      UPDATE scheduled_job_runs
+      SET status = 'retrying', last_error = ?, updated_at = ?
+      WHERE job_id = ? AND finished_at IS NULL
+    `),
+    finishOpenRunStmt: db.prepare(`
+      UPDATE scheduled_job_runs
+      SET status = ?, last_error = ?, updated_at = ?, finished_at = ?
+      WHERE job_id = ? AND finished_at IS NULL
+    `),
   };
+
+  function inTransaction<T>(work: () => T): T {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = work();
+      db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  function finishOpenRun(
+    jobId: string,
+    status: Exclude<ScheduledJobRunStatus, 'running' | 'retrying'>,
+    error: string | null,
+  ): void {
+    const now = Date.now();
+    handles.finishOpenRunStmt.run(status, error, now, now, jobId);
+  }
 
   return {
     create(job: NewScheduledJob): ScheduledJob {
@@ -184,15 +295,27 @@ export function openScheduledJobStore(
     },
 
     cancel(id: string): boolean {
-      return handles.cancelStmt.run(id).changes === 1;
+      return inTransaction(() => {
+        if (handles.cancelStmt.run(id).changes !== 1) return false;
+        finishOpenRun(id, 'cancelled', null);
+        return true;
+      });
     },
 
     rearmCron(id: string, nextRunAt: number, lastError: string | null = null): boolean {
-      return handles.rearmCronStmt.run(nextRunAt, lastError, id).changes === 1;
+      return inTransaction(() => {
+        if (handles.rearmCronStmt.run(nextRunAt, lastError, id).changes !== 1) return false;
+        finishOpenRun(id, lastError === null ? 'succeeded' : 'failed', lastError);
+        return true;
+      });
     },
 
     markDone(id: string): boolean {
-      return handles.markDoneStmt.run(id).changes === 1;
+      return inTransaction(() => {
+        if (handles.markDoneStmt.run(id).changes !== 1) return false;
+        finishOpenRun(id, 'succeeded', null);
+        return true;
+      });
     },
 
     recordFailure(
@@ -201,22 +324,46 @@ export function openScheduledJobStore(
       retryAt: number,
       maxAttempts: number,
     ): ScheduledJobFailureOutcome | undefined {
-      const row = handles.recordFailureStmt.get(
-        maxAttempts,
-        maxAttempts,
-        retryAt,
-        error,
-        id,
-      ) as { status: 'pending' | 'failed' } | undefined;
-      if (!row) {
-        return undefined;
-      }
-      return row.status === 'failed' ? 'failed' : 'retrying';
+      return inTransaction(() => {
+        const row = handles.recordFailureStmt.get(
+          maxAttempts,
+          maxAttempts,
+          retryAt,
+          error,
+          id,
+        ) as { status: 'pending' | 'failed' } | undefined;
+        if (!row) {
+          return undefined;
+        }
+        if (row.status === 'failed') {
+          finishOpenRun(id, 'failed', error);
+          return 'failed';
+        }
+        handles.retryOpenRunStmt.run(error, Date.now(), id);
+        return 'retrying';
+      });
     },
 
-    claim(id: string, now: number): ScheduledJob | undefined {
-      const row = handles.claimStmt.get(now, id, now) as ScheduledJobRow | undefined;
-      return row ? toScheduledJob(row) : undefined;
+    claim(id: string, now: number): ClaimedScheduledJob | undefined {
+      return inTransaction(() => {
+        const row = handles.claimStmt.get(now, id, now) as ScheduledJobRow | undefined;
+        if (!row) return undefined;
+        const open = handles.openRunStmt.get(id) as ScheduledJobRunRow | undefined;
+        let runId: string;
+        if (open) {
+          runId = open.id;
+          handles.resumeRunStmt.run(now, runId);
+        } else {
+          runId = createRunId();
+          handles.insertRunStmt.run(runId, id, createConversationId(), row.next_run_at, now, now);
+        }
+        const run = handles.getRunStmt.get(runId) as ScheduledJobRunRow;
+        return { ...toScheduledJob(row), run: toScheduledJobRun(run) };
+      });
+    },
+
+    listRuns(jobId: string): ScheduledJobRun[] {
+      return (handles.listRunsStmt.all(jobId) as ScheduledJobRunRow[]).map(toScheduledJobRun);
     },
 
     advancePendingCron(id: string, nextRunAt: number): boolean {
@@ -224,9 +371,11 @@ export function openScheduledJobStore(
     },
 
     failRunningBefore(before: number, error: string): ScheduledJob[] {
-      return (handles.failRunningBeforeStmt.all(error, before) as ScheduledJobRow[]).map(
-        toScheduledJob,
-      );
+      return inTransaction(() => {
+        const rows = handles.failRunningBeforeStmt.all(error, before) as ScheduledJobRow[];
+        for (const row of rows) finishOpenRun(row.id, 'failed', error);
+        return rows.map(toScheduledJob);
+      });
     },
 
     close(): void {

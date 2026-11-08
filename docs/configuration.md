@@ -78,7 +78,9 @@ Sky가 만드는 directory는 `0700`, settings·secret·DB와 WAL/SHM·cursor·t
 
 에이전트 작업 디렉터리는 설정한 workspace이며 기본값은 Sky home의 `workspace`입니다. Workspace의 `SOUL.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`를 조립해 새 대화의 system prompt로 사용합니다. `sky init`이 기본 workspace prompt를 준비합니다.
 
-Conversation 복원 정보는 Sky home의 `sky.db`에 저장됩니다. Backend를 바꾸어도 기존 대화 기록을 삭제하지 않으며, 이전 backend로 돌아오면 해당 backend의 대화를 복원할 수 있습니다.
+대화는 Sky가 발급한 대화 ID로 식별하며, Slack 스레드는 대화에 연결된 외부 식별자입니다. 대화와 연결, backend별 세션 복원 정보는 Sky home의 `sky.db`에 저장됩니다. Backend를 바꾸어도 기존 대화의 세션 정보를 삭제하지 않으며, 이전 backend로 돌아오면 해당 backend의 세션을 복원합니다. 같은 backend에서 모델이 바뀌면 그 대화는 새 세션으로 시작합니다.
+
+Memory 입력으로 쓰는 transcript는 `transcripts/<대화 ID>/<session ID>.md`에 기록됩니다. 대화 스키마가 바뀌는 업데이트는 데몬 시작 시 DB와 transcript 디렉터리를 함께 전환하며, 전환된 Sky home은 이전 버전으로 되돌려 실행할 수 없습니다. 식별 모델과 전환 방식의 근거는 [ADR-0015](adr/0015-identify-conversations-by-sky-id.md)를 참고하세요.
 
 | 항목 | pi | claude-agent-sdk |
 | --- | --- | --- |

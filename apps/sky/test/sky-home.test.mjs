@@ -287,7 +287,8 @@ test('SQLite, transcript, and cursor writers preserve private files at their rea
     prepareSkyHome(home);
     const store = openConversationStore(home);
     try {
-      store.put('thread-1', {
+      const conversation = store.create();
+      store.putSession(conversation.id, {
         sessionId: 'session-1',
         backend: 'pi',
         model: 'anthropic/test-model',
@@ -297,14 +298,10 @@ test('SQLite, transcript, and cursor writers preserve private files at their rea
         assert.equal(permissions(file), 0o600, file);
       }
 
-      const transcript = new TranscriptWriter('C123:123.456', home);
+      const transcript = new TranscriptWriter(conversation.id, home);
       transcript.appendUser('private message');
       transcript.setSessionId('session-1');
-      const transcriptFile = path.join(
-        home.transcriptsDir,
-        'C123:123.456',
-        'session-1.md',
-      );
+      const transcriptFile = path.join(home.transcriptsDir, conversation.id, 'session-1.md');
       assert.equal(permissions(path.dirname(transcriptFile)), 0o700);
       assert.equal(permissions(transcriptFile), 0o600);
 

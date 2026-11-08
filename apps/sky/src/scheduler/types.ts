@@ -3,6 +3,7 @@ export type ScheduledJobStatus = 'pending' | 'running' | 'done' | 'cancelled' | 
 export type ScheduledJobThreadStrategy = 'new-root';
 export type ScheduledJobDeliveryMode = 'agent';
 export type ScheduledJobFailureOutcome = 'retrying' | 'failed';
+export type ScheduledJobRunStatus = 'running' | 'retrying' | 'succeeded' | 'failed' | 'cancelled';
 
 export type ScheduledJob = {
   id: string;
@@ -22,6 +23,23 @@ export type ScheduledJob = {
   lastError: string | null;
 };
 
+export type ScheduledJobRun = {
+  id: string;
+  jobId: string;
+  conversationId: string;
+  scheduledFor: number;
+  status: ScheduledJobRunStatus;
+  attempts: number;
+  startedAt: number;
+  updatedAt: number;
+  finishedAt: number | null;
+  lastError: string | null;
+};
+
+export type ClaimedScheduledJob = ScheduledJob & {
+  run: ScheduledJobRun;
+};
+
 export type NewScheduledJob = Omit<
   ScheduledJob,
   'cronExpr' | 'status' | 'lastRunAt' | 'runCount' | 'lastError'
@@ -34,7 +52,8 @@ export interface ScheduledJobStore {
   get(id: string): ScheduledJob | undefined;
   list(): ScheduledJob[];
   cancel(id: string): boolean;
-  claim(id: string, now: number): ScheduledJob | undefined;
+  claim(id: string, now: number): ClaimedScheduledJob | undefined;
+  listRuns(jobId: string): ScheduledJobRun[];
   advancePendingCron(id: string, nextRunAt: number): boolean;
   rearmCron(id: string, nextRunAt: number, lastError?: string | null): boolean;
   markDone(id: string): boolean;

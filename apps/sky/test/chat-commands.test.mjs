@@ -7,23 +7,38 @@ import {
   parseChatCommand,
   stripLeadingMentionLabel,
 } from '../dist/slack/commands.js';
+import { createConversationManager } from '../dist/conversation/manager.js';
+import { openConversationStore } from '../dist/conversation/store.js';
 
-function createContext({ rawText, hasConversation = false, models = {} } = {}) {
+const THREAD = { channelId: 'C123', threadTs: '1777901000.000000' };
+const LINK = { provider: 'slack', externalId: 'C123:1777901000.000000' };
+
+function createContext({ rawText, hasSession = false, model } = {}) {
   const replies = [];
-  const stored = new Map(Object.entries(models));
+  const store = openConversationStore(':memory:');
+  if (hasSession || model) {
+    const conversation = store.create({ link: LINK, ...(model ? { model } : {}) });
+    if (hasSession) {
+      store.putSession(conversation.id, { sessionId: 'session-1', backend: 'pi', model: '', agentName: 'main' });
+    }
+  }
+  const conversationManager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: Object.assign(async () => assert.fail('commands must not open a session'), { backend: 'pi' }),
+  });
+  const storedModel = () => {
+    const id = conversationManager.find(LINK);
+    return id === undefined ? undefined : conversationManager.get(id)?.model;
+  };
   return {
     replies,
-    stored,
+    conversationManager,
+    storedModel,
     ctx: {
-      threadId: 'C123:1777901000.000000',
+      thread: THREAD,
       rawText,
-      conversationManager: {
-        has: () => hasConversation,
-      },
-      threadModelStore: {
-        get: (key) => stored.get(key),
-        set: (key, model) => stored.set(key, model),
-      },
+      conversationManager,
       reply: {
         sendReply: async (text) => {
           replies.push(text);
@@ -45,23 +60,27 @@ test('parseChatCommand recognises single-line bang commands and ignores everythi
 });
 
 test('maybeHandleChatCommand sets the thread model and confirms it', async () => {
-  const { ctx, replies, stored } = createContext({ rawText: '!model fable' });
+  const { ctx, replies, storedModel, conversationManager } = createContext({ rawText: '!model fable' });
 
   assert.equal(await maybeHandleChatCommand(ctx), true);
   assert.deepEqual(replies, ['모델이 claude-fable-5로 설정되었습니다.']);
-  assert.equal(stored.get('C123:1777901000.000000'), 'anthropic/claude-fable-5');
+  assert.equal(storedModel(), 'anthropic/claude-fable-5');
+  const conversationId = conversationManager.find(LINK);
+  assert.equal(conversationManager.has(conversationId), false);
+  assert.equal(conversationManager.has(conversationId, { name: 'main', systemPrompt: '' }), false);
 
   const opus = createContext({ rawText: '!model opus' });
   assert.equal(await maybeHandleChatCommand(opus.ctx), true);
   assert.deepEqual(opus.replies, ['모델이 claude-opus-5로 설정되었습니다.']);
-  assert.equal(opus.stored.get('C123:1777901000.000000'), 'anthropic/claude-opus-5');
+  assert.equal(opus.storedModel(), 'anthropic/claude-opus-5');
 });
 
 test('maybeHandleChatCommand passes non-command messages through to the agent', async () => {
-  const { ctx, replies } = createContext({ rawText: '오늘 일정 알려줘' });
+  const { ctx, replies, conversationManager } = createContext({ rawText: '오늘 일정 알려줘' });
 
   assert.equal(await maybeHandleChatCommand(ctx), false);
   assert.deepEqual(replies, []);
+  assert.equal(conversationManager.find(LINK), undefined);
 });
 
 test('maybeHandleChatCommand answers unknown commands with usage instead of running a turn', async () => {
@@ -77,29 +96,26 @@ test('maybeHandleChatCommand rejects unknown models and malformed !model usage',
   const unknownModel = createContext({ rawText: '!model gpt' });
   assert.equal(await maybeHandleChatCommand(unknownModel.ctx), true);
   assert.match(unknownModel.replies[0], /알 수 없는 모델입니다: `gpt`/);
-  assert.equal(unknownModel.stored.size, 0);
+  assert.equal(unknownModel.conversationManager.find(LINK), undefined);
 
   for (const rawText of ['!model', '!model fable opus']) {
-    const { ctx, replies, stored } = createContext({ rawText });
+    const { ctx, replies, conversationManager } = createContext({ rawText });
     assert.equal(await maybeHandleChatCommand(ctx), true);
     assert.deepEqual(replies, [CHAT_COMMAND_USAGE]);
-    assert.equal(stored.size, 0);
+    assert.equal(conversationManager.find(LINK), undefined);
   }
 });
 
 test('maybeHandleChatCommand locks the model once the thread has a conversation or a model', async () => {
-  const started = createContext({ rawText: '!model fable', hasConversation: true });
+  const started = createContext({ rawText: '!model fable', hasSession: true });
   assert.equal(await maybeHandleChatCommand(started.ctx), true);
   assert.deepEqual(started.replies, [CHAT_COMMAND_MODEL_LOCKED_REPLY]);
-  assert.equal(started.stored.size, 0);
+  assert.equal(started.storedModel(), undefined);
 
-  const alreadySet = createContext({
-    rawText: '!model opus',
-    models: { 'C123:1777901000.000000': 'anthropic/claude-fable-5' },
-  });
+  const alreadySet = createContext({ rawText: '!model opus', model: 'anthropic/claude-fable-5' });
   assert.equal(await maybeHandleChatCommand(alreadySet.ctx), true);
   assert.deepEqual(alreadySet.replies, [CHAT_COMMAND_MODEL_LOCKED_REPLY]);
-  assert.equal(alreadySet.stored.get('C123:1777901000.000000'), 'anthropic/claude-fable-5');
+  assert.equal(alreadySet.storedModel(), 'anthropic/claude-fable-5');
 });
 
 test('maybeHandleChatCommand answers !help with the usage text', async () => {

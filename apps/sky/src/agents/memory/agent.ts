@@ -79,7 +79,7 @@ export async function runMemoryAgent(options: MemoryAgentOptions): Promise<Memor
   }
 
   const userText = buildUserPrompt(transcripts);
-  const key = 'memory:run';
+  const key = options.conversationManager.create({ id: 'memory:run' });
   const memoryAgent = createMemoryAgentConfig(options.workspace);
   let finalText = '';
 

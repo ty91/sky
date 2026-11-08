@@ -399,6 +399,21 @@ async function handleRequest(
     return;
   }
 
+  const conversationSessionMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/session$/);
+  if (conversationSessionMatch) {
+    if (request.method !== 'DELETE') return methodNotAllowed(response, 'DELETE');
+    if (!requireMutationProtection(request, response, session)) return;
+    let conversationId: string;
+    try {
+      conversationId = decodeURIComponent(conversationSessionMatch[1]);
+    } catch {
+      writeError(response, 400, 'invalid_request');
+      return;
+    }
+    writeJson(response, 200, await control.execute({ type: 'session.reset', conversationId }));
+    return;
+  }
+
   if (url.pathname === '/api/scheduler/jobs') {
     if (request.method !== 'GET') return methodNotAllowed(response, 'GET');
     writeJson(response, 200, await control.execute({ type: 'scheduler.jobs.list' }));

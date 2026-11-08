@@ -275,7 +275,10 @@ class ClaudeAgentSdkSession implements AgentSession {
     private readonly deps: ClaudeAgentSdkDeps,
   ) {
     this.sessionIdValue = options.resume?.sessionId ?? '';
-    this.customTools = options.agent.customToolsFactory?.({ sessionKey: options.key }) ?? [];
+    this.customTools = options.agent.customToolsFactory?.({
+      conversationId: options.conversation.id,
+      links: options.conversation.links,
+    }) ?? [];
     this.customToolNames = new Set(this.customTools.map((toolSpec) => toolSpec.name));
     this.mcpServer = deps.createSdkMcpServer({
       name: CLAUDE_MCP_SERVER_NAME,

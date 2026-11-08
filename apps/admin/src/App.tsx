@@ -918,6 +918,10 @@ function ManagementHeader({
   );
 }
 
+function sessionLabel(session: RuntimeSessionSummary): string {
+  return session.threadKey ?? session.conversationId;
+}
+
 function SessionsPage({
   session,
   onSessionExpired,
@@ -959,17 +963,19 @@ function SessionsPage({
     setMessage(undefined);
     try {
       const result = await requestJson<{ reset: boolean }>(
-        `/api/sessions/${encodeURIComponent(confirming.threadKey)}`,
+        confirming.threadKey === null
+          ? `/api/conversations/${encodeURIComponent(confirming.conversationId)}/session`
+          : `/api/sessions/${encodeURIComponent(confirming.threadKey)}`,
         {
           method: 'DELETE',
           headers: { 'x-sky-csrf-token': session.csrfToken },
         },
       );
-      setSessions((current) => current?.filter(({ threadKey }) => threadKey !== confirming.threadKey));
+      setSessions((current) => current?.filter(({ conversationId }) => conversationId !== confirming.conversationId));
       setMessage(
         result.reset
-          ? `Session ${confirming.threadKey} was reset.`
-          : `Session ${confirming.threadKey} was already gone.`,
+          ? `Session ${sessionLabel(confirming)} was reset.`
+          : `Session ${sessionLabel(confirming)} was already gone.`,
       );
       setConfirming(undefined);
     } catch (error) {
@@ -1006,7 +1012,7 @@ function SessionsPage({
               <div>
                 <p className="eyebrow">Destructive action</p>
                 <h2 id="reset-session-title">Reset this session?</h2>
-                <p id="reset-session-description">The active or pending turn will stop, and the saved mapping for <code>{confirming.threadKey}</code> will be removed. The backend session file is not deleted.</p>
+                <p id="reset-session-description">The active or pending turn will stop, and the saved mapping for <code>{sessionLabel(confirming)}</code> will be removed. The backend session file is not deleted.</p>
               </div>
               <div className="confirmation-actions">
                 <button className="text-button" type="button" disabled={resetting} onClick={() => setConfirming(undefined)}>Keep session</button>
@@ -1019,8 +1025,8 @@ function SessionsPage({
           ) : (
             <div className="management-list" aria-label="Runtime sessions">
               {sessions.map((item) => (
-                <article className="management-card" key={`${item.threadKey}:${item.backend}`}>
-                  <header><div><p className="eyebrow">Slack thread</p><h2 className="mono">{item.threadKey}</h2></div><span className="status-badge">{item.backend}</span></header>
+                <article className="management-card" key={`${item.conversationId}:${item.backend}`}>
+                  <header><div><p className="eyebrow">{item.threadKey === null ? 'Conversation' : 'Slack thread'}</p><h2 className="mono">{sessionLabel(item)}</h2></div><span className="status-badge">{item.backend}</span></header>
                   <dl className="management-details">
                     <div><dt>Backend session</dt><dd className="mono">{item.backendSessionId}</dd></div>
                     <div><dt>Model</dt><dd>{item.model || 'Default model'}</dd></div>
@@ -1028,7 +1034,7 @@ function SessionsPage({
                     <div><dt>Created</dt><dd>{formatDate(item.createdAt)}</dd></div>
                     <div><dt>Updated</dt><dd>{formatDate(item.updatedAt)}</dd></div>
                   </dl>
-                  <button className="danger-text-button" type="button" onClick={() => { setMessage(undefined); setConfirming(item); }}>Reset session {item.threadKey}</button>
+                  <button className="danger-text-button" type="button" onClick={() => { setMessage(undefined); setConfirming(item); }}>Reset session {sessionLabel(item)}</button>
                 </article>
               ))}
             </div>

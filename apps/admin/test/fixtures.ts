@@ -177,6 +177,7 @@ export function sessionsFixture(): RuntimeSessionsSnapshot {
   return {
     sessions: [
       {
+        conversationId: '018f3b2e-7c1d-4a5e-9b6f-0123456789ab',
         threadKey: 'D123:1777901000.000000',
         backendSessionId: 'pi-session-1',
         backend: 'pi',

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createConversationManager } from '../dist/conversation/manager.js';
+import { openConversationStore } from '../dist/conversation/store.js';
 
 const AGENT = {
   name: 'main',
@@ -55,44 +56,18 @@ function createFakeAgentSession({
   };
 }
 
-function storeKey(key, backend) {
-  return `${key}:${backend}`;
-}
-
-function createMockConversationStore(initial = {}) {
-  const data = new Map(
-    Object.entries(initial).map(([key, conversation]) => [
-      `${key}:${conversation.backend}`,
-      conversation,
-    ]),
-  );
-  const calls = { get: [], put: [], remove: [] };
-  return {
-    store: {
-      get: (key, backend) => {
-        calls.get.push({ key, backend });
-        return data.get(storeKey(key, backend));
-      },
-      put: (key, conversation) => {
-        calls.put.push({ key, conversation });
-        data.set(storeKey(key, conversation.backend), conversation);
-      },
-      remove: (key, backend) => {
-        calls.remove.push({ key, backend });
-        data.delete(storeKey(key, backend));
-      },
-      close: () => {},
-    },
-    calls,
-    data,
-  };
-}
+const SLACK_THREAD = { provider: 'slack', externalId: 'D123:1799971200.000100' };
 
 function createSessionFactory(createSession, backend = 'pi') {
   return Object.assign(createSession, { backend });
 }
 
-test('conversation manager creates an agent session for a new key and returns final text with handle', async () => {
+function sequentialIds() {
+  let next = 0;
+  return () => `conversation-${++next}`;
+}
+
+test('conversation manager creates an agent session for a new conversation and returns final text with handle', async () => {
   const created = [];
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
@@ -102,7 +77,8 @@ test('conversation manager creates an agent session for a new key and returns fi
     }),
   });
 
-  const result = await manager.runTurn('thread-1', AGENT, 'hello');
+  const conversationId = manager.create();
+  const result = await manager.runTurn(conversationId, AGENT, 'hello');
 
   assert.deepEqual(result, {
     kind: 'ok',
@@ -113,101 +89,151 @@ test('conversation manager creates an agent session for a new key and returns fi
       sessionFile: '/tmp/pi-session-1.jsonl',
     },
   });
-  assert.equal(created.length, 1);
-  assert.deepEqual(created[0], {
-    key: 'thread-1',
+  assert.deepEqual(created, [{
+    conversation: { id: conversationId, links: [] },
     agent: AGENT,
     cwd: '/tmp/workspace',
-  });
+  }]);
 });
 
-test('conversation manager persists successful agent conversation handles', async () => {
-  const { store, calls } = createMockConversationStore();
+test('conversation manager refuses a turn for a conversation that was never created', async () => {
+  const created = [];
   const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store: openConversationStore(':memory:'),
+    createSession: createSessionFactory(async (config) => {
+      created.push(config);
+      return createFakeAgentSession();
+    }),
+  });
+
+  const result = await manager.runTurn('D123:1799971200.000100', AGENT, 'hello');
+
+  assert.equal(result.kind, 'error');
+  assert.equal(result.error.name, 'UnknownConversationError');
+  assert.deepEqual(created, []);
+  assert.equal(manager.activeWorkCount(), 0);
+});
+
+test('conversation manager resolves an external link to the same conversation and hands its links to the session', async () => {
+  const created = [];
+  const store = openConversationStore(':memory:', { createId: sequentialIds() });
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: createSessionFactory(async (config) => {
+      created.push(config);
+      return createFakeAgentSession();
+    }),
+  });
+
+  assert.equal(manager.find(SLACK_THREAD), undefined);
+  const conversationId = manager.ensure(SLACK_THREAD);
+  assert.equal(manager.ensure(SLACK_THREAD), conversationId);
+  assert.equal(manager.find(SLACK_THREAD), conversationId);
+
+  await manager.runTurn(conversationId, AGENT, 'hello');
+
+  assert.deepEqual(created[0].conversation, { id: 'conversation-1', links: [SLACK_THREAD] });
+  assert.deepEqual((await manager.list()).map(({ conversationId: id, links }) => ({ id, links })), [
+    { id: 'conversation-1', links: [SLACK_THREAD] },
+  ]);
+});
+
+test('conversation manager persists the backend session and resumes it after restart', async () => {
+  const store = openConversationStore(':memory:');
+  const first = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
     createSession: createSessionFactory(async () =>
       createFakeAgentSession({
         sessionId: 'agent-session-persisted',
         resumeRef: '/tmp/pi-session-persisted.jsonl',
+        systemPrompt: 'frozen prompt',
       }),
     ),
   });
-
-  const result = await manager.runTurn('thread-1', AGENT, 'hello');
-
-  assert.equal(result.kind, 'ok');
-  assert.deepEqual(calls.put, [
-    {
-      key: 'thread-1',
-      conversation: {
-        sessionId: 'agent-session-persisted',
-        backend: 'pi',
-        resumeRef: '/tmp/pi-session-persisted.jsonl',
-        model: 'anthropic/claude-opus-4-7',
-        agentName: 'main',
-      },
-    },
-  ]);
-});
-
-test('conversation manager resumes a persisted session file after restart', async () => {
-  const { store } = createMockConversationStore({
-    'thread-1': {
-      sessionId: 'pi-session-existing',
-      backend: 'pi',
-      resumeRef: '/tmp/pi-session-existing.jsonl',
-      model: 'anthropic/claude-opus-4-7',
-      agentName: 'main',
-      systemPrompt: 'frozen prompt',
-    },
+  const conversationId = first.ensure(SLACK_THREAD);
+  assert.equal((await first.runTurn(conversationId, AGENT, 'hello')).kind, 'ok');
+  assert.deepEqual(store.getSession(conversationId, 'pi'), {
+    sessionId: 'agent-session-persisted',
+    backend: 'pi',
+    resumeRef: '/tmp/pi-session-persisted.jsonl',
+    model: 'anthropic/claude-opus-4-7',
+    agentName: 'main',
+    systemPrompt: 'frozen prompt',
   });
+  await first.closeAll();
+
   const created = [];
-  const manager = createConversationManager({
+  const afterRestart = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
     createSession: createSessionFactory(async (config) => {
       created.push(config);
       return createFakeAgentSession({
-        sessionId: 'pi-session-existing',
-        resumeRef: '/tmp/pi-session-existing.jsonl',
+        sessionId: 'agent-session-persisted',
+        resumeRef: '/tmp/pi-session-persisted.jsonl',
       });
     }),
   });
 
-  const result = await manager.runTurn('thread-1', AGENT, 'hello again');
+  const result = await afterRestart.runTurn(afterRestart.find(SLACK_THREAD), AGENT, 'hello again');
 
   assert.equal(result.kind, 'ok');
-  assert.equal(created.length, 1);
   assert.deepEqual(created[0].resume, {
-    sessionId: 'pi-session-existing',
-    resumeRef: '/tmp/pi-session-existing.jsonl',
+    sessionId: 'agent-session-persisted',
+    resumeRef: '/tmp/pi-session-persisted.jsonl',
     systemPrompt: 'frozen prompt',
   });
 });
 
-test('conversation manager has/getHandle/purge cover in-memory and persisted conversations', async () => {
-  const { store, data, calls } = createMockConversationStore({
-    persisted: {
-      sessionId: 'pi-session-persisted',
-      backend: 'pi',
-      resumeRef: '/tmp/pi-session-persisted.jsonl',
-      model: 'anthropic/claude-opus-4-7',
-      agentName: 'main',
-    },
-    otherAgent: {
-      sessionId: 'pi-session-other',
-      backend: 'pi',
-      resumeRef: '/tmp/pi-session-other.jsonl',
-      model: 'anthropic/claude-opus-4-7',
-      agentName: 'memory',
-    },
-    otherBackend: {
-      sessionId: 'claude-session-other',
-      backend: 'claude-agent-sdk',
-      model: 'anthropic/claude-opus-4-7',
-      agentName: 'main',
-    },
+test('conversation manager persists handles that only have a session id and the injected backend', async () => {
+  const store = openConversationStore(':memory:');
+  const manager = createConversationManager({
+    defaultCwd: '/tmp/workspace',
+    store,
+    createSession: createSessionFactory(
+      async () => createFakeAgentSession({ sessionId: 'claude-session-1', resumeRef: undefined }),
+      'claude-agent-sdk',
+    ),
+  });
+
+  const conversationId = manager.create();
+  assert.equal((await manager.runTurn(conversationId, AGENT, 'hello')).kind, 'ok');
+
+  assert.deepEqual(store.getSession(conversationId, 'claude-agent-sdk'), {
+    sessionId: 'claude-session-1',
+    backend: 'claude-agent-sdk',
+    model: 'anthropic/claude-opus-4-7',
+    agentName: 'main',
+  });
+  assert.equal(store.getSession(conversationId, 'pi'), undefined);
+});
+
+test('conversation manager has/getHandle/purge cover in-memory and persisted sessions of the current backend', async () => {
+  const store = openConversationStore(':memory:');
+  const persisted = store.create().id;
+  store.putSession(persisted, {
+    sessionId: 'pi-session-persisted',
+    backend: 'pi',
+    resumeRef: '/tmp/pi-session-persisted.jsonl',
+    model: 'anthropic/claude-opus-4-7',
+    agentName: 'main',
+  });
+  const otherAgent = store.create().id;
+  store.putSession(otherAgent, {
+    sessionId: 'pi-session-other',
+    backend: 'pi',
+    model: 'anthropic/claude-opus-4-7',
+    agentName: 'memory',
+  });
+  const otherBackend = store.create().id;
+  store.putSession(otherBackend, {
+    sessionId: 'claude-session-other',
+    backend: 'claude-agent-sdk',
+    model: 'anthropic/claude-opus-4-7',
+    agentName: 'main',
   });
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
@@ -218,107 +244,69 @@ test('conversation manager has/getHandle/purge cover in-memory and persisted con
   });
 
   assert.equal(manager.has('missing', AGENT), false);
-  assert.equal(manager.has('persisted', AGENT), true);
-  assert.equal(manager.has('otherAgent', AGENT), false);
-  assert.equal(manager.has('otherBackend', AGENT), false);
-  assert.deepEqual(manager.getHandle('persisted', AGENT), {
+  assert.equal(manager.has(persisted, AGENT), true);
+  assert.equal(manager.has(otherAgent, AGENT), false);
+  assert.equal(manager.has(otherAgent), true);
+  assert.equal(manager.has(otherBackend, AGENT), false);
+  assert.deepEqual(manager.getHandle(persisted, AGENT), {
     sessionId: 'pi-session-persisted',
     sessionFile: '/tmp/pi-session-persisted.jsonl',
   });
 
-  const result = await manager.runTurn('open', AGENT, 'hello');
-  assert.equal(result.kind, 'ok');
-  assert.equal(manager.has('open', AGENT), true);
-  assert.equal(manager.has('open', { ...AGENT, name: 'memory' }), false);
-  assert.deepEqual(manager.getHandle('open', AGENT), {
+  const open = manager.create();
+  assert.equal(manager.has(open, AGENT), false);
+  assert.equal((await manager.runTurn(open, AGENT, 'hello')).kind, 'ok');
+  assert.equal(manager.has(open, AGENT), true);
+  assert.equal(manager.has(open, { ...AGENT, name: 'memory' }), false);
+  assert.deepEqual(manager.getHandle(open, AGENT), {
     sessionId: 'agent-session-open',
     sessionFile: '/tmp/pi-session-1.jsonl',
   });
 
-  await manager.purge('open');
-  await manager.purge('persisted');
+  assert.equal(await manager.purge(open), true);
+  assert.equal(await manager.purge(persisted), true);
+  assert.equal(await manager.purge(persisted), false);
 
-  assert.equal(manager.has('open', AGENT), false);
-  assert.equal(manager.has('persisted', AGENT), false);
-  assert.equal(data.has('open:pi'), false);
-  assert.equal(data.has('persisted:pi'), false);
-  assert.deepEqual(calls.remove, [
-    { key: 'open', backend: 'pi' },
-    { key: 'persisted', backend: 'pi' },
-  ]);
+  assert.equal(manager.has(open, AGENT), false);
+  assert.equal(manager.has(persisted, AGENT), false);
+  assert.equal(store.getSession(open, 'pi'), undefined);
+  assert.equal(store.getSession(persisted, 'pi'), undefined);
+  assert.equal(store.get(persisted)?.id, persisted);
+  assert.equal(store.getSession(otherBackend, 'claude-agent-sdk')?.sessionId, 'claude-session-other');
 });
 
-test('conversation manager re-keys an in-memory conversation and moves the persisted pointer', async () => {
-  const { store, data, calls } = createMockConversationStore();
-  const manager = createConversationManager({
-    defaultCwd: '/tmp/workspace',
-    store,
-    createSession: createSessionFactory(async () =>
-      createFakeAgentSession({
-        sessionId: 'agent-session-rekey',
-        resumeRef: '/tmp/pi-session-rekey.jsonl',
-      }),
-    ),
+test('conversation manager keeps each backend slot and replaces only the current slot when the model changes', async () => {
+  const store = openConversationStore(':memory:');
+  const conversationId = store.create({ link: SLACK_THREAD }).id;
+  store.putSession(conversationId, {
+    sessionId: 'claude-session-kept',
+    backend: 'claude-agent-sdk',
+    model: 'anthropic/claude-opus-4-7',
+    agentName: 'main',
   });
-
-  const first = await manager.runTurn('scheduled:job-1', AGENT, 'hello');
-  assert.equal(first.kind, 'ok');
-  assert.equal(manager.has('scheduled:job-1', AGENT), true);
-
-  manager.rekey('scheduled:job-1', 'D123:1799971200.000100');
-
-  // In-memory index moved.
-  assert.equal(manager.has('scheduled:job-1', AGENT), false);
-  assert.equal(manager.has('D123:1799971200.000100', AGENT), true);
-  assert.deepEqual(manager.getHandle('D123:1799971200.000100', AGENT), {
-    sessionId: 'agent-session-rekey',
-    sessionFile: '/tmp/pi-session-rekey.jsonl',
+  store.putSession(conversationId, {
+    sessionId: 'pi-session-old-model',
+    backend: 'pi',
+    model: 'anthropic/claude-sonnet-4-6',
+    agentName: 'main',
   });
-
-  // Persisted pointer moved (put at new key, removed at old key).
-  assert.equal(data.has('scheduled:job-1:pi'), false);
-  assert.equal(data.has('D123:1799971200.000100:pi'), true);
-  assert.deepEqual(calls.remove.at(-1), { key: 'scheduled:job-1', backend: 'pi' });
-
-  // The re-keyed session keeps the same backend history: the follow-up reply
-  // resumes it rather than creating a new session.
   const created = [];
-  const managerAfterRestart = createConversationManager({
+  const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
     createSession: createSessionFactory(async (config) => {
       created.push(config);
-      return createFakeAgentSession({
-        sessionId: 'agent-session-rekey',
-        resumeRef: '/tmp/pi-session-rekey.jsonl',
-      });
+      return createFakeAgentSession({ sessionId: 'pi-session-new-model' });
     }),
   });
-  const reply = await managerAfterRestart.runTurn('D123:1799971200.000100', AGENT, 'reply');
-  assert.equal(reply.kind, 'ok');
-  assert.deepEqual(created[0].resume, {
-    sessionId: 'agent-session-rekey',
-    resumeRef: '/tmp/pi-session-rekey.jsonl',
-  });
 
-  await manager.closeAll();
-  await managerAfterRestart.closeAll();
-});
+  assert.equal((await manager.runTurn(conversationId, AGENT, 'hello')).kind, 'ok');
 
-test('conversation manager rekey is a no-op for equal keys and unknown sources', () => {
-  const { store, calls } = createMockConversationStore();
-  const manager = createConversationManager({
-    defaultCwd: '/tmp/workspace',
-    store,
-    createSession: createSessionFactory(async () => createFakeAgentSession()),
-  });
-
-  manager.rekey('same', 'same');
-  manager.rekey('missing', 'target');
-
-  assert.deepEqual(calls.put, []);
-  assert.deepEqual(calls.remove, []);
-  assert.equal(manager.has('target', AGENT), false);
+  assert.equal(created[0].resume, undefined);
+  assert.equal(store.getSession(conversationId, 'pi')?.sessionId, 'pi-session-new-model');
+  assert.equal(store.getSession(conversationId, 'pi')?.model, 'anthropic/claude-opus-4-7');
+  assert.equal(store.getSession(conversationId, 'claude-agent-sdk')?.sessionId, 'claude-session-kept');
+  assert.equal(manager.find(SLACK_THREAD), conversationId);
 });
 
 test('conversation manager forwards agent text deltas to the caller callback', async () => {
@@ -353,7 +341,7 @@ test('conversation manager forwards agent text deltas to the caller callback', a
     ),
   });
 
-  const result = await manager.runTurn('thread-1', AGENT, 'hello', {
+  const result = await manager.runTurn(manager.create(), AGENT, 'hello', {
     onTextDelta: async (delta) => {
       deltas.push(delta);
     },
@@ -396,7 +384,7 @@ test('conversation manager keeps assistant message boundaries when the backend e
     ),
   });
 
-  const result = await manager.runTurn('thread-1', AGENT, 'hello', {
+  const result = await manager.runTurn(manager.create(), AGENT, 'hello', {
     onMessage: async (message) => {
       delivered.push(message);
     },
@@ -444,10 +432,11 @@ test('conversation manager interrupts an active turn and lets the latest turn co
     ),
   });
 
-  const first = manager.runTurn('thread-1', AGENT, 'first');
+  const conversationId = manager.create();
+  const first = manager.runTurn(conversationId, AGENT, 'first');
   await new Promise((resolve) => setTimeout(resolve, 10));
 
-  const second = manager.runTurn('thread-1', AGENT, 'second');
+  const second = manager.runTurn(conversationId, AGENT, 'second');
   const [firstResult, secondResult] = await Promise.all([first, second]);
 
   assert.deepEqual(firstResult, { kind: 'interrupted' });
@@ -456,130 +445,62 @@ test('conversation manager interrupts an active turn and lets the latest turn co
   assert.equal(abortCount, 1);
 });
 
-test('conversation manager persists handles that only have a session id', async () => {
-  const { store, calls } = createMockConversationStore();
-  const manager = createConversationManager({
-    defaultCwd: '/tmp/workspace',
-    store,
-    createSession: createSessionFactory(async () =>
-      createFakeAgentSession({
-        sessionId: 'agent-session-without-resume-ref',
-        resumeRef: undefined,
-      }),
-    ),
-  });
-
-  const result = await manager.runTurn('thread-1', AGENT, 'hello');
-
-  assert.equal(result.kind, 'ok');
-  assert.deepEqual(calls.put, [
-    {
-      key: 'thread-1',
-      conversation: {
-        sessionId: 'agent-session-without-resume-ref',
-        backend: 'pi',
-        model: 'anthropic/claude-opus-4-7',
-        agentName: 'main',
-      },
-    },
-  ]);
-});
-
-test('conversation manager persists the injected session factory backend', async () => {
-  const { store, calls } = createMockConversationStore();
-  const createSession = Object.assign(
-    async () =>
-      createFakeAgentSession({
-        sessionId: 'claude-session-1',
-        resumeRef: undefined,
-        systemPrompt: 'frozen prompt',
-      }),
-    { backend: 'claude-agent-sdk' },
-  );
-  const manager = createConversationManager({
-    defaultCwd: '/tmp/workspace',
-    store,
-    createSession,
-  });
-
-  const result = await manager.runTurn('thread-1', AGENT, 'hello');
-
-  assert.equal(result.kind, 'ok');
-  assert.deepEqual(calls.put, [
-    {
-      key: 'thread-1',
-      conversation: {
-        sessionId: 'claude-session-1',
-        backend: 'claude-agent-sdk',
-        model: 'anthropic/claude-opus-4-7',
-        agentName: 'main',
-        systemPrompt: 'frozen prompt',
-      },
-    },
-  ]);
-});
-
-test('conversation manager applies the per-thread model override to every entry point', async () => {
-  const { store, calls } = createMockConversationStore();
-  const threadModelStore = {
-    get: (key) => (key === 'thread-fable' ? 'anthropic/claude-fable-5' : undefined),
-  };
+test('conversation manager applies the conversation model to every entry point', async () => {
+  const store = openConversationStore(':memory:');
   const created = [];
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
-    threadModelStore,
     createSession: createSessionFactory(async (config) => {
       created.push(config);
-      return createFakeAgentSession({ sessionId: `session-${config.key}` });
+      return createFakeAgentSession({ sessionId: `session-${created.length}` });
     }),
   });
+  const fable = manager.ensure(SLACK_THREAD);
+  manager.setModel(fable, 'anthropic/claude-fable-5');
+  const untouched = manager.create();
 
-  const overridden = await manager.runTurn('thread-fable', AGENT, 'hello');
-  const untouched = await manager.runTurn('thread-default', AGENT, 'hello');
+  assert.equal((await manager.runTurn(fable, AGENT, 'hello')).kind, 'ok');
+  assert.equal((await manager.runTurn(untouched, AGENT, 'hello')).kind, 'ok');
 
-  assert.equal(overridden.kind, 'ok');
-  assert.equal(untouched.kind, 'ok');
   assert.equal(created[0].agent.model, 'anthropic/claude-fable-5');
   // The override is a copy; the shared agent config is never mutated.
   assert.equal(AGENT.model, 'anthropic/claude-opus-4-7');
   assert.equal(created[1].agent, AGENT);
-
-  assert.equal(calls.put[0].conversation.model, 'anthropic/claude-fable-5');
-  assert.equal(calls.put[1].conversation.model, 'anthropic/claude-opus-4-7');
+  assert.equal(store.getSession(fable, 'pi')?.model, 'anthropic/claude-fable-5');
+  assert.equal(store.getSession(untouched, 'pi')?.model, 'anthropic/claude-opus-4-7');
 
   // `has`/`getHandle` resolve the same override, so an ownership check made
   // with the default agent config still finds the overridden conversation.
-  assert.equal(manager.has('thread-fable', AGENT), true);
-  assert.equal(manager.getHandle('thread-fable', AGENT).sessionId, 'session-thread-fable');
+  assert.equal(manager.has(fable, AGENT), true);
+  assert.equal(manager.getHandle(fable, AGENT).sessionId, 'session-1');
 });
 
-test('conversation manager resumes an overridden thread instead of forking a new session', async () => {
+test('conversation manager resumes an overridden conversation instead of forking a new session', async () => {
   // Mirrors a proactive turn (scheduled reminder / post-restart trigger) that
   // runs with the default agent config after a restart: the persisted record
-  // holds the thread's chosen model, so without the override the ownership
-  // check would fail and silently start a fresh session.
-  const { store } = createMockConversationStore({
-    'thread-fable': {
-      sessionId: 'session-existing',
-      backend: 'pi',
-      resumeRef: '/tmp/pi-session-existing.jsonl',
-      model: 'anthropic/claude-fable-5',
-      agentName: 'main',
-    },
+  // holds the conversation's chosen model, so without the override the
+  // ownership check would fail and silently start a fresh session.
+  const store = openConversationStore(':memory:');
+  const conversationId = store.create({ link: SLACK_THREAD, model: 'anthropic/claude-fable-5' }).id;
+  store.putSession(conversationId, {
+    sessionId: 'session-existing',
+    backend: 'pi',
+    resumeRef: '/tmp/pi-session-existing.jsonl',
+    model: 'anthropic/claude-fable-5',
+    agentName: 'main',
   });
   const created = [];
   const manager = createConversationManager({
     defaultCwd: '/tmp/workspace',
     store,
-    threadModelStore: { get: () => 'anthropic/claude-fable-5' },
     createSession: createSessionFactory(async (config) => {
       created.push(config);
       return createFakeAgentSession({ sessionId: 'session-existing' });
     }),
   });
 
-  const result = await manager.runTurn('thread-fable', AGENT, 'hello');
+  const result = await manager.runTurn(conversationId, AGENT, 'hello');
 
   assert.equal(result.kind, 'ok');
   assert.deepEqual(created[0].resume, {

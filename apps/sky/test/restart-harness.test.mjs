@@ -107,7 +107,7 @@ import { createSlackAgentConfig } from './dist/slack/agent.js';
 const agentWithoutUploader = createSlackAgentConfig({ systemPrompt: 'system' });
 assert.equal(agentWithoutUploader.tools.includes('slack_attach_files'), false);
 assert.deepEqual(
-  agentWithoutUploader.customToolsFactory({ sessionKey: 'C123:111.22' }).map((tool) => tool.name),
+  agentWithoutUploader.customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'C123:111.22' }] }).map((tool) => tool.name),
   [],
 );
 
@@ -126,7 +126,7 @@ try {
     }),
   });
 
-  const tools = agentWithUploader.customToolsFactory({ sessionKey: 'C123:111.22' });
+  const tools = agentWithUploader.customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'C123:111.22' }] });
   assert.deepEqual(tools.map((tool) => tool.name), ['slack_attach_files']);
 
   const attachTool = tools.find((tool) => tool.name === 'slack_attach_files');
@@ -197,7 +197,7 @@ const agent = createSlackAgentConfig({
   slackFileUploaderProvider: provider,
 });
 const unavailableTool = agent
-  .customToolsFactory({ sessionKey: 'C123:111.22' })
+  .customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'C123:111.22' }] })
   .find((tool) => tool.name === 'slack_attach_files');
 await assert.rejects(
   () => unavailableTool.execute({ paths: [filePath] }),

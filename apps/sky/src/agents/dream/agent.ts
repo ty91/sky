@@ -145,7 +145,7 @@ async function runSummarize(
     unlinkSync(targetPath);
   }
 
-  const key = 'dream:summarize';
+  const key = options.conversationManager.create({ id: 'dream:summarize' });
   try {
     const userText = buildSummarizeUserPrompt(targetDate, entries, nowIso, targetPath);
     const result = await options.conversationManager.runTurn(
@@ -171,7 +171,7 @@ async function runKnowledge(
   entries: TranscriptEntry[],
   nowIso: string,
 ): Promise<string> {
-  const key = 'dream:knowledge';
+  const key = options.conversationManager.create({ id: 'dream:knowledge' });
   try {
     const dailyPath = dreamDailyFilePath(options.workspace, targetDate);
     const userText = buildKnowledgeUserPrompt(targetDate, entries, nowIso, dailyPath);

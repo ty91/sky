@@ -30,6 +30,7 @@ fs.writeFileSync(path.join(transcriptDir, 'session-1.md'), transcriptBody, 'utf8
 
 const calls = { runTurn: [], close: [] };
 const conversationManager = {
+  create: ({ id }) => id,
   runTurn: async (key, agent, text) => {
     calls.runTurn.push({ key, agent, text });
     return { kind: 'ok', text: 'memory summary', handle: { sessionId: 'pi-memory' } };

@@ -206,11 +206,12 @@ test('assembled admin HTTP resets an active real-SQLite session and the next tur
 
   try {
     const auth = await authenticate(daemon);
-    const first = await manager.runTurn('D123:1777901000.000000', AGENT, 'first');
+    const conversationId = manager.ensure({ provider: 'slack', externalId: 'D123:1777901000.000000' });
+    const first = await manager.runTurn(conversationId, AGENT, 'first');
     assert.equal(first.kind, 'ok');
     assert.equal(first.handle.sessionId, 'backend-session-1');
 
-    const active = manager.runTurn('D123:1777901000.000000', AGENT, 'block');
+    const active = manager.runTurn(conversationId, AGENT, 'block');
     await sessions.blockedStarted;
 
     const listed = await tcpRequest(auth.port, 'GET', '/api/sessions', {
@@ -218,6 +219,7 @@ test('assembled admin HTTP resets an active real-SQLite session and the next tur
     });
     assert.equal(listed.statusCode, 200, listed.body);
     assert.deepEqual(JSON.parse(listed.body).sessions.map((session) => ({
+      conversationId: session.conversationId,
       threadKey: session.threadKey,
       backendSessionId: session.backendSessionId,
       backend: session.backend,
@@ -225,6 +227,7 @@ test('assembled admin HTTP resets an active real-SQLite session and the next tur
       agent: session.agent,
     })), [
       {
+        conversationId,
         threadKey: 'D123:1777901000.000000',
         backendSessionId: 'backend-session-1',
         backend: 'pi',
@@ -246,8 +249,12 @@ test('assembled admin HTTP resets an active real-SQLite session and the next tur
 
     const database = new DatabaseSync(daemon.paths.databaseFile, { readOnly: true });
     assert.equal(
-      database.prepare('SELECT COUNT(*) AS count FROM conversations').get().count,
+      database.prepare('SELECT COUNT(*) AS count FROM conversation_sessions').get().count,
       0,
+    );
+    assert.equal(
+      database.prepare('SELECT COUNT(*) AS count FROM conversation_links').get().count,
+      1,
     );
     database.close();
 
@@ -259,10 +266,27 @@ test('assembled admin HTTP resets an active real-SQLite session and the next tur
     );
     assert.deepEqual(JSON.parse(repeated.body), { reset: false });
 
-    const next = await manager.runTurn('D123:1777901000.000000', AGENT, 'next');
+    const next = await manager.runTurn(conversationId, AGENT, 'next');
     assert.equal(next.kind, 'ok');
     assert.equal(next.handle.sessionId, 'backend-session-2');
     assert.equal(sessions.created(), 2);
+
+    const unlinked = manager.create();
+    assert.equal((await manager.runTurn(unlinked, AGENT, 'unlinked')).kind, 'ok');
+    const unlinkedListed = JSON.parse((await tcpRequest(auth.port, 'GET', '/api/sessions', {
+      headers: { cookie: auth.headers.cookie },
+    })).body).sessions.find((session) => session.conversationId === unlinked);
+    assert.equal(unlinkedListed.threadKey, null);
+    const unlinkedReset = await tcpRequest(
+      auth.port,
+      'DELETE',
+      `/api/conversations/${encodeURIComponent(unlinked)}/session`,
+      { headers: auth.headers },
+    );
+    assert.equal(unlinkedReset.statusCode, 200, unlinkedReset.body);
+    assert.deepEqual(JSON.parse(unlinkedReset.body), { reset: true });
+    assert.equal(manager.has(unlinked, AGENT), false);
+    assert.equal(manager.has(conversationId, AGENT), true);
   } finally {
     await daemon.close();
     await rm(homeDir, { recursive: true, force: true });

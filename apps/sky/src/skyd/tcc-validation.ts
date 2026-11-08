@@ -144,7 +144,7 @@ export function createTccValidation(options: {
         const factory = createBackend(settings, record);
         const tools = request.route === 'bash' ? ['Bash'] : [request.operation === 'read' ? 'Read' : 'Write'];
         session = await factory({
-          key: `tcc-validation:${id}`,
+          conversation: { id: `tcc-validation:${id}`, links: [] },
           cwd: options.paths.rootDir,
           agent: {
             name: 'tcc-validation',

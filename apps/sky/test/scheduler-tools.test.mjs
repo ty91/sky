@@ -11,7 +11,7 @@ test('main agent can schedule a reminder for the current Slack channel', async (
     schedulerClock: () => 1_700_000_000_000,
     schedulerIdFactory: () => 'job-1',
   });
-  const tools = agent.customToolsFactory({ sessionKey: 'D123:1777901000.000000' });
+  const tools = agent.customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'D123:1777901000.000000' }] });
   const schedule = tools.find((tool) => tool.name === 'schedule_reminder');
 
   const result = await schedule.execute({
@@ -62,7 +62,7 @@ test('main agent can list pending reminders', async () => {
   });
   const agent = createSlackAgentConfig({ systemPrompt: 'system', scheduledJobStore: store });
   const list = agent
-    .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
+    .customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'D123:1777901000.000000' }] })
     .find((tool) => tool.name === 'list_scheduled');
 
   const result = await list.execute({});
@@ -101,10 +101,10 @@ test('main agent can cancel a pending reminder', async () => {
   });
   const agent = createSlackAgentConfig({ systemPrompt: 'system', scheduledJobStore: store });
   const cancel = agent
-    .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
+    .customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'D123:1777901000.000000' }] })
     .find((tool) => tool.name === 'cancel_scheduled');
   const list = agent
-    .customToolsFactory({ sessionKey: 'D123:1777901000.000000' })
+    .customToolsFactory({ conversationId: 'conversation-1', links: [{ provider: 'slack', externalId: 'D123:1777901000.000000' }] })
     .find((tool) => tool.name === 'list_scheduled');
 
   const result = await cancel.execute({ id: 'job-1' });
@@ -119,4 +119,21 @@ test('main agent can cancel a pending reminder', async () => {
   assert.deepEqual(repeated.details, { id: 'job-1', cancelled: false });
 
   store.close();
+});
+
+test('a conversation without a Slack link gets no Slack file or reminder tools', () => {
+  const agent = createSlackAgentConfig({
+    systemPrompt: 'system',
+    scheduledJobStore: openScheduledJobStore(':memory:'),
+    slackFileUploaderProvider: () => ({ uploadFiles: async () => [] }),
+  });
+
+  assert.deepEqual(agent.customToolsFactory({ conversationId: 'app-conversation', links: [] }), []);
+  assert.deepEqual(
+    agent.customToolsFactory({
+      conversationId: 'other-conversation',
+      links: [{ provider: 'other', externalId: 'D123:1777901000.000000' }],
+    }),
+    [],
+  );
 });
