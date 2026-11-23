@@ -91,7 +91,7 @@ env -i HOME="$SKY_TEST_ROOT/home" SKY_HOME="$SKY_TEST_ROOT/sky-home" \
 | React admin | standalone 내부 `/$bunfs/` 자산. 호스트가 embedded asset reader로 HTTP 제공 |
 | Pi 0.80.10 | JS와 필요한 import 자산을 standalone에 포함. 호스트 프로세스 안에서 실행 |
 | Pi clipboard 0.3.9 | `Contents/Frameworks/clipboard.darwin-arm64.node`를 호스트가 직접 로드 |
-| Claude Agent SDK 0.3.283 | SDK JS는 호스트에 포함하고 darwin-arm64 플랫폼 패키지의 `claude` Mach-O는 `Contents/Helpers/claude`로 복사 |
+| Claude Agent SDK 0.3.330 | SDK JS는 호스트에 포함하고 Claude Code 2.1.330의 arm64 실행 파일은 `Contents/Helpers/claude`로 복사 |
 | Claude 실행 파일 | 호스트의 실제 실행 파일 위치를 기준으로 `../Helpers/claude`를 직접 실행. 임시 경로 추출 없음. CLI symlink로 호출해도 앱 내부 경로를 유지 |
 | Bash·외부 도구 | macOS shell과 호스트 PATH를 사용. 임의의 에이전트 도구까지 앱에 모두 포함하지 않음 |
 | Pi의 rg·fd | Pi가 PATH 또는 Pi agent directory의 `bin`을 조회하고 필요하면 다운로드. 기본 `~/.pi/agent/bin`, `PI_CODING_AGENT_DIR`로 변경 가능. Sky home과 별도이며 앱 번들의 고정 실행 파일이 아님 |
